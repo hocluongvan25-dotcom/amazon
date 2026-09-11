@@ -1,0 +1,13 @@
+{
+  "name": "vexim-ops-worker",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Sync worker VEXIM Ops — đồng bộ SP-API (Amazon) → Supabase. Tier 1: chạy với mock/sandbox, không cần credentials.",
+  "scripts": {
+    "test": "node --experimental-strip-types --test tests/*.test.ts"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

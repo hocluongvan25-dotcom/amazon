@@ -17,6 +17,7 @@ Nền tảng quản trị vận hành Amazon cho VEXIM (agency quản lý hộ t
 docs/        Tài liệu triển khai (đề xuất, hồ sơ Amazon, SOP, phân tích module, tiến độ)
 supabase/    Migrations + seed + bộ test RLS (hướng dẫn: supabase/README.md)
 web/         Ứng dụng Next.js 15 + Tailwind + Supabase Auth (hướng dẫn: web/README.md)
+worker/      Sync worker Module 3 — đồng bộ tồn kho FBA 3 tầng (hướng dẫn: worker/README.md)
 landing/     Landing page "VEXIM Ops" — điều kiện nộp Developer Profile
 wireframes/  Wireframe 8 dashboard (bản duyệt thiết kế — tham chiếu)
 ```
