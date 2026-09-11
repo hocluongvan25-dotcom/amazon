@@ -71,7 +71,23 @@ cd web && npm run dev            # http://localhost:3000
 # Đăng nhập demo: truy cập /login → chọn Ban điều hành VEXIM (ceo) → vào /pricing
 ```
 
-## 5. Những gì CHƯA làm (nằm ngoài scope P1-P3 Đợt 2)
+## 5. Cập nhật — Module 6 (F1/F2) hoàn thành cùng phiên
+
+Cùng phiên làm việc này, **Module 6 — Tài chính & Đối soát (F1/F2)** cũng đã được xây xong,
+hoàn thành Đợt 1 (7/7 module đọc).
+
+| File | Mô tả |
+|---|---|
+| `web/src/app/(app)/finance/page.tsx` | Cập nhật thêm tab navigation → F1/F2, khóa F3/F4 (Đợt 2) |
+| `web/src/app/(app)/finance/settlements/page.tsx` | F1 danh sách kỳ settlement (filter shop/status, KPI tiền về/tổng đã nhận/số dư kỳ đang mở/tổng phí) |
+| `web/src/app/(app)/finance/settlements/detail/page.tsx` | F1 chi tiết kỳ: nhóm phí + children, top SKU đóng góp, take rate & TACOS |
+| `web/src/app/(app)/finance/events/page.tsx` | F2 financial events: filter loại/shop/search, tổng hợp vào/ra/net, link sang orders/pricing/settlements |
+| `worker/src/domain/finance.ts` | reconcileSettlement (dung sai 1%), feeTakeRate, tacos, totalTakeRate, estimateReserveHold/OpenPayout, summarizeEvents |
+| `worker/tests/finance.test.ts` | 18 test cases |
+
+Tổng sau Module 6: **91/91 worker test pass**, **36 routes build OK** (thêm 3 routes finance).
+
+## 6. Những gì CHƯA làm (nằm ngoài scope P1-P3 Đợt 2)
 
 - **P4 — Quy tắc giá tự động (auto-apply)** — spec ghi rõ Đợt 3, đã khóa bằng chip dashed "P4 · Đợt 3".
 - **Thao tác ghi giá thật (patchListingsItem / JSON_LISTINGS_FEED)** — cần SP-API credentials + Supabase; ở bản DEMO các nút "Áp giá" / "Từ chối" bị disabled và ghi rõ.

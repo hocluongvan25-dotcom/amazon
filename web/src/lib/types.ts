@@ -222,6 +222,80 @@ export type InboundRow = {
   reconcileTone: "up" | "down" | "flat" | "warn";
 };
 
+/* ---------- Module 6 — Tài chính & Đối soát (F1–F4) ---------- */
+
+export type SettlementStatus = "deposited" | "processing" | "open";
+
+export type SettlementRow = {
+  id: string; // settlementId từ Amazon (vd 120400000000000)
+  shop: string;
+  depositDate: string;
+  startDate: string;
+  endDate: string;
+  status: SettlementStatus;
+  sales: number; // tổng bán hàng (product charges + shipping + gift wrap)
+  refunds: number; // tiền hoàn lại cho buyer
+  amazonFeesTotal: number; // referral + FBA + storage + other fees (âm)
+  advertisingFees: number; // PPC spend (âm)
+  otherCharges: number; // adjustments, reimbursements
+  transferAmount: number; // số tiền chuyển về tài khoản ngân hàng
+  currency: string;
+  accountDeposit: string; // thông tin tài khoản nhận cuối
+};
+
+export type SettlementEventGroup = {
+  label: string; // Product sales / Shipping credits / FBA fees / ...
+  amount: number;
+  tone: "up" | "down" | "flat";
+  children?: { label: string; amount: number }[];
+};
+
+export type SettlementDetailMock = {
+  id: string;
+  shop: string;
+  depositDate: string;
+  startDate: string;
+  endDate: string;
+  transferAmount: number;
+  accountDeposit: string;
+  currency: string;
+  groups: SettlementEventGroup[];
+  skuBreakdown: {
+    sku: string;
+    quantity: number;
+    productSales: number;
+    amazonFees: number;
+    net: number;
+  }[];
+};
+
+export type FinancialEventType =
+  | "ProductSale"
+  | "ShippingCredit"
+  | "Refund"
+  | "ReferralFee"
+  | "FBAFee"
+  | "StorageFee"
+  | "AdvertisingFee"
+  | "Reimbursement"
+  | "Adjustment"
+  | "ServiceFee"
+  | "Subscription"
+  | "Reserve";
+
+export type FinancialEventRow = {
+  id: string;
+  postedAt: string;
+  shop: string;
+  type: FinancialEventType;
+  typeLabel: string;
+  description: string;
+  orderId?: string;
+  sku?: string;
+  amount: number; // dương = tiền vào, âm = tiền ra
+  settlementId?: string;
+};
+
 /* ---------- Module 2 — Giá & Featured Offer (P1–P4) ---------- */
 
 export type BoxStatus = "holding" | "at_risk" | "lost" | "no_box";
