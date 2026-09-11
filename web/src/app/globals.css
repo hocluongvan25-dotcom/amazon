@@ -1,0 +1,14 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-bg text-ink antialiased;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+/* thanh cuộn mảnh cho các bảng dài */
+*::-webkit-scrollbar { height: 8px; width: 8px; }
+*::-webkit-scrollbar-thumb { background: #d5dae3; border-radius: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
