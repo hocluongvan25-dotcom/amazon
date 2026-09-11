@@ -222,6 +222,58 @@ export type InboundRow = {
   reconcileTone: "up" | "down" | "flat" | "warn";
 };
 
+/* ---------- Chuông thông báo & Profile & Quản trị user ---------- */
+
+export type NotificationItem = {
+  id: string;
+  tone: AlertSeverity;
+  icon: string;
+  title: string;
+  detail: string;
+  time: string; // tương đối: "5 phút trước"
+  href?: string; // link điều hướng khi click
+  read: boolean;
+  category: "alert" | "approval" | "system";
+};
+
+export type Profile = {
+  name: string;
+  email: string;
+  role: string;
+  department: string;
+  phone: string;
+  avatarInitials: string;
+  joinedAt: string;
+  lastLogin: string;
+  mfaEnabled: boolean;
+};
+
+export type Department =
+  | "Vận hành & Health"
+  | "Listing & Nội dung"
+  | "Quảng cáo (PPC)"
+  | "Kho vận & FBA"
+  | "Đơn hàng & CSKH"
+  | "Tài chính & Đối soát"
+  | "Điều phối";
+
+export type AppRole =
+  | "super_admin"
+  | "org_admin"
+  | "dept_lead"
+  | "operator"
+  | "analyst"
+  | "client_viewer";
+
+export const ROLE_LABEL: Record<AppRole, string> = {
+  super_admin: "Super Admin",
+  org_admin: "Org Admin",
+  dept_lead: "Dept Lead",
+  operator: "Operator",
+  analyst: "Analyst / Viewer",
+  client_viewer: "Client Viewer",
+};
+
 /* ---------- Module 6 — Tài chính & Đối soát (F1–F4) ---------- */
 
 export type SettlementStatus = "deposited" | "processing" | "open";

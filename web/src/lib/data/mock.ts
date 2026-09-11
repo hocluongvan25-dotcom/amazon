@@ -972,3 +972,138 @@ export const eventTypeFilters: { id: FinancialEventType | "all"; label: string }
   { id: "StorageFee", label: "Storage fees" },
   { id: "Adjustment", label: "Adjustments" },
 ];
+
+/* ---------- Notifications chuông (theo persona) ---------- */
+import type { Department, NotificationItem, Profile, AppRole } from "@/lib/types";
+import { ROLE_LABEL } from "@/lib/types";
+
+/**
+ * Chuông thông báo — trả về theo persona đang đăng nhập.
+ * Ở DEMO MODE số `bell` trong PERSONAS khớp với số phần tử mảng.
+ * Khi có Supabase: query bảng `notifications` (realtime qua presence channel).
+ */
+export const notificationsByPersona: Record<string, NotificationItem[]> = {
+  ceo: [
+    {
+      id: "N1", tone: "red", icon: "💲", title: "6 SKU dưới giá sàn",
+      detail: "XMO-951-ACC đang biên âm −2.4% sau khi đối thủ hạ giá",
+      time: "12 phút trước", href: "/pricing?margin=below_floor", read: false, category: "alert",
+    },
+    {
+      id: "N2", tone: "red", icon: "📦", title: "3 SKU sắp hết hàng (cover 5–8 ngày)",
+      detail: "Shop A1 · XMO-950-BLK, VPN-220, XMO-950-WHT — ~$410/ngày nếu đứt",
+      time: "28 phút trước", href: "/fulfillment/inventory", read: false, category: "alert",
+    },
+    {
+      id: "N3", tone: "red", icon: "🛡️", title: "Account Health vàng — 1 vi phạm IP chưa khiếu nại",
+      detail: "Shop C2 · case CS-10238741 · rủi ro khóa shop",
+      time: "1 giờ trước", href: "/health/violations", read: false, category: "alert",
+    },
+    {
+      id: "N4", tone: "amber", icon: "✅", title: "12 đề xuất áp giá chờ duyệt",
+      detail: "8 đề xuất ≤2% operator tự duyệt · 4 đề xuất cần trưởng phòng",
+      time: "2 giờ trước", href: "/pricing/approve", read: false, category: "approval",
+    },
+    {
+      id: "N5", tone: "amber", icon: "💬", title: "4 đơn FBM chờ xác nhận",
+      detail: "Còn 3 giờ trước hạn ship",
+      time: "3 giờ trước", href: "/orders/fbm", read: false, category: "alert",
+    },
+    {
+      id: "N6", tone: "amber", icon: "📈", title: "2 campaign hết budget trước 18h hôm qua",
+      detail: "Đang mất cơ hội đơn — kiểm tra PPC",
+      time: "8 giờ trước", href: "/ppc", read: true, category: "alert",
+    },
+    {
+      id: "N7", tone: "green", icon: "🏦", title: "Kỳ settlement $42,950 đã chuyển",
+      detail: "Shop A1 · kỳ 27/08–09/09 · về tài khoản ****4218",
+      time: "hôm qua", href: "/finance/settlements", read: true, category: "system",
+    },
+  ],
+  lead_fulfill: [
+    {
+      id: "F1", tone: "red", icon: "📦", title: "3 SKU sắp hết hàng",
+      detail: "XMO-950-BLK cover 5 ngày",
+      time: "28 phút trước", href: "/fulfillment/inventory", read: false, category: "alert",
+    },
+    {
+      id: "F2", tone: "amber", icon: "🚚", title: "Lô FBA15G…9DLP đang nhận tại FC LAX9",
+      detail: "ETA 1 ngày",
+      time: "1 giờ trước", href: "/fulfillment/inbound", read: false, category: "system",
+    },
+  ],
+  op_ppc: [
+    { id: "P1", tone: "amber", icon: "📈", title: "2 campaign hết budget sớm", detail: "XMO-950 Exact ACOS 34% 3 ngày liên tiếp", time: "1 giờ trước", href: "/ppc", read: false, category: "alert" },
+  ],
+  client: [],
+};
+
+/* ---------- Trang cá nhân ---------- */
+export const profileByPersona: Record<string, Profile> = {
+  ceo: {
+    name: "Nguyễn Hải Anh", email: "haianh@vexim.vn", role: ROLE_LABEL.super_admin,
+    department: "Điều phối", phone: "+84 912 345 678", avatarInitials: "NA",
+    joinedAt: "01/03/2024", lastLogin: "11/09/2026 13:40", mfaEnabled: true,
+  },
+  lead_fulfill: {
+    name: "Trần Mỹ Linh", email: "mylinh@vexim.vn", role: ROLE_LABEL.dept_lead,
+    department: "Kho vận & FBA", phone: "+84 988 765 432", avatarInitials: "MT",
+    joinedAt: "15/05/2024", lastLogin: "11/09/2026 08:15", mfaEnabled: true,
+  },
+  op_ppc: {
+    name: "Lê Tuấn", email: "tuan@vexim.vn", role: ROLE_LABEL.operator,
+    department: "Quảng cáo (PPC)", phone: "+84 904 111 222", avatarInitials: "TQ",
+    joinedAt: "02/01/2025", lastLogin: "11/09/2026 09:02", mfaEnabled: false,
+  },
+  client: {
+    name: "Đại diện Doanh nghiệp A", email: "contact@khacha-a.vn", role: ROLE_LABEL.client_viewer,
+    department: "—", phone: "—", avatarInitials: "DA",
+    joinedAt: "10/08/2026", lastLogin: "09/09/2026 16:30", mfaEnabled: false,
+  },
+};
+
+/* ---------- Tạo user mới (danh mục) ---------- */
+export const DEPARTMENTS: Department[] = [
+  "Điều phối",
+  "Vận hành & Health",
+  "Listing & Nội dung",
+  "Quảng cáo (PPC)",
+  "Kho vận & FBA",
+  "Đơn hàng & CSKH",
+  "Tài chính & Đối soát",
+];
+
+export const APP_ROLES: { id: AppRole; label: string; level: number; desc: string; canAssignTo: AppRole[] }[] = [
+  {
+    id: "super_admin", label: ROLE_LABEL.super_admin, level: 100,
+    desc: "Toàn quyền hệ thống VEXIM — thấy mọi shop, mọi module, mọi hành động. Chỉ dành cho 1–2 người sáng lập/CTO.",
+    canAssignTo: ["super_admin", "org_admin", "dept_lead", "operator", "analyst", "client_viewer"],
+  },
+  {
+    id: "org_admin", label: ROLE_LABEL.org_admin, level: 80,
+    desc: "Admin một doanh nghiệp/khách hàng (nhóm shop). Quản lý nhân viên, shop, xem toàn bộ dữ liệu của org đó.",
+    canAssignTo: ["dept_lead", "operator", "analyst", "client_viewer"],
+  },
+  {
+    id: "dept_lead", label: ROLE_LABEL.dept_lead, level: 50,
+    desc: "Trưởng phòng — duyệt thao tác rủi ro (đổi giá >2%, ngân sách ads…), quản lý nhân viên trong phòng.",
+    canAssignTo: ["operator", "analyst"],
+  },
+  {
+    id: "operator", label: ROLE_LABEL.operator, level: 30,
+    desc: "Nhân viên vận hành — đọc + ghi trên shop/module được gán.",
+    canAssignTo: [],
+  },
+  {
+    id: "analyst", label: ROLE_LABEL.analyst, level: 20,
+    desc: "Chỉ đọc, xuất báo cáo. Không thao tác ghi.",
+    canAssignTo: [],
+  },
+  {
+    id: "client_viewer", label: ROLE_LABEL.client_viewer, level: 10,
+    desc: "Khách hàng (client) — chỉ đọc shop của mình, không thấy nội bộ VEXIM.",
+    canAssignTo: [],
+  },
+];
+
+export const SHOPS = ["A1 · US", "A2 · MX", "B1 · DE", "C2 · US", "D1 · US", "E3 · CA"];

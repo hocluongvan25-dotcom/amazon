@@ -8,3 +8,4 @@ out/
 npm-debug.log*
 .vercel
 *.log
+supabase/.temp/

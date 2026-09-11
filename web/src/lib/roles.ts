@@ -102,6 +102,12 @@ export const NAV: { group: string; items: NavItem[] }[] = [
       { href: "/module0/users", label: "Người dùng & quyền", icon: "👥", personas: ["ceo"] },
     ],
   },
+  {
+    group: "Tài khoản",
+    items: [
+      { href: "/profile", label: "Trang cá nhân", icon: "👤", personas: ["ceo", "lead_fulfill", "op_ppc", "client"] },
+    ],
+  },
 ];
 
 export function navFor(persona: PersonaKey) {
