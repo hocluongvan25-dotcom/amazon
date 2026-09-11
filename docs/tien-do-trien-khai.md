@@ -33,10 +33,11 @@
 | | **Sync layer 3 tầng** (worker/): notification → getInventorySummaries → report MYI đối soát; chỉ số velocity/cover/đề xuất nhập đúng công thức §2 | ✅ Tier 1 (mock, 16/16 test) |
 | **1. Listing (đọc)** | L1 Danh sách listing (filter trạng thái/shop/loại lỗi/brand, tìm kiếm, sort, xuất CSV) · L2 Chi tiết (thuộc tính theo product type, issues đúng mã lỗi Amazon, lịch sử, offer & Buy Box, doanh thu 30 ngày) · L4 Hàng đợi inactive/stranded theo SOP-03 | ✅ (mock) |
 | | **Sync layer Listing** (worker/): getListingsItem + LISTINGS_ITEM_STATUS_CHANGE/ISSUES_CHANGE + 3 report parser (Merchant ALL/INACTIVE, Stranded) | ✅ (mock, 12 test) |
-| **2. Giá & Buy Box** | P1–P3 | ⬜ |
-| **6. Tài chính (đọc)** | F1–F2 | ⬜ |
+| **2. Giá & Buy Box** | P1 Bảng giá & Featured Offer (FOEP, giá sàn, biên, box status) · P2 Chi tiết giá (30 ngày, breakdown giá sàn, offers đối thủ) · P3 Duyệt & áp giá (≤2% operator / >2% trưởng phòng, khóa dưới sàn, SOP-02) | ✅ mock (PR #2) |
+| | **Sync layer Pricing** (worker/): computeFloorPrice / computeMargin / computeBoxStatus / suggestPrice / pricingFlag · buildPricingSnapshot · batch/retry đúng SP-API 2022-05-01 (FOEP batch 40, offers 20, RPS 0.5) | ✅ mock, **73/73 test** |
+| **6. Tài chính (đọc)** | F1–F2 | ⬜ kế tiếp |
 
-**Kiểm chứng build (11/09):** `next build` pass 16 routes · middleware chặn chưa đăng nhập (307 → /login) · CEO xem được /dashboard · Operator PPC vào /finance bị chặn "Không có quyền truy cập" ✅
+**Kiểm chứng build (11/09, sau PR #2):** `next build` pass **33 routes** · worker test **73/73** · phân quyền hoạt động · sidebar đủ 9 mục (thêm Giá & Buy Box) ✅
 
 ## Cách verify nhanh (DEMO MODE)
 
