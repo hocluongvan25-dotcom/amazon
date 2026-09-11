@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VEXIM Ops — Wireframe 8 Dashboard (bản duyệt thiết kế)</title>
+<style>
+  :root{
+    --ink:#0f1720; --muted:#5b6472; --soft:#8a93a3;
+    --bg:#f4f6f9; --card:#fff; --line:#e5e8ee;
+    --accent:#ff9900; --accent-ink:#b25f00; --accent-soft:#fff4e5;
+    --green:#0e9f6e; --green-soft:#e6f7f0;
+    --red:#e02424; --red-soft:#fdeaea;
+    --amber:#c27803; --amber-soft:#fdf3e0;
+    --blue:#2563eb; --blue-soft:#eaf1ff;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;color:var(--ink);background:var(--bg);font-size:14px;line-height:1.55}
+  a{text-decoration:none;color:inherit}
+
+  .ribbon{background:var(--ink);color:#ffd9a0;font-size:12px;font-weight:600;text-align:center;padding:7px 12px}
+  .ribbon b{color:#fff}
+
+  .topbar{position:sticky;top:0;z-index:40;background:rgba(255,255,255,.94);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;padding:0 16px;height:58px;flex-wrap:nowrap;overflow-x:auto}
+  .logo{display:flex;align-items:center;gap:8px;font-weight:800;font-size:15px;white-space:nowrap}
+  .logo-mark{width:28px;height:28px;border-radius:8px;background:var(--ink);color:var(--accent);display:grid;place-items:center;font-weight:900}
+  .sel{border:1px solid var(--line);background:#fff;border-radius:9px;padding:7px 9px;font-size:12.5px;color:var(--muted);font-weight:600;white-space:nowrap}
+  .sel.role{border-color:var(--accent);background:var(--accent-soft);color:var(--accent-ink);font-weight:800;min-width:250px}
+  .bell{margin-left:auto;position:relative;width:34px;height:34px;border:1px solid var(--line);border-radius:9px;background:#fff;display:grid;place-items:center;font-size:15px;cursor:pointer;flex:none}
+  .bell i{position:absolute;top:-6px;right:-6px;background:var(--red);color:#fff;font-size:10.5px;font-weight:800;font-style:normal;border-radius:999px;padding:1px 6px}
+  .avatar{width:34px;height:34px;border-radius:50%;background:#dfe6f3;display:grid;place-items:center;font-weight:800;font-size:12px;color:#3c4a63;flex:none}
+
+  .scope{display:flex;gap:10px;align-items:center;background:var(--blue-soft);border-bottom:1px solid var(--line);padding:8px 18px;font-size:12.5px;color:#1e3a8a;font-weight:600}
+  .scope b{color:var(--blue)}
+
+  .layout{display:grid;grid-template-columns:242px 1fr;max-width:1440px;margin:0 auto;min-height:calc(100vh - 120px)}
+  .sidebar{border-right:1px solid var(--line);background:#fff;padding:14px 10px}
+  .nav-group{font-size:10.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--soft);padding:12px 12px 6px}
+  .nav-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:9px;font-size:13.5px;font-weight:600;color:var(--muted);cursor:pointer;margin-bottom:2px}
+  .nav-item:hover{background:var(--bg)}
+  .nav-item.active{background:var(--accent-soft);color:var(--accent-ink)}
+  .nav-item .ico{width:20px;text-align:center}
+  .nav-item .cnt{margin-left:auto;font-size:11px;font-weight:800;background:var(--red-soft);color:var(--red);border-radius:999px;padding:1px 7px}
+  .sidebar .note{margin:16px 12px 0;font-size:11.5px;color:var(--soft);background:var(--bg);border:1px dashed var(--line);border-radius:9px;padding:10px}
+  .hidden-nav{display:none!important}
+
+  .main{padding:22px 26px 40px;max-width:1150px}
+  .page-head{display:flex;align-items:baseline;gap:12px;margin-bottom:4px}
+  .page-head h1{font-size:21px;letter-spacing:-.02em}
+  .page-head .sub{color:var(--soft);font-size:12.5px;font-weight:600}
+  .page-desc{color:var(--muted);font-size:13px;margin-bottom:18px}
+
+  .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:14px 16px}
+  .card .c-label{font-size:11.5px;font-weight:700;color:var(--soft);text-transform:uppercase;letter-spacing:.05em}
+  .card .c-value{font-size:23px;font-weight:800;letter-spacing:-.02em;margin-top:3px}
+  .card .c-sub{font-size:12px;font-weight:600;margin-top:3px}
+  .up{color:var(--green)} .down{color:var(--red)} .flat{color:var(--soft)} .warn{color:var(--amber)}
+
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:16px 18px;margin-bottom:14px}
+  .panel h3{font-size:14.5px;margin-bottom:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .panel h3 .hint{font-size:11.5px;color:var(--soft);font-weight:500}
+  table.data{width:100%;border-collapse:collapse;font-size:13px}
+  table.data th{text-align:left;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--soft);padding:7px 8px;border-bottom:1px solid var(--line)}
+  table.data td{padding:8px;border-bottom:1px solid #f0f2f6;vertical-align:middle}
+  table.data tr:last-child td{border-bottom:0}
+  .num{text-align:right;font-variant-numeric:tabular-nums}
+
+  .chip{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:800;border-radius:999px;padding:2px 10px;white-space:nowrap}
+  .chip.red{background:var(--red-soft);color:#a01717}
+  .chip.amber{background:var(--amber-soft);color:#8a5602}
+  .chip.green{background:var(--green-soft);color:#0b7a55}
+  .chip.gray{background:#eef1f5;color:#5b6472}
+
+  .alerts{display:flex;flex-direction:column;gap:8px}
+  .alert{display:flex;gap:10px;align-items:flex-start;border-radius:10px;padding:10px 13px;font-size:13px;font-weight:600;line-height:1.45}
+  .alert .a-ico{width:9px;height:9px;border-radius:50%;margin-top:5px;flex:none}
+  .alert.red{background:var(--red-soft);color:#a01717}.alert.red .a-ico{background:var(--red)}
+  .alert.amber{background:var(--amber-soft);color:#8a5602}.alert.amber .a-ico{background:var(--amber)}
+  .alert.green{background:var(--green-soft);color:#0b7a55}.alert.green .a-ico{background:var(--green)}
+
+  .bars{display:flex;align-items:flex-end;gap:6px;height:110px;padding-top:6px}
+  .bars .b{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:5px;height:100%}
+  .bars .b i{width:100%;background:linear-gradient(180deg,#bfd3f5,#8fb3f0);border-radius:5px 5px 0 0}
+  .bars .b.today i{background:linear-gradient(180deg,#ffd9a0,#ffb84d)}
+  .bars .b span{font-size:10px;color:var(--soft);font-weight:700}
+
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .mini-list{display:flex;flex-direction:column;gap:8px}
+  .mini-item{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:10px;padding:9px 12px;font-size:13px}
+  .mini-item .muted{color:var(--soft);font-size:12px}
+  .mini-item .right{margin-left:auto;font-weight:800;font-size:12.5px;white-space:nowrap}
+  .client-note{background:var(--blue);color:#fff;border-radius:13px;padding:14px 18px;font-size:13px;font-weight:600;margin-bottom:14px}
+  .footer-note{margin-top:22px;color:var(--soft);font-size:11.5px;text-align:center}
+
+  section.view{display:none}
+  section.view.active{display:block}
+
+  @media (max-width:1020px){.cards{grid-template-columns:repeat(2,1fr)}.grid2{grid-template-columns:1fr}.layout{grid-template-columns:1fr}.sidebar{display:flex;overflow-x:auto;border-right:0;border-bottom:1px solid var(--line)}.nav-item{white-space:nowrap}.nav-group,.sidebar .note{display:none}}
+</style>
+</head>
+<body>
+
+<div class="ribbon">⚠️ <b>WIREFRAME</b> — dữ liệu giả (mock) · dashboard tổng quan như bản gốc · dùng bộ chuyển vai trò (viền cam) để kiểm chứng mỗi phòng chỉ thấy phạm vi mình</div>
+
+<div class="topbar">
+  <div class="logo"><span class="logo-mark">V</span> VEXIM&nbsp;Ops</div>
+  <select class="sel role" id="roleSwitch" title="Bộ mô phỏng vai trò — thực tế hệ thống tự áp theo đăng nhập">
+    <option value="ceo">👑 Đang xem: Ban điều hành VEXIM</option>
+    <option value="lead_fulfill">📦 Đang xem: Trưởng phòng Kho vận &amp; FBA</option>
+    <option value="op_ppc">📈 Đang xem: Operator PPC (5 shop được gán)</option>
+    <option value="client">🏢 Đang xem: Client Viewer — Doanh nghiệp A</option>
+  </select>
+  <select class="sel" id="selOrg"><option>Khách hàng: Tất cả</option></select>
+  <select class="sel" id="selShop"><option>Shop: Tất cả (14)</option></select>
+  <select class="sel"><option>Hôm qua</option><option>7 ngày</option><option>30 ngày</option></select>
+  <div class="bell">🔔<i id="bellCount">7</i></div>
+  <div class="avatar" id="avatarBox">NA</div>
+</div>
+
+<div class="scope" id="scopeBanner">🔒 <span id="scopeText"></span></div>
+
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+    <div class="nav-group">Dashboard</div>
+    <div class="nav-item active" data-view="ceo" data-groups="ceo"><span class="ico">📊</span> Tổng quan</div>
+    <div class="nav-group">Phòng ban</div>
+    <div class="nav-item" data-view="health" data-groups="ceo"><span class="ico">🛡️</span> Vận hành &amp; Health <span class="cnt">5</span></div>
+    <div class="nav-item" data-view="listing" data-groups="ceo"><span class="ico">🏷️</span> Listing &amp; Nội dung <span class="cnt">7</span></div>
+    <div class="nav-item" data-view="ppc" data-groups="ceo,op_ppc"><span class="ico">📈</span> Quảng cáo (PPC) <span class="cnt">3</span></div>
+    <div class="nav-item" data-view="fulfill" data-groups="ceo,lead_fulfill"><span class="ico">📦</span> Kho vận &amp; FBA <span class="cnt">5</span></div>
+    <div class="nav-item" data-view="orders" data-groups="ceo"><span class="ico">💬</span> Đơn hàng &amp; CSKH <span class="cnt">4</span></div>
+    <div class="nav-item" data-view="finance" data-groups="ceo"><span class="ico">💰</span> Tài chính &amp; Đối soát <span class="cnt">6</span></div>
+    <div class="nav-group">Khách hàng</div>
+    <div class="nav-item" data-view="client" data-groups="ceo,client"><span class="ico">🏢</span> Client Viewer</div>
+    <div class="note">Mục hiển thị theo quyền của vai trò đang chọn — thực tế được đảm bảo bằng RLS ở tầng database, không chỉ ẩn UI.</div>
+  </aside>
+
+  <main class="main">
+
+    <!-- ================= 1. TỔNG QUAN (CEO) ================= -->
+    <section class="view active" id="view-ceo">
+      <div class="page-head"><h1>Tổng quan</h1><span class="sub">Hôm qua · 14 shop · cập nhật 06:00</span></div>
+      <div class="page-desc">Số liệu chốt từ bảng kpi_daily (đồng bộ từ SP-API). Mỗi con số trả lời câu hỏi: hôm nay phải làm gì?</div>
+      <div class="cards">
+        <div class="card"><div class="c-label">Doanh thu hôm qua</div><div class="c-value">$12,480</div><div class="c-sub up">▲ 8.2% so cùng ngày tuần trước</div></div>
+        <div class="card"><div class="c-label">Đơn hàng</div><div class="c-value">341</div><div class="c-sub up">▲ 4.7%</div></div>
+        <div class="card"><div class="c-label">Spend QC · TACOS</div><div class="c-value">$862</div><div class="c-sub flat">TACOS 6.9% · mục tiêu ≤ 8%</div></div>
+        <div class="card"><div class="c-label">Shop cần xử lý gấp</div><div class="c-value down">2 / 14</div><div class="c-sub down">1 sắp hết hàng · 1 health vàng</div></div>
+      </div>
+      <div class="panel">
+        <h3>Doanh thu 14 ngày gần nhất <span class="hint">toàn bộ shop · USD</span></h3>
+        <div class="bars">
+          <div class="b"><i style="height:42%"></i><span>T</span></div><div class="b"><i style="height:38%"></i><span>S</span></div>
+          <div class="b"><i style="height:35%"></i><span>B</span></div><div class="b"><i style="height:47%"></i><span>K</span></div>
+          <div class="b"><i style="height:52%"></i><span>N</span></div><div class="b"><i style="height:49%"></i><span>T</span></div>
+          <div class="b"><i style="height:44%"></i><span>S</span></div><div class="b"><i style="height:41%"></i><span>B</span></div>
+          <div class="b"><i style="height:55%"></i><span>K</span></div><div class="b"><i style="height:61%"></i><span>N</span></div>
+          <div class="b"><i style="height:57%"></i><span>T</span></div><div class="b"><i style="height:53%"></i><span>S</span></div>
+          <div class="b"><i style="height:50%"></i><span>B</span></div>
+          <div class="b today"><i style="height:72%"></i><span>Hôm qua</span></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>Shop "đỏ" hôm nay <span class="hint">xếp theo mức ảnh hưởng doanh thu</span></h3>
+        <table class="data">
+          <tr><th>Shop</th><th>Vấn đề</th><th>Ảnh hưởng</th><th>Phòng phụ trách</th><th>Trạng thái</th></tr>
+          <tr><td><b>Shop A1 · US</b></td><td>3 SKU sắp hết hàng (cover 5–8 ngày)</td><td class="num">~$410/ngày nếu đứt</td><td>Kho vận</td><td><span class="chip red">Chờ kế hoạch nhập</span></td></tr>
+          <tr><td><b>Shop C2 · US</b></td><td>Account Health vàng — 1 vi phạm IP chưa khiếu nại</td><td class="num">rủi ro khóa shop</td><td>Vận hành &amp; Health</td><td><span class="chip amber">Đang xử lý</span></td></tr>
+        </table>
+      </div>
+    </section>
+
+    <!-- ================= 2. VẬN HÀNH & ACCOUNT HEALTH ================= -->
+    <section class="view" id="view-health">
+      <div class="page-head"><h1>Vận hành &amp; Account Health</h1><span class="sub">Hôm nay · 14 shop</span></div>
+      <div class="page-desc">Nguồn: GET_V1_SELLER_PERFORMANCE_REPORT + notification ACCOUNT_STATUS_CHANGED (Selling Partner Insights).</div>
+      <div class="cards">
+        <div class="card"><div class="c-label">Shop khỏe (AHR xanh)</div><div class="c-value up">12</div><div class="c-sub flat">giữ nguyên so với hôm qua</div></div>
+        <div class="card"><div class="c-label">Shop vàng / đỏ</div><div class="c-value warn">2</div><div class="c-sub down">▲ 1 so với hôm qua</div></div>
+        <div class="card"><div class="c-label">Vấn đề mở</div><div class="c-value">5</div><div class="c-sub flat">2 IP · 1 listing gỡ · 2 KYC</div></div>
+        <div class="card"><div class="c-label">Tác vụ quá hạn SLA</div><div class="c-value down">3</div><div class="c-sub down">cần đẩy ngay hôm nay</div></div>
+      </div>
+      <div class="grid2">
+        <div class="panel">
+          <h3>Sức khỏe theo shop</h3>
+          <table class="data">
+            <tr><th>Shop</th><th class="num">AHR</th><th class="num">ODR</th><th class="num">Late ship</th><th>Trạng thái</th></tr>
+            <tr><td>Shop A1 · US</td><td class="num">780</td><td class="num">0.4%</td><td class="num">1.2%</td><td><span class="chip green">Khỏe</span></td></tr>
+            <tr><td>Shop C2 · US</td><td class="num">165</td><td class="num">0.9%</td><td class="num">3.8%</td><td><span class="chip amber">Có rủi ro</span></td></tr>
+            <tr><td>Shop B1 · DE</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td><span class="chip gray">Chưa kết nối</span></td></tr>
+          </table>
+        </div>
+        <div class="panel">
+          <h3>Tác vụ quá hạn</h3>
+          <div class="mini-list">
+            <div class="mini-item">⏰ <div><b>KYC Shop D1</b><div class="muted">hạn 2 ngày · phòng Vận hành</div></div><span class="right down">quá hạn 1 ngày</span></div>
+            <div class="mini-item">📄 <div><b>Khiếu nại vi phạm IP — Shop C2</b><div class="muted">hạn hôm qua · phòng Vận hành</div></div><span class="right down">quá hạn 1 ngày</span></div>
+            <div class="mini-item">🔁 <div><b>Bàn giao shop E3 cho PPC mới</b><div class="muted">hạn 3 ngày · điều phối</div></div><span class="right warn">hết hôm nay</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 3. LISTING & NỘI DUNG ================= -->
+    <section class="view" id="view-listing">
+      <div class="page-head"><h1>Listing &amp; Nội dung</h1><span class="sub">Hôm qua · 14 shop</span></div>
+      <div class="page-desc">Nguồn: Listings Items API + notification LISTINGS_ITEM_ISSUES_CHANGE + report Merchant Listings.</div>
+      <div class="cards">
+        <div class="card"><div class="c-label">Listing active</div><div class="c-value">1,240</div><div class="c-sub up">▲ 12 listing mới</div></div>
+        <div class="card"><div class="c-label">Inactive / stranded</div><div class="c-value warn">18</div><div class="c-sub up">▼ 6 so với hôm qua</div></div>
+        <div class="card"><div class="c-label">Listing có lỗi</div><div class="c-value down">7</div><div class="c-sub flat">3 lỗi ảnh · 2 thiếu thuộc tính</div></div>
+        <div class="card"><div class="c-label">Chờ duyệt nội dung</div><div class="c-value">12</div><div class="c-sub flat">trưởng phòng duyệt trước 12h</div></div>
+      </div>
+      <div class="panel">
+        <h3>Hàng đợi xử lý hôm nay <span class="hint">xếp theo doanh thu/SKU</span></h3>
+        <table class="data">
+          <tr><th>SKU / ASIN</th><th>Shop</th><th>Vấn đề</th><th class="num">Doanh thu/SKU</th><th>Ưu tiên</th><th>Người phụ trách</th></tr>
+          <tr><td><b>XMO-950-BLK</b> · B0C…31F</td><td>A1</td><td>Thiếu ảnh swatch — bị ẩn biến thể</td><td class="num">$96/ngày</td><td><span class="chip red">Cao</span></td><td>Lan</td></tr>
+          <tr><td><b>VPN-220</b> · B0B…77K</td><td>A1</td><td>Stranded — còn hàng tại FC không bán được</td><td class="num">$71/ngày</td><td><span class="chip red">Cao</span></td><td>Minh</td></tr>
+          <tr><td><b>KCH-118-W</b> · B0C…52D</td><td>C2</td><td>Tiêu đề thiếu từ khóa chính</td><td class="num">$38/ngày</td><td><span class="chip amber">Vừa</span></td><td>Lan</td></tr>
+          <tr><td><b>DRF-300</b> · B0A…14M</td><td>A2</td><td>Thuộc tính expiration bắt buộc thiếu</td><td class="num">$12/ngày</td><td><span class="chip gray">Thấp</span></td><td>Tuấn</td></tr>
+        </table>
+      </div>
+    </section>
+
+    <!-- ================= 4. QUẢNG CÁO (PPC) ================= -->
+    <section class="view" id="view-ppc">
+      <div class="page-head"><h1>Quảng cáo (PPC)</h1><span class="sub">Hôm qua · ACOS tính theo 7 ngày</span></div>
+      <div class="page-desc">Nguồn: Amazon Ads API — campaign metrics theo giờ, search term report hằng ngày.</div>
+      <div class="cards">
+        <div class="card"><div class="c-label">Spend hôm qua</div><div class="c-value">$862</div><div class="c-sub flat">91% ngân sách ngày</div></div>
+        <div class="card"><div class="c-label">ACOS 7 ngày</div><div class="c-value">18.2%</div><div class="c-sub up">▼ 0.8 điểm · mục tiêu ≤ 20%</div></div>
+        <div class="card"><div class="c-label">TACOS</div><div class="c-value">6.9%</div><div class="c-sub up">▼ 0.4 điểm</div></div>
+        <div class="card"><div class="c-label">Đơn từ quảng cáo</div><div class="c-value">96</div><div class="c-sub up">▲ 6 đơn</div></div>
+      </div>
+      <div class="grid2">
+        <div class="panel">
+          <h3>Cần xử lý ngay</h3>
+          <div class="alerts">
+            <div class="alert red"><span class="a-ico"></span>2 campaign hết budget trước 18h hôm qua — đang mất cơ hội đơn</div>
+            <div class="alert amber"><span class="a-ico"></span>Campaign "XMO-950 Exact" ACOS 34% (vượt ngưỡng 25%) 3 ngày liên tiếp</div>
+            <div class="alert green"><span class="a-ico"></span>5 từ khóa gợi ý negative sẵn sàng duyệt (click 42 · 0 đơn)</div>
+          </div>
+        </div>
+        <div class="panel">
+          <h3>Campaign ACOS vượt ngưỡng <span class="hint">7 ngày · chỉnh trực tiếp từ hệ thống</span></h3>
+          <table class="data">
+            <tr><th>Campaign</th><th class="num">Spend 7d</th><th class="num">ACOS</th><th>Xu hướng</th></tr>
+            <tr><td>XMO-950 Exact</td><td class="num">$312</td><td class="num down">34.0%</td><td>▲ 3 ngày</td></tr>
+            <tr><td>VPN-220 Broad</td><td class="num">$198</td><td class="num down">28.7%</td><td>▲ 2 ngày</td></tr>
+            <tr><td>KCH-118 Auto</td><td class="num">$87</td><td class="num warn">25.9%</td><td>bằng phẳng</td></tr>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 5. KHO VẬN & FBA ================= -->
+    <section class="view" id="view-fulfill">
+      <div class="page-head"><h1>Kho vận &amp; FBA</h1><span class="sub">Hôm nay · cập nhật tồn kho 45 phút trước</span></div>
+      <div class="page-desc">Nguồn: FBA Inventory API (getInventorySummaries) + report Inventory Aged · role: Inventory and Order Tracking.</div>
+      <div class="cards">
+        <div class="card"><div class="c-label">SKU sắp hết hàng</div><div class="c-value down">5</div><div class="c-sub down">cover &lt; 14 ngày</div></div>
+        <div class="card"><div class="c-label">Tồn khả dụng</div><div class="c-value">48,220</div><div class="c-sub flat">đơn vị · toàn shop</div></div>
+        <div class="card"><div class="c-label">Lô hàng đang về</div><div class="c-value">6</div><div class="c-sub flat">2 lô sắp đến FC</div></div>
+        <div class="card"><div class="c-label">Tồn &gt; 365 ngày</div><div class="c-value warn">12 SKU</div><div class="c-sub warn">chuẩn bị removal để tránh phí dài hạn</div></div>
+      </div>
+      <div class="grid2">
+        <div class="panel">
+          <h3>SKU sắp hết — xếp theo doanh thu <span class="hint">đề xuất số lượng nhập</span></h3>
+          <table class="data">
+            <tr><th>SKU</th><th class="num">Tồn</th><th class="num">Cover</th><th class="num">Bán/ngày</th><th class="num">Đề xuất nhập</th></tr>
+            <tr><td><b>XMO-950-BLK</b></td><td class="num">88</td><td class="num down">5 ngày</td><td class="num">17</td><td class="num">520</td></tr>
+            <tr><td><b>VPN-220</b></td><td class="num">140</td><td class="num down">8 ngày</td><td class="num">18</td><td class="num">540</td></tr>
+            <tr><td><b>KCH-118-W</b></td><td class="num">210</td><td class="num warn">11 ngày</td><td class="num">19</td><td class="num">570</td></tr>
+          </table>
+        </div>
+        <div class="panel">
+          <h3>Inbound shipments</h3>
+          <div class="mini-list">
+            <div class="mini-item">🚚 <div><b>Shipment FBA15G…K3QX</b><div class="muted">520 đơn vị · Shop A1 · đang giao đến FC ONT8</div></div><span class="right">ETA 4 ngày</span></div>
+            <div class="mini-item">📦 <div><b>Shipment FBA15G…9DLP</b><div class="muted">540 đơn vị · Shop A1 · đang nhận tại FC LAX9</div></div><span class="right warn">ETA 1 ngày</span></div>
+            <div class="mini-item">⚠️ <div><b>Shipment FBA14Q…2XZT</b><div class="muted">32 đơn vị thiếu khi nhận — cần mở case điều tra</div></div><span class="right down">cần xử lý</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 6. ĐƠN HÀNG & CSKH ================= -->
+    <section class="view" id="view-orders">
+      <div class="page-head"><h1>Đơn hàng &amp; CSKH</h1><span class="sub">Hôm nay</span></div>
+      <div class="page-desc">Nguồn: Orders API + ORDER_CHANGE (realtime) · tin nhắn từ log nội bộ (SP-API không đọc hộp thư — quyết định v1.1).</div>
+      <div class="cards">
+        <div class="card"><div class="c-label">Đơn hôm nay</div><div class="c-value">341</div><div class="c-sub flat">FBA 320 · FBM 21</div></div>
+        <div class="card"><div class="c-label">FBM chờ xác nhận</div><div class="c-value warn">4</div><div class="c-sub warn">còn 3h trước hạn ship</div></div>
+        <div class="card"><div class="c-label">Tin nhắn chưa trả lời</div><div class="c-value warn">2</div><div class="c-sub warn">1 tin gần 21h — SLA 24h</div></div>
+        <div class="card"><div class="c-label">Return mới</div><div class="c-value">3</div><div class="c-sub flat">1 refund chờ duyệt</div></div>
+      </div>
+      <div class="grid2">
+        <div class="panel">
+          <h3>Chỉ số giao hàng so với ngưỡng Amazon</h3>
+          <table class="data">
+            <tr><th>Chỉ số</th><th class="num">Hiện tại</th><th class="num">Ngưỡng</th><th>Trạng thái</th></tr>
+            <tr><td>ODR</td><td class="num">0.8%</td><td class="num">&lt; 1%</td><td><span class="chip green">An toàn</span></td></tr>
+            <tr><td>Late Shipment Rate</td><td class="num">2.1%</td><td class="num">&lt; 4%</td><td><span class="chip green">An toàn</span></td></tr>
+            <tr><td>Valid Tracking Rate</td><td class="num">97%</td><td class="num">&gt; 95%</td><td><span class="chip green">An toàn</span></td></tr>
+          </table>
+        </div>
+        <div class="panel">
+          <h3>Việc cần làm ngay</h3>
+          <div class="alerts">
+            <div class="alert amber"><span class="a-ico"></span>4 đơn FBM chờ xác nhận — hết hạn sau 3 giờ</div>
+            <div class="alert amber"><span class="a-ico"></span>Tin nhắn buyer #114-… về đổi kích cỡ — 21h chưa trả lời</div>
+            <div class="alert red"><span class="a-ico"></span>1 feedback 1★ mới cho Shop A1 — xem chính sách phản hồi</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 7. TÀI CHÍNH & ĐỐI SOÁT ================= -->
+    <section class="view" id="view-finance">
+      <div class="page-head"><h1>Tài chính &amp; Đối soát</h1><span class="sub">Kỳ settlement gần nhất · đối soát 2h sáng</span></div>
+      <div class="page-desc">Nguồn: Finances API + report Settlement / Ledger · lợi nhuận tính với giá vốn nội bộ VEXIM nhập.</div>
+      <div class="cards">
+        <div class="card"><div class="c-label">Tiền về kỳ gần nhất</div><div class="c-value">$42,180</div><div class="c-sub flat">kỳ 27/08–09/09 · 14 shop</div></div>
+        <div class="card"><div class="c-label">Phí Amazon kỳ này</div><div class="c-value">$9,340</div><div class="c-sub flat">referral 6,1k · FBA 2,5k · storage 0,7k</div></div>
+        <div class="card"><div class="c-label">Doanh thu chưa thanh toán</div><div class="c-value">$18,900</div><div class="c-sub flat">kỳ hiện tại</div></div>
+        <div class="card"><div class="c-label">Bồi hoàn cần claim</div><div class="c-value up">6 khoản</div><div class="c-sub up">≈ $1,240 hồi về</div></div>
+      </div>
+      <div class="grid2">
+        <div class="panel">
+          <h3>Lợi nhuận SKU (ước tính) <span class="hint">top 3 · sau phí Amazon + giá vốn</span></h3>
+          <table class="data">
+            <tr><th>SKU</th><th class="num">Doanh thu</th><th class="num">Phí Amazon</th><th class="num">Giá vốn</th><th class="num">Lãi gộp</th></tr>
+            <tr><td>XMO-950-BLK</td><td class="num">$2,880</td><td class="num">−$712</td><td class="num">−$1,380</td><td class="num up">+$788 (27%)</td></tr>
+            <tr><td>VPN-220</td><td class="num">$1,260</td><td class="num">−$318</td><td class="num">−$640</td><td class="num up">+$302 (24%)</td></tr>
+            <tr><td>KCH-118-W</td><td class="num">$740</td><td class="num">−$205</td><td class="num">−$470</td><td class="num warn">+$65 (9%)</td></tr>
+          </table>
+        </div>
+        <div class="panel">
+          <h3>Bồi hoàn FBA chờ xử lý</h3>
+          <div class="mini-list">
+            <div class="mini-item">🧾 <div><b>Hàng mất tại FC ONT8</b><div class="muted">18 đơn vị · XMO-950 · phát hiện khi đối soát tồn</div></div><span class="right up">+$324</span></div>
+            <div class="mini-item">🧾 <div><b>Hư hỏng khi nhập FBA15G…9DLP</b><div class="muted">7 đơn vị · VPN-220</div></div><span class="right up">+$126</span></div>
+            <div class="mini-item">🧾 <div><b>Thu sai phí lưu kho dài hạn</b><div class="muted">kỳ 08/2026 · Shop C2</div></div><span class="right up">+$210</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 8. CLIENT VIEWER ================= -->
+    <section class="view" id="view-client">
+      <div class="client-note">🏢 Chế độ khách hàng (Client Viewer) — chỉ đọc, chỉ thấy shop của doanh nghiệp mình · không thấy tác vụ nội bộ &amp; phân công của VEXIM</div>
+      <div class="page-head"><h1>Shop của bạn</h1><span class="sub">Doanh nghiệp A · 2 shop · cập nhật 06:00</span></div>
+      <div class="cards">
+        <div class="card"><div class="c-label">Doanh thu tháng này</div><div class="c-value">$186,400</div><div class="c-sub up">▲ 11% so tháng trước</div></div>
+        <div class="card"><div class="c-label">Đơn hàng tháng</div><div class="c-value">5,120</div><div class="c-sub up">▲ 6%</div></div>
+        <div class="card"><div class="c-label">Sức khỏe tài khoản</div><div class="c-value up">Tốt</div><div class="c-sub flat">AHR 780 · không vi phạm</div></div>
+        <div class="card"><div class="c-label">Kỳ thanh toán tới</div><div class="c-value">$23,900</div><div class="c-sub flat">chiếu toán 24/09</div></div>
+      </div>
+      <div class="panel">
+        <h3>Báo cáo định kỳ</h3>
+        <div class="mini-list">
+          <div class="mini-item">📄 <div><b>Báo cáo tuần 37</b><div class="muted">doanh thu · quảng cáo · tồn kho · 3 hành động đề xuất</div></div><span class="right">đã gửi 08/09</span></div>
+          <div class="mini-item">📄 <div><b>Báo cáo tháng 08</b><div class="muted">đầy đủ settlement &amp; lợi nhuận SKU</div></div><span class="right">đã gửi 02/09</span></div>
+        </div>
+      </div>
+    </section>
+
+    <div class="footer-note">VEXIM Ops · wireframe — phê duyệt thiết kế này là điều kiện để bắt đầu code UI thật (Next.js) · mọi con số trên là dữ liệu giả để duyệt bố cục</div>
+  </main>
+</div>
+
+<script>
+  const ROLES = {
+    ceo:{label:'Ban điều hành VEXIM',scope:'Toàn quyền — thấy mọi phòng ban, mọi shop.',org:'Khách hàng: Tất cả',shop:'Shop: Tất cả (14)',bell:7,avatar:'NA'},
+    lead_fulfill:{label:'Trưởng phòng Kho vận & FBA',scope:'Chỉ thấy dashboard Kho vận & FBA của phòng mình. Không thấy Tài chính, PPC, CSKH của phòng khác.',org:'Khách hàng: 5 KH có kho FBA',shop:'Shop: 9 shop có FBA',bell:2,avatar:'MT'},
+    op_ppc:{label:'Operator PPC — 5 shop được gán',scope:'Chỉ thấy dashboard Quảng cáo, chỉ 5 shop được gán (RBAC + RLS).',org:'Khách hàng: theo gán',shop:'Shop: 5 shop được gán',bell:1,avatar:'TQ'},
+    client:{label:'Client Viewer — Doanh nghiệp A',scope:'Chỉ đọc · chỉ 2 shop của doanh nghiệp mình · không thấy thông tin nội bộ VEXIM.',org:'Khách hàng: Doanh nghiệp A',shop:'Shop: 2 shop của bạn',bell:0,avatar:'DA'}
+  };
+
+  function applyRole(r){
+    const role = ROLES[r];
+    document.getElementById('scopeText').innerHTML = 'Vai trò: <b>' + role.label + '</b> — ' + role.scope;
+    document.getElementById('selOrg').innerHTML = '<option>' + role.org + '</option>';
+    document.getElementById('selShop').innerHTML = '<option>' + role.shop + '</option>';
+    const bell = document.getElementById('bellCount');
+    bell.textContent = role.bell;
+    bell.style.display = role.bell ? '' : 'none';
+    document.getElementById('avatarBox').textContent = role.avatar;
+    document.querySelectorAll('.nav-item').forEach(it=>{
+      it.classList.toggle('hidden-nav', !it.dataset.groups.split(',').includes(r));
+    });
+    const active = document.querySelector('.nav-item.active');
+    if(!active || active.classList.contains('hidden-nav')){
+      const first = document.querySelector('.nav-item:not(.hidden-nav)');
+      if(first) first.click();
+    }
+  }
+
+  document.querySelectorAll('.nav-item').forEach(it=>{
+    it.addEventListener('click',()=>{
+      document.querySelectorAll('.nav-item').forEach(x=>x.classList.remove('active'));
+      it.classList.add('active');
+      document.querySelectorAll('section.view').forEach(s=>s.classList.remove('active'));
+      document.getElementById('view-'+it.dataset.view).classList.add('active');
+      window.scrollTo({top:0,behavior:'smooth'});
+    });
+  });
+  document.getElementById('roleSwitch').addEventListener('change',e=>applyRole(e.target.value));
+  applyRole('ceo');
+</script>
+</body>
+</html>
