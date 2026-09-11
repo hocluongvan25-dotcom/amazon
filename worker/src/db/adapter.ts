@@ -32,10 +32,31 @@ export type NotificationRecord = {
   receivedAt: Date;
 };
 
+/** Trạng thái vòng đời listing cho màn L1/L4 (Đợt 1) */
+export type ListingLifecycleStatus = "ACTIVE" | "INACTIVE" | "SUPPRESSED" | "STRANDED";
+
+export type ListingStateRow = {
+  sellerAccountId: string;
+  sku: string;
+  asin?: string | null;
+  itemName?: string | null; // itemName CÓ THỂ null từ Amazon (đã ghi nhận thực tế)
+  status: ListingLifecycleStatus | null; // null = chưa biết (bỏ qua, không ghi đè)
+  buyable?: boolean | null;
+  discoverable?: boolean | null;
+  issueErrors?: number;
+  issueWarnings?: number;
+  enforcementActions?: string[];
+  price?: string | null;
+  quantity?: number | null;
+  strandedReason?: string | null;
+  updatedAt: Date;
+};
+
 export interface DbAdapter {
   upsertInventorySnapshot(row: InventorySnapshotRow): Promise<void>;
   upsertInventoryDaily(row: InventoryDailyRow): Promise<void>;
   recordNotification(row: NotificationRecord): Promise<void>;
+  upsertListing(row: ListingStateRow): Promise<void>;
   /** Đơn vị bán theo ngày gần nhất (đầu tiên = gần nhất) — dùng tính velocity */
   getSellingDays(sellerAccountId: string, sku: string, days: number): Promise<number[]>;
 }
@@ -45,6 +66,7 @@ export class MockDbAdapter implements DbAdapter {
   snapshots: InventorySnapshotRow[] = [];
   daily: InventoryDailyRow[] = [];
   notifications: NotificationRecord[] = [];
+  listings: ListingStateRow[] = [];
   private sellingDays: Record<string, number[]> = {};
 
   seedSellingDays(sellerAccountId: string, sku: string, days: number[]): void {
@@ -72,6 +94,14 @@ export class MockDbAdapter implements DbAdapter {
 
   async recordNotification(row: NotificationRecord): Promise<void> {
     this.notifications.push(row);
+  }
+
+  async upsertListing(row: ListingStateRow): Promise<void> {
+    const i = this.listings.findIndex(
+      (l) => l.sellerAccountId === row.sellerAccountId && l.sku === row.sku,
+    );
+    if (i >= 0) this.listings[i] = { ...this.listings[i], ...row };
+    else this.listings.push(row);
   }
 
   async getSellingDays(sellerAccountId: string, sku: string, days: number): Promise<number[]> {

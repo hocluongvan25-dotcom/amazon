@@ -24,6 +24,20 @@ export default async function ListingPage() {
         sub="Hôm qua · 14 shop"
         desc="Nguồn: Listings Items API + notification LISTINGS_ITEM_ISSUES_CHANGE + report Merchant Listings."
       />
+      <div className="mb-4 flex flex-wrap gap-2">
+        {[
+          ["/listing/list", "📋 Danh sách listing"],
+          ["/listing/queue", "🚑 Hàng đợi inactive/stranded"],
+        ].map(([href, label]) => (
+          <a
+            key={href}
+            href={href}
+            className="rounded-full border border-line bg-card px-4 py-1.5 text-[12.5px] font-bold text-muted transition hover:border-accent hover:bg-accent-soft hover:text-accent-ink"
+          >
+            {label}
+          </a>
+        ))}
+      </div>
       <KpiGrid>
         {listingKpis.map((k) => (
           <KpiCard key={k.label} {...k} />

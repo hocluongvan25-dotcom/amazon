@@ -360,3 +360,113 @@ export const inboundShipmentsFull: InboundRow[] = [
   { id: "FBA14Q…2XZT", shop: "A2", status: "CLOSED", statusTone: "green", units: 32, fc: "LAX9", eta: "đã nhận 10/07", reconcile: "Thiếu 32 — SOP-09", reconcileTone: "down" },
   { id: "FBA15H…8PLM", shop: "C2", status: "WORKING", statusTone: "gray", units: 570, fc: "— chờ placement", eta: "—", reconcile: "—", reconcileTone: "flat" },
 ];
+
+import type { ListingDetailMock, ListingListRow, ListingQueueItem } from "@/lib/types";
+
+/* ---------- Module 1 — Listing (L1/L2/L4) ---------- */
+
+export const listingList: ListingListRow[] = [
+  { sku: "XMO-950-BLK", asin: "B0C7T31F", title: "XMO 950 Hardside Spinner Đen 28\"", shop: "A1", brand: "XMO Home", status: "SUPPRESSED", price: "$129.99", stock: 142, issueErrors: 1, issueWarnings: 1, owner: "Lan", revenue30d: 2880, updated: "2 giờ trước" },
+  { sku: "XMO-950-BLU", asin: "B0C7T31G", title: "XMO 950 Hardside Spinner Xanh 28\"", shop: "A1", brand: "XMO Home", status: "ACTIVE", price: "$129.99", stock: 96, issueErrors: 0, issueWarnings: 0, owner: "Lan", revenue30d: 1710, updated: "2 giờ trước" },
+  { sku: "VPN-220", asin: "B0B2X77K", title: "VPNova 220 Máy xay sinh tố 1.5L", shop: "A1", brand: "VPNova", status: "STRANDED", price: "$59.90", stock: 214, issueErrors: 1, issueWarnings: 0, owner: "Minh", revenue30d: 2130, updated: "5 giờ trước" },
+  { sku: "VPN-220-PRO", asin: "B0B2X77L", title: "VPNova 220 Pro Máy xay 2L", shop: "A1", brand: "VPNova", status: "ACTIVE", price: "$89.00", stock: 58, issueErrors: 0, issueWarnings: 1, owner: "Minh", revenue30d: 1245, updated: "5 giờ trước" },
+  { sku: "KCH-118-W", asin: "B0C4K52D", title: "KChef 118 Nồi chiên không dầu 5.5L Trắng", shop: "C2", brand: "KChef", status: "ACTIVE", price: "$79.99", stock: 310, issueErrors: 0, issueWarnings: 2, owner: "Lan", revenue30d: 1140, updated: "hôm qua" },
+  { sku: "KCH-118-BK", asin: "B0C4K52E", title: "KChef 118 Nồi chiên không dầu 5.5L Đen", shop: "C2", brand: "KChef", status: "INACTIVE", price: "$79.99", stock: 0, issueErrors: 1, issueWarnings: 0, owner: "Tuấn", revenue30d: 320, updated: "hôm qua" },
+  { sku: "DRF-300", asin: "B0A9F14M", title: "DriftLine 300 Ghế camping gấp", shop: "A2", brand: "DriftLine", status: "INACTIVE", price: "$45.50", stock: 87, issueErrors: 1, issueWarnings: 0, owner: "Tuấn", revenue30d: 360, updated: "3 ngày trước" },
+  { sku: "DRF-300-XL", asin: "B0A9F14N", title: "DriftLine 300 XL Ghế camping", shop: "A2", brand: "DriftLine", status: "ACTIVE", price: "$59.00", stock: 41, issueErrors: 0, issueWarnings: 0, owner: "Tuấn", revenue30d: 690, updated: "3 ngày trước" },
+  { sku: "AQR-12-TOW", asin: "B0D1Q88A", title: "Aqura 12 Khăn tắm microfiber", shop: "C2", brand: "Aqura", status: "ACTIVE", price: "$19.99", stock: 520, issueErrors: 0, issueWarnings: 0, owner: "Minh", revenue30d: 480, updated: "hôm qua" },
+  { sku: "AQR-12-SET", asin: "B0D1Q88B", title: "Aqura 12 Bộ 4 khăn microfiber", shop: "C2", brand: "Aqura", status: "STRANDED", price: "$34.99", stock: 63, issueErrors: 1, issueWarnings: 0, owner: "—", revenue30d: 95, updated: "6 giờ trước" },
+];
+
+export const listingDetails: Record<string, ListingDetailMock> = {
+  "XMO-950-BLK": {
+    sku: "XMO-950-BLK",
+    asin: "B0C7T31F",
+    shop: "A1",
+    productType: "LUGGAGE",
+    conditionType: "new_new",
+    statusFlags: ["DISCOVERABLE"], // mất BUYABLE → bị ẩn khỏi mua
+    createdDate: "2024-08-12",
+    lastUpdatedDate: "2026-09-09",
+    attributes: [
+      { name: "item_name", value: "XMO 950 Hardside Spinner Đen 28\" — Tương hành lý cấp độ hàng không" },
+      { name: "brand", value: "XMO Home" },
+      { name: "item_type_keyword", value: "hardside-spinner-luggage" },
+      { name: "color", value: "Black" },
+      { name: "material", value: "Polycarbonate" },
+      { name: "item_weight", value: "4.3 kg" },
+      { name: "item_package_quantity", value: "1" },
+      { name: "purchasable_offer", value: "USD 129.99 · audience: All" },
+      { name: "fulfillment_availability", value: "FBA (AMAZON_NA) · 142" },
+      { name: "product_description", value: "Vỏ polycarbonate kép, khóa TSA, bánh xe 360°…" },
+    ],
+    issues: [
+      {
+        code: "—",
+        severity: "ERROR",
+        message: "Ảnh biến thể (swatch) thiếu — biến thể không hiển thị trên trang cha, listing bị ẩn khỏi tìm kiếm",
+        attributeNames: ["main_image", "other_image_url_2"],
+        enforcement: "SEARCH_SUPPRESSED",
+      },
+      {
+        code: "8541",
+        severity: "WARNING",
+        message: "Attributes tagged as relevant_attributes are incomplete. Provide values for: item_diameter, theme",
+        attributeNames: ["item_diameter", "theme"],
+      },
+    ],
+    offer: { buyBox: false, price: "$129.99", offerCount: 4 },
+    revenue30d: "$2,880",
+    history: [
+      { time: "09/09 14:20", actor: "Lan (Listing)", change: "Sửa tiêu đề — thêm từ khóa \"hardside spinner\"" },
+      { time: "08/09 09:05", actor: "Amazon", change: "Issue mới: SEARCH_SUPPRESSED (ảnh swatch thiếu)" },
+      { time: "05/09 17:40", actor: "Lan (Listing)", change: "Cập nhật giá $134.99 → $129.99 (tại Seller Central)" },
+      { time: "01/09 11:00", actor: "Hệ thống", change: "Đồng bộ report Merchant Listings — trạng thái ACTIVE" },
+    ],
+  },
+  "VPN-220": {
+    sku: "VPN-220",
+    asin: "B0B2X77K",
+    shop: "A1",
+    productType: "BLENDER",
+    conditionType: "new_new",
+    statusFlags: [], // không BUYABLE/DISCOVERABLE — listing tách khỏi tồn kho
+    createdDate: "2023-11-02",
+    lastUpdatedDate: "2026-08-28",
+    attributes: [
+      { name: "item_name", value: "VPNova 220 Máy xay sinh tố 1.5L — Lưỡi thép không gỉ 6 cánh" },
+      { name: "brand", value: "VPNova" },
+      { name: "model_number", value: "VPN-220" },
+      { name: "capacity", value: "1.5 liter" },
+      { name: "item_power", value: "800 watt" },
+      { name: "purchasable_offer", value: "USD 59.90 · audience: All" },
+      { name: "fulfillment_availability", value: "FBA (AMAZON_NA) · 214 (stranded)" },
+      { name: "product_description", value: "Máy xay 800W, cốc Tritan, 2 cối kèm theo…" },
+    ],
+    issues: [
+      {
+        code: "90220",
+        severity: "ERROR",
+        message: "'product_description' is required but not supplied.",
+        attributeNames: ["product_description"],
+        enforcement: "LISTING_SUPPRESSED",
+      },
+    ],
+    offer: { buyBox: false, price: "$59.90", offerCount: 1 },
+    revenue30d: "$2,130",
+    history: [
+      { time: "28/08 10:12", actor: "Amazon", change: "Listing chuyển INACTIVE — thiếu product_description" },
+      { time: "28/08 10:12", actor: "Hệ thống", change: "214 đơn vị tồn tại FC trở thành stranded (SOP-03)" },
+      { time: "15/08 16:30", actor: "Minh (Listing)", change: "Bổ sung thuộc tính capacity, item_power" },
+    ],
+  },
+};
+
+export const listingQueueFull: ListingQueueItem[] = [
+  { sku: "XMO-950-BLK", asin: "B0C7T31F", shop: "A1", cause: "Thiếu ảnh swatch biến thể — ẩn khỏi tìm kiếm", causeCode: "SEARCH_SUPPRESSED", suggestion: "Tải lên ảnh swatch 500×500+ cho biến thể Đen (SOP-03 bước 2: soạn bản sửa → duyệt → publish)", owner: "Lan", slaLabel: "còn 9h (SLA 24h)", revenuePerDay: "$96/ngày", priority: "red", priorityLabel: "Cao" },
+  { sku: "VPN-220", asin: "B0B2X77K", shop: "A1", cause: "Stranded — thiếu product_description, 214 đơn vị kẹt tại FC", causeCode: "90220", suggestion: "Bổ sung product_description rồi relist (sửa tại Seller Central theo SOP-03)", owner: "Minh", slaLabel: "còn 14h (SLA 24h)", revenuePerDay: "$71/ngày", priority: "red", priorityLabel: "Cao" },
+  { sku: "KCH-118-W", asin: "B0C4K52D", shop: "C2", cause: "Tiêu đề thiếu từ khóa chính — cảnh báo chất lượng", causeCode: "8541 (WARNING)", suggestion: "Viết lại item_name theo formula checklist (SOP-03 bước 7 nếu lặp ≥3 lần)", owner: "Lan", slaLabel: "hôm nay", revenuePerDay: "$38/ngày", priority: "amber", priorityLabel: "Vừa" },
+  { sku: "DRF-300", asin: "B0A9F14M", shop: "A2", cause: "Thuộc tính expiration_date bắt buộc thiếu (danh mục cắm trại)", causeCode: "8541", suggestion: "Bổ sung expiration_date qua patch thuộc tính (Đợt 2) hoặc Seller Central", owner: "Tuấn", slaLabel: "3 ngày", revenuePerDay: "$12/ngày", priority: "amber", priorityLabel: "Vừa" },
+  { sku: "KCH-118-BK", asin: "B0C4K52E", shop: "C2", cause: "Inactive — hết hàng từ 12/09, listing tự đóng", causeCode: "OUT_OF_STOCK", suggestion: "Chờ lô inbound KCH-118 nhận hàng — listing tự active lại khi có tồn", owner: "Tuấn", slaLabel: "theo inbound", revenuePerDay: "$11/ngày", priority: "gray", priorityLabel: "Thấp" },
+  { sku: "AQR-12-SET", asin: "B0D1Q88B", shop: "C2", cause: "Stranded — ASIN bị gộp khỏi catalog sau dọn danh mục", causeCode: "CATALOG_ITEM_REMOVED", suggestion: "Tạo lại offer trên ASIN mới hoặc chuyển removal (phối Kho vận — SOP-03 bước 6)", owner: "—", slaLabel: "chưa gán", revenuePerDay: "$3/ngày", priority: "amber", priorityLabel: "Vừa" },
+];

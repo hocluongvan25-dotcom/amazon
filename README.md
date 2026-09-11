@@ -9,7 +9,9 @@ Nền tảng quản trị vận hành Amazon cho VEXIM (agency quản lý hộ t
 | Đề xuất triển khai + lộ trình 4 cấp độ | ✅ đã thống nhất với VEXIM |
 | Hồ sơ Amazon Developer Profile | 🟠 đã nộp, chờ duyệt (2–8 tuần) |
 | Database Supabase (3 migrations + seed) | ✅ **đã kiểm chứng trên Postgres 18 — 10/10 test RLS multi-tenant PASS** |
-| Web app Next.js (Phase 1 — 27 routes) | ✅ đang chạy DEMO MODE (MockProvider), tự chuyển sang dữ liệu thật khi có Supabase |
+| Web app Next.js (Phase 1 — 30 routes) | ✅ đang chạy DEMO MODE (MockProvider), tự chuyển sang dữ liệu thật khi có Supabase |
+| Sync worker Module 3 (kho vận) | ✅ Tier 1 — 3 tầng đồng bộ + chỉ số tồn kho (16/16 test, mock) |
+| Sync worker Module 1 (listing) | ✅ getListingsItem + 2 notification handler + 3 report parser (12 test, mock) |
 
 ## Cấu trúc repo
 
@@ -17,7 +19,7 @@ Nền tảng quản trị vận hành Amazon cho VEXIM (agency quản lý hộ t
 docs/        Tài liệu triển khai (đề xuất, hồ sơ Amazon, SOP, phân tích module, tiến độ)
 supabase/    Migrations + seed + bộ test RLS (hướng dẫn: supabase/README.md)
 web/         Ứng dụng Next.js 15 + Tailwind + Supabase Auth (hướng dẫn: web/README.md)
-worker/      Sync worker Module 3 — đồng bộ tồn kho FBA 3 tầng (hướng dẫn: worker/README.md)
+worker/      Sync worker — đồng bộ kho vận (Module 3) + listing (Module 1) (hướng dẫn: worker/README.md)
 landing/     Landing page "VEXIM Ops" — điều kiện nộp Developer Profile
 wireframes/  Wireframe 8 dashboard (bản duyệt thiết kế — tham chiếu)
 ```

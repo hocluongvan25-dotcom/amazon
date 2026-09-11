@@ -221,3 +221,61 @@ export type InboundRow = {
   reconcile: string;
   reconcileTone: "up" | "down" | "flat" | "warn";
 };
+
+/* ---------- Module 1 — Listing (L1/L2/L4) ---------- */
+
+export type ListingStatus = "ACTIVE" | "INACTIVE" | "STRANDED" | "SUPPRESSED";
+
+export type ListingListRow = {
+  sku: string;
+  asin: string;
+  title: string;
+  shop: string;
+  brand: string;
+  status: ListingStatus;
+  price: string;
+  stock: number;
+  issueErrors: number;
+  issueWarnings: number;
+  owner: string;
+  revenue30d: number; // USD — để sort
+  updated: string;
+};
+
+export type ListingIssueItem = {
+  code: string; // mã lỗi Amazon (8541, 90220…) — "—" nếu chưa gắn mã
+  severity: "ERROR" | "WARNING" | "INFO";
+  message: string;
+  attributeNames: string[];
+  enforcement?: string; // LISTING_SUPPRESSED, SEARCH_SUPPRESSED…
+};
+
+export type ListingDetailMock = {
+  sku: string;
+  asin: string;
+  shop: string;
+  productType: string;
+  conditionType: string;
+  statusFlags: string[]; // BUYABLE / DISCOVERABLE theo Listings Items API
+  createdDate: string;
+  lastUpdatedDate: string;
+  attributes: { name: string; value: string }[];
+  issues: ListingIssueItem[];
+  offer: { buyBox: boolean; price: string; offerCount: number };
+  revenue30d: string;
+  history: { time: string; actor: string; change: string }[];
+};
+
+export type ListingQueueItem = {
+  sku: string;
+  asin: string;
+  shop: string;
+  cause: string; // nguyên nhân (issues / stranded reason)
+  causeCode: string; // mã lỗi Amazon hoặc stranded-reason
+  suggestion: string; // đề xuất sửa theo SOP-03
+  owner: string;
+  slaLabel: string; // SLA còn lại theo SOP-03 (SKU doanh thu cao ≤ 24h)
+  revenuePerDay: string;
+  priority: "red" | "amber" | "gray";
+  priorityLabel: string;
+};

@@ -1,4 +1,4 @@
-# VEXIM Ops Worker — Sync Layer Module 3 (Kho vận)
+# VEXIM Ops Worker — Sync Layer (Module 3 Kho vận + Module 1 Listing)
 
 Đồng bộ tồn kho Amazon FBA theo kiến trúc 3 tầng trong
 `docs/phan-tich-ky-thuat-module-3-kho-van.md` §1.1:
@@ -51,3 +51,16 @@ Host mặc định NA: `sellingpartnerapi-na.amazon.com`.
 - [ ] Kết nối Supabase thật (thay `MockDbAdapter` bằng adapter Postgres qua service_role)
 - [ ] Đính kèm Sandbox App của VEXIM khi profile được duyệt
 - [ ] Tầng report FC/receipts/adjustments (SOP-09 đối soát thất thoát)
+
+## Module 1 — Listing (L1/L2/L4, Đợt 1 chỉ đọc)
+
+| Nguồn | File | Ghi chú |
+|-------|------|---------|
+| `getListingsItem` (Listings Items API 2021-08-01, 5 rps/10 burst) | `src/amazon/listings.ts` | includedData: summaries, attributes, issues, offers, fulfillmentAvailability · itemName CÓ THỂ null |
+| Notification `LISTINGS_ITEM_STATUS_CHANGE` | `src/notifications/listings.handler.ts` | Status flags BUYABLE/DISCOVERABLE → ACTIVE/SUPPRESSED/INACTIVE · Status rỗng = không áp dụng (bỏ qua) |
+| Notification `LISTINGS_ITEM_ISSUES_CHANGE` (PayloadVersion 2023-12-13) | `src/notifications/listings.handler.ts` | KHÔNG chứa chi tiết → gọi getListingsItem lấy issues (đúng hướng dẫn Amazon) |
+| Report `GET_MERCHANT_LISTINGS_ALL_DATA` / `..._INACTIVE_DATA` | `src/reports/merchant-listings.parser.ts` | TSV header thật có cột "Deprecated column" — parse theo TÊN cột · status "Active [*]" → SUPPRESSED |
+| Report `GET_STRANDED_INVENTORY_UI_DATA` | `src/reports/merchant-listings.parser.ts` | cột "Stranded reason" → queue L4 (SOP-03) |
+| Job nạp hằng ngày 2h sáng | `src/jobs/listings-sync.job.ts` | 3 report → listing state + queue L4 · cảnh báo khi ALL vs INACTIVE lệch nhau, không đè số mù quáng |
+
+Write ops (`putListingsItem`, `patchListingsItem`, `JSON_LISTINGS_FEED`): **khóa đến Đợt 2** theo SOP-03 (Draft → duyệt → Publish).
