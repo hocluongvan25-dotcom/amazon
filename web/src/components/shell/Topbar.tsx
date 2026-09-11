@@ -20,8 +20,8 @@ export default function Topbar({
   }
 
   return (
-    <div className="sticky top-0 z-40 border-b border-line bg-card/95 backdrop-blur">
-      <div className="flex h-[58px] items-center gap-2.5 overflow-x-auto px-4">
+    <div className="sticky top-0 z-40 overflow-visible border-b border-line bg-card/95 backdrop-blur">
+      <div className="flex h-[58px] items-center gap-2.5 overflow-visible px-4">
         <Link href="/dashboard" className="flex shrink-0 items-center gap-2 text-[15px] font-extrabold">
           <span className="grid h-7 w-7 place-items-center rounded-lg bg-ink text-accent">V</span>
           VEXIM&nbsp;Ops
