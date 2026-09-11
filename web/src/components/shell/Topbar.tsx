@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { PERSONAS, type PersonaKey } from "@/lib/roles";
 import type { Session } from "@/lib/auth/session";
 import BellDropdown from "@/components/notifications/BellDropdown";
@@ -16,25 +15,12 @@ export default function Topbar({
   notifications: NotificationItem[];
   unreadCount: number;
 }) {
-  const router = useRouter();
   const persona = PERSONAS[session.persona];
 
   function switchPersona(next: string) {
     // Chỉ dùng ở DEMO MODE — kiểm chứng phân quyền theo phòng
     document.cookie = `demo_role=${next}; path=/; max-age=${60 * 60 * 24 * 7}`;
     window.location.href = "/dashboard";
-  }
-
-  async function logout() {
-    try {
-      const { createClient } = await import("@/lib/supabase/client");
-      const supabase = createClient();
-      if (supabase) await supabase.auth.signOut();
-    } catch {
-      // ignore
-    }
-    document.cookie = "demo_role=; path=/; max-age=0";
-    window.location.href = "/login";
   }
 
   return (
@@ -85,13 +71,6 @@ export default function Topbar({
           >
             {persona.avatar}
           </Link>
-          <button
-            onClick={logout}
-            title="Đăng xuất"
-            className="hidden h-[34px] rounded-[9px] border border-line bg-card px-2.5 text-[11.5px] font-bold text-muted transition hover:border-red hover:text-red md:block"
-          >
-            Thoát
-          </button>
         </div>
       </div>
 
