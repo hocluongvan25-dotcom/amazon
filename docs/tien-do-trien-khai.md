@@ -38,7 +38,7 @@
 | **6. Tài chính (đọc)** | F1 Danh sách kỳ settlement (filter shop/status, tổng tiền vào/ra/phí/ads) · F1 Chi tiết kỳ (phân loại nhóm phí, breakdown SKU, take rate/TACOS) · F2 Financial events (filter loại/shop/search, tổng hợp vào/ra/net) | ✅ mock |
 | | **Domain Finance** (worker/): reconcileSettlement (dung sai 1% — SOP-10), totalCredits/Debits/netTransfer, feeTakeRate/TACOS/totalTakeRate, estimateReserveHold/OpenPayout, summarizeEvents | ✅ 91/91 test |
 
-**Kiểm chứng build (11/09, sau Module 2+6):** `next build` pass **36 routes** · worker test **91/91** · phân quyền hoạt động · sidebar đủ 10 mục (thêm Giá & Buy Box) · Đợt 1 hoàn thành 7/7 module đọc ✅
+**Kiểm chứng build (11/09, sau thêm thông báo/profile/user-admin):** `next build` pass **39 routes** · worker test **91/91** · phân quyền hoạt động · sidebar đủ 11 mục (thêm Trang cá nhân) · chuông thông báo hoạt động theo persona · form tạo user phân cấp role ✅
 
 ## Cách verify nhanh (DEMO MODE)
 
