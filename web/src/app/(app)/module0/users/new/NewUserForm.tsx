@@ -1,28 +1,54 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { APP_ROLES, DEPARTMENTS, SHOPS } from "@/lib/data/mock";
+import { APP_ROLES, DEPARTMENTS } from "@/lib/data/mock";
 import { Chip } from "@/components/ui";
+import { createClient } from "@/lib/supabase/client";
 
-/**
- * Form tạo nhân viên mới.
- * Ở DEMO MODE: submit hiện thông báo thành công (chưa ghi DB).
- * Ở SUPABASE MODE: server action tạo user trong auth.users + bản ghi iam.user_profiles + role_assignments,
- * rồi gửi email mời đặt mật khẩu.
- */
+type ShopRow = { id: string; display_name: string; seller_id: string; marketplace: string; status: string };
+type DeptRow = { id: string; code: string; name: string };
+
+const DEPT_CODE_TO_LABEL: Record<string, string> = {
+  ops_health: "Vận hành & Health",
+  listing: "Listing & Nội dung",
+  ppc: "Quảng cáo (PPC)",
+  fulfillment: "Kho vận & FBA",
+  orders_care: "Đơn hàng & CSKH",
+  finance: "Tài chính & Đối soát",
+};
+
 export default function NewUserForm() {
   const router = useRouter();
+  const supabase = createClient();
+  const isDemo = !supabase;
+
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [role, setRole] = useState(APP_ROLES[3].id); // mặc định operator
-  const [dept, setDept] = useState<string>(DEPARTMENTS[3]);
+  const [role, setRole] = useState("operator");
+  const [deptId, setDeptId] = useState<string>("");
+  const [depts, setDepts] = useState<DeptRow[]>([]);
+  const [shops, setShops] = useState<ShopRow[]>([]);
   const [selectedShops, setSelectedShops] = useState<string[]>([]);
   const [sendInvite, setSendInvite] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [createdName, setCreatedName] = useState("");
+  const [createdEmail, setCreatedEmail] = useState("");
+
+  useEffect(() => {
+    if (!supabase) return;
+    (async () => {
+      const [{ data: d }, { data: s }] = await Promise.all([
+        supabase.from("iam.departments").select("id,code,name"),
+        supabase.from("connections.seller_accounts").select("id,display_name,seller_id,marketplace,status"),
+      ]);
+      if (d) setDepts(d);
+      if (s) setShops(s);
+    })();
+  }, [supabase]);
 
   const roleObj = APP_ROLES.find((r) => r.id === role)!;
 
@@ -32,11 +58,6 @@ export default function NewUserForm() {
     );
   }
 
-  function canAssign(assigningRole: (typeof APP_ROLES)[number]["id"]) {
-    // Super-admin demo có mọi quyền; ở SUPABASE MODE sẽ đọc từ session.roleLevel
-    return roleObj.canAssignTo.includes(assigningRole) || roleObj.id === "super_admin";
-  }
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -44,12 +65,35 @@ export default function NewUserForm() {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return setError("Email không hợp lệ");
     if (selectedShops.length === 0 && role !== "super_admin")
       return setError("Vui lòng chọn ít nhất 1 shop được gán");
+    if (role !== "client_viewer" && !deptId && role !== "super_admin" && role !== "org_admin")
+      return setError("Vui lòng chọn phòng ban");
 
     setSubmitting(true);
-    // DEMO: giả lập tạo thành công sau 600ms. SUPABASE: gọi server action.
-    await new Promise((r) => setTimeout(r, 600));
-    setSubmitting(false);
-    setDone(true);
+    try {
+      if (isDemo) {
+        // DEMO: giả lập thành công
+        await new Promise((r) => setTimeout(r, 600));
+      } else {
+        const deptCode = depts.find((d) => d.id === deptId)?.code ?? null;
+        const res = await fetch("/api/admin/invite-user", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email, displayName: name, phone: phone || null, role,
+            departmentCode: deptCode, shopIds: selectedShops,
+          }),
+        });
+        const j = await res.json();
+        if (!res.ok) throw new Error(j.error ?? "Lỗi không xác định");
+      }
+      setCreatedName(name);
+      setCreatedEmail(email);
+      setDone(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   if (done) {
@@ -58,35 +102,21 @@ export default function NewUserForm() {
         <div className="text-3xl">✅</div>
         <div className="mt-2 text-[16px] font-extrabold text-[#0b7a55]">Đã tạo tài khoản thành công</div>
         <div className="mt-1 text-[13px] text-[#0b7a55]">
-          <b>{name}</b> · {email} · vai trò <b>{roleObj.label}</b>
-          {selectedShops.length > 0 ? (
-            <>
-              {" "}· {selectedShops.length} shop
-            </>
-          ) : null}
+          <b>{createdName}</b> · {createdEmail} · vai trò <b>{roleObj.label}</b>
+          {selectedShops.length > 0 ? <> · {selectedShops.length} shop</> : null}
         </div>
-        {sendInvite ? (
-          <div className="mt-1 text-[12px] text-[#0b7a55]">
-            Email mời đã được gửi đến <b>{email}</b> (sẽ hoạt động khi bật SUPABASE MODE).
-          </div>
+        {sendInvite && !isDemo ? (
+          <div className="mt-1 text-[12px] text-[#0b7a55]">Email mời đặt mật khẩu đã được gửi đến {createdEmail}.</div>
+        ) : isDemo ? (
+          <div className="mt-1 text-[12px] text-[#0b7a55]">Đang ở DEMO MODE — không gửi email thật.</div>
         ) : null}
         <div className="mt-4 flex flex-wrap gap-2">
-          <button
-            onClick={() => router.push("/module0/users")}
-            className="h-9 rounded-full bg-green px-4 py-2 text-[12.5px] font-extrabold text-white hover:bg-[#0b7a55]"
-          >
+          <button onClick={() => router.push("/module0/users")}
+            className="h-9 rounded-full bg-green px-4 py-2 text-[12.5px] font-extrabold text-white hover:bg-[#0b7a55]">
             Về danh sách người dùng →
           </button>
-          <button
-            onClick={() => {
-              setDone(false);
-              setName("");
-              setEmail("");
-              setPhone("");
-              setSelectedShops([]);
-            }}
-            className="h-9 rounded-full border border-line bg-card px-4 py-2 text-[12.5px] font-bold text-muted"
-          >
+          <button onClick={() => { setDone(false); setName(""); setEmail(""); setPhone(""); setSelectedShops([]); }}
+            className="h-9 rounded-full border border-line bg-card px-4 py-2 text-[12.5px] font-bold text-muted">
             ＋ Tạo tiếp người dùng
           </button>
         </div>
@@ -101,40 +131,24 @@ export default function NewUserForm() {
           <h3 className="mb-3 text-[14.5px] font-bold">1. Thông tin cơ bản</h3>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Họ và tên *">
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Nguyễn Văn A"
-                className="h-9 w-full rounded-[9px] border border-line bg-card px-3 text-[13px] font-semibold outline-none focus:border-accent"
-              />
+              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nguyễn Văn A"
+                className="h-9 w-full rounded-[9px] border border-line bg-card px-3 text-[13px] font-semibold outline-none focus:border-accent" />
             </Field>
             <Field label="Email *">
-              <input
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                type="email"
-                placeholder="vana@vexim.vn"
-                className="h-9 w-full rounded-[9px] border border-line bg-card px-3 text-[13px] font-semibold outline-none focus:border-accent"
-              />
+              <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="vana@vexim.vn"
+                className="h-9 w-full rounded-[9px] border border-line bg-card px-3 text-[13px] font-semibold outline-none focus:border-accent" />
             </Field>
             <Field label="Số điện thoại">
-              <input
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="+84 ..."
-                className="h-9 w-full rounded-[9px] border border-line bg-card px-3 text-[13px] font-semibold outline-none focus:border-accent"
-              />
+              <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+84 ..."
+                className="h-9 w-full rounded-[9px] border border-line bg-card px-3 text-[13px] font-semibold outline-none focus:border-accent" />
             </Field>
-            <Field label="Phòng ban">
-              <select
-                value={dept}
-                onChange={(e) => setDept(e.target.value)}
-                className="h-9 w-full rounded-[9px] border border-line bg-card px-3 text-[13px] font-semibold outline-none focus:border-accent"
-              >
-                {DEPARTMENTS.map((d) => (
-                  <option key={d} value={d}>
-                    {d}
-                  </option>
+            <Field label={isDemo ? "Phòng ban (demo)" : "Phòng ban"}>
+              <select value={deptId} onChange={(e) => setDeptId(e.target.value)}
+                disabled={role === "super_admin" || role === "org_admin"}
+                className="h-9 w-full rounded-[9px] border border-line bg-card px-3 text-[13px] font-semibold outline-none focus:border-accent disabled:cursor-not-allowed disabled:opacity-60">
+                <option value="">— Chọn phòng —</option>
+                {(depts.length ? depts : Object.entries(DEPT_CODE_TO_LABEL).map(([code, n]) => ({ id: code, code, name: n }))).map((d) => (
+                  <option key={d.id} value={d.id}>{DEPT_CODE_TO_LABEL[d.code as string] ?? d.name}</option>
                 ))}
               </select>
             </Field>
@@ -146,72 +160,45 @@ export default function NewUserForm() {
           <div className="grid gap-2 sm:grid-cols-2">
             {APP_ROLES.map((r) => {
               const active = role === r.id;
-              const disabled = !canAssign(r.id) && r.id !== role;
               return (
-                <label
-                  key={r.id}
-                  className={`flex cursor-pointer flex-col gap-1 rounded-[10px] border p-3 transition ${
-                    active
-                      ? "border-accent bg-accent-soft"
-                      : disabled
-                        ? "cursor-not-allowed border-dashed border-line opacity-50"
-                        : "border-line hover:border-accent"
-                  }`}
-                >
+                <label key={r.id}
+                  className={`flex cursor-pointer flex-col gap-1 rounded-[10px] border p-3 transition ${active ? "border-accent bg-accent-soft" : "border-line hover:border-accent"}`}>
                   <div className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      name="role"
-                      value={r.id}
-                      checked={active}
-                      disabled={disabled}
-                      onChange={() => setRole(r.id)}
-                      className="accent-accent"
-                    />
+                    <input type="radio" name="role" value={r.id} checked={active} onChange={() => setRole(r.id)}
+                      className="accent-accent" />
                     <span className="text-[13px] font-bold">{r.label}</span>
-                    <span className="ml-auto rounded-full bg-bg px-2 py-0.5 text-[10px] font-extrabold text-soft">
-                      lv {r.level}
-                    </span>
+                    <span className="ml-auto rounded-full bg-bg px-2 py-0.5 text-[10px] font-extrabold text-soft">lv {r.level}</span>
                   </div>
                   <div className="pl-6 text-[11.5px] text-soft">{r.desc}</div>
                 </label>
               );
             })}
           </div>
-          <p className="mt-2 text-[11.5px] font-semibold text-soft">
-            Vai trò hiện tại (Super Admin demo) có thể gán mọi cấp. Khi vận hành thật: bạn chỉ có thể
-            gán vai trò cấp THẤP hơn vai trò của bạn.
-          </p>
+          {isDemo ? (
+            <p className="mt-2 text-[11.5px] font-semibold text-amber">
+              Đang ở DEMO MODE — danh sách phòng/shop cố định. Đăng nhập Supabase để tải từ DB.
+            </p>
+          ) : null}
         </section>
 
         <section className="mt-4 rounded-[13px] border border-line bg-card px-[18px] py-4">
           <h3 className="mb-3 text-[14.5px] font-bold">3. Phạm vi shop được gán</h3>
           <div className="mb-2 flex flex-wrap gap-2">
-            {SHOPS.map((s) => {
-              const active = selectedShops.includes(s);
+            {(shops.length ? shops : Array.from({ length: 6 }, (_, i) => ({
+              id: `demo-${i}`, display_name: ["A1 · US", "A2 · MX", "B1 · DE", "C2 · US", "D1 · US", "E3 · CA"][i], seller_id: `SH${i}`, marketplace: "US", status: "active",
+            }))).map((s) => {
+              const active = selectedShops.includes(s.id);
               return (
-                <button
-                  type="button"
-                  key={s}
-                  onClick={() => toggleShop(s)}
+                <button type="button" key={s.id} onClick={() => toggleShop(s.id)}
                   disabled={role === "super_admin"}
-                  className={`rounded-full border px-3.5 py-1.5 text-[12.5px] font-bold transition ${
-                    active
-                      ? "border-accent bg-accent-soft text-accent-ink"
-                      : role === "super_admin"
-                        ? "cursor-not-allowed border-dashed border-line text-soft"
-                        : "border-line bg-card text-muted hover:border-accent"
-                  }`}
-                >
-                  {active ? "✓ " : ""}
-                  {s}
+                  className={`rounded-full border px-3.5 py-1.5 text-[12.5px] font-bold transition ${active ? "border-accent bg-accent-soft text-accent-ink" : role === "super_admin" ? "cursor-not-allowed border-dashed border-line text-soft" : "border-line bg-card text-muted hover:border-accent"}`}>
+                  {active ? "✓ " : ""}{s.display_name}
                 </button>
               );
             })}
           </div>
           <p className="text-[11.5px] text-soft">
-            Super Admin tự động có quyền mọi shop — không cần chọn. Client Viewer phải được gán vào
-            chính xác shop của khách hàng họ đại diện.
+            Super Admin tự động có mọi shop. Client Viewer phải gán đúng shop của khách.
           </p>
         </section>
       </div>
@@ -222,57 +209,26 @@ export default function NewUserForm() {
           <div className="flex flex-col gap-2 text-[12.5px]">
             <Sum label="Họ tên" value={name || "—"} />
             <Sum label="Email" value={email || "—"} />
-            <Sum label="Phòng" value={dept} />
-            <Sum
-              label="Vai trò"
-              value={
-                <span>
-                  <Chip tone="blue">{roleObj.label}</Chip>
-                </span>
-              }
-            />
-            <Sum
-              label="Shop"
-              value={
-                selectedShops.length === 0 && role === "super_admin"
-                  ? "Tất cả (14 shop)"
-                  : selectedShops.length === 0
-                    ? "—"
-                    : `${selectedShops.length} shop đã chọn`
-              }
-            />
+            <Sum label="Vai trò" value={<Chip tone="blue">{roleObj.label}</Chip>} />
+            <Sum label="Shop" value={
+              selectedShops.length === 0 && role === "super_admin" ? "Tất cả" :
+              selectedShops.length === 0 ? "—" : `${selectedShops.length} shop đã chọn`
+            } />
           </div>
-
           <label className="mt-3 flex items-start gap-2 text-[12.5px]">
-            <input
-              type="checkbox"
-              checked={sendInvite}
-              onChange={(e) => setSendInvite(e.target.checked)}
-              className="mt-0.5 accent-accent"
-            />
-            <span>
-              Gửi email mời đến <b>{email || "địa chỉ trên"}</b> để người dùng tự đặt mật khẩu
-            </span>
+            <input type="checkbox" checked={sendInvite} onChange={(e) => setSendInvite(e.target.checked)}
+              className="mt-0.5 accent-accent" />
+            <span>Gửi email mời đến <b>{email || "địa chỉ trên"}</b> để người dùng tự đặt mật khẩu</span>
           </label>
-
           {error ? (
-            <div className="mt-3 rounded-[8px] bg-red-soft px-3 py-2 text-[12px] font-bold text-[#a01717]">
-              {error}
-            </div>
+            <div className="mt-3 rounded-[8px] bg-red-soft px-3 py-2 text-[12px] font-bold text-[#a01717]">{error}</div>
           ) : null}
-
-          <button
-            type="submit"
-            disabled={submitting}
-            className="mt-4 h-10 w-full rounded-full bg-accent text-[13px] font-extrabold text-white transition hover:bg-accent-ink disabled:opacity-60"
-          >
+          <button type="submit" disabled={submitting}
+            className="mt-4 h-10 w-full rounded-full bg-accent text-[13px] font-extrabold text-white transition hover:bg-accent-ink disabled:opacity-60">
             {submitting ? "Đang tạo…" : "Tạo tài khoản"}
           </button>
-          <button
-            type="button"
-            onClick={() => router.push("/module0/users")}
-            className="mt-2 h-9 w-full rounded-full border border-line bg-card text-[12.5px] font-bold text-muted"
-          >
+          <button type="button" onClick={() => router.push("/module0/users")}
+            className="mt-2 h-9 w-full rounded-full border border-line bg-card text-[12.5px] font-bold text-muted">
             Hủy
           </button>
         </section>
@@ -289,7 +245,6 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     </label>
   );
 }
-
 function Sum({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex items-center justify-between border-b border-[#f0f2f6] pb-1.5 last:border-0">

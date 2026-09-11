@@ -3,17 +3,13 @@
 import Link from "next/link";
 import { PERSONAS, type PersonaKey } from "@/lib/roles";
 import type { Session } from "@/lib/auth/session";
-import BellDropdown from "@/components/notifications/BellDropdown";
-import type { NotificationItem } from "@/lib/types";
 
 export default function Topbar({
   session,
-  notifications,
-  unreadCount,
+  bellSlot,
 }: {
   session: Session;
-  notifications: NotificationItem[];
-  unreadCount: number;
+  bellSlot: React.ReactNode;
 }) {
   const persona = PERSONAS[session.persona];
 
@@ -63,7 +59,7 @@ export default function Topbar({
         </select>
 
         <div className="ml-auto flex shrink-0 items-center gap-2.5">
-          <BellDropdown initial={notifications} unreadCount={unreadCount} />
+          {bellSlot}
           <Link
             href="/profile"
             title="Trang cá nhân"

@@ -2,22 +2,19 @@ import type { ReactNode } from "react";
 import Sidebar from "@/components/shell/Sidebar";
 import Topbar from "@/components/shell/Topbar";
 import type { Session } from "@/lib/auth/session";
-import type { NotificationItem } from "@/lib/types";
 
 export default function AppShell({
   session,
-  notifications,
-  unreadCount,
+  bellSlot,
   children,
 }: {
   session: Session;
-  notifications: NotificationItem[];
-  unreadCount: number;
+  bellSlot: ReactNode;
   children: ReactNode;
 }) {
   return (
     <div className="min-h-screen">
-      <Topbar session={session} notifications={notifications} unreadCount={unreadCount} />
+      <Topbar session={session} bellSlot={bellSlot} />
       <div className="mx-auto grid max-w-[1440px] grid-cols-1 lg:grid-cols-[242px_1fr]">
         <div className="hidden lg:block">
           <Sidebar persona={session.persona} />
