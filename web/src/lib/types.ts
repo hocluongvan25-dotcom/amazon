@@ -222,6 +222,88 @@ export type InboundRow = {
   reconcileTone: "up" | "down" | "flat" | "warn";
 };
 
+/* ---------- Module 2 — Giá & Featured Offer (P1–P4) ---------- */
+
+export type BoxStatus = "holding" | "at_risk" | "lost" | "no_box";
+
+export type PricingRow = {
+  sku: string;
+  asin: string;
+  shop: string;
+  title: string;
+  ourPrice: number; // USD
+  currency: string; // "USD"
+  foep: number | null; // Featured Offer Expected Price
+  foepDelta: number | null; // ourPrice - foep (dương = đang cao hơn FOEP → nguy cơ mất box)
+  referencePrice: number | null; // giá tham chiếu thấp nhất của đối thủ (landed)
+  floorPrice: number; // giá sàn = vốn + referral fee + FBA fee + biên tối thiểu
+  currentMargin: number; // % biên hiện tại (ourPrice - floorCost) / ourPrice
+  marginTone: "red" | "amber" | "green"; // <0 đỏ · <biên tối thiểu vàng
+  boxStatus: BoxStatus;
+  competitorCount: number;
+  velocity30d: number; // đơn/ngày — để ước tính tổn thất khi mất box
+  lastPriceChange: string;
+  owner: string;
+};
+
+export type CompetitorOffer = {
+  sellerId: string;
+  sellerLabel: string; // e.g., "Amazon.com", "XYZ-Seller", "Chúng tôi"
+  isMe: boolean;
+  fulfillment: "FBA" | "FBM" | "AMZ";
+  price: number;
+  shipping: number;
+  landedPrice: number;
+  rating: number | null;
+  feedbackCount: number | null;
+  isFeatured: boolean;
+  condition: string;
+};
+
+export type PriceHistoryPoint = {
+  date: string; // "09/09"
+  myPrice: number;
+  buyBoxPrice: number;
+  lowestCompetitor: number;
+};
+
+export type FeeBreakdown = {
+  cogs: number; // giá vốn
+  referralFeeRate: number; // % referral fee (thường 15%)
+  referralFeeAmount: number;
+  fbaFee: number; // FBA fulfillment fee
+  otherFees: number; // closing fee, storage, ...
+  minMarginRate: number; // % biên tối thiểu (cấu hình theo shop/SKU)
+  minMarginAmount: number;
+  floorPrice: number; // giá sàn
+};
+
+export type PricingDetailMock = {
+  sku: string;
+  asin: string;
+  shop: string;
+  history: PriceHistoryPoint[];
+  offers: CompetitorOffer[];
+  fees: FeeBreakdown;
+  alerts: { tone: AlertSeverity; text: string }[];
+};
+
+export type PriceApprovalItem = {
+  id: string;
+  sku: string;
+  asin: string;
+  shop: string;
+  oldPrice: number;
+  newPrice: number;
+  deltaPct: number;
+  reason: string; // lý do: "auto-follow-foep" / "manual" / "raise-to-floor"
+  source: "auto" | "manual";
+  requestedBy: string;
+  requestedAt: string;
+  minMarginAfter: number; // % biên sau khi áp — để kiểm tra dưới sàn
+  belowFloor: boolean;
+};
+
 /* ---------- Module 1 — Listing (L1/L2/L4) ---------- */
 
 export type ListingStatus = "ACTIVE" | "INACTIVE" | "STRANDED" | "SUPPRESSED";
