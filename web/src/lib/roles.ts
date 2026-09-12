@@ -85,6 +85,8 @@ export const NAV: { group: string; items: NavItem[] }[] = [
       { href: "/fulfillment", label: "Kho vận & FBA", icon: "📦", count: 5, personas: ["ceo", "lead_fulfill"] },
       { href: "/orders", label: "Đơn hàng & CSKH", icon: "💬", count: 4, personas: ["ceo"] },
       { href: "/finance", label: "Tài chính & Đối soát", icon: "💰", count: 6, personas: ["ceo"] },
+      { href: "/finance/claims", label: "Bồi hoàn FBA (F3)", icon: "🧾", personas: ["ceo"] },
+      { href: "/finance/profit", label: "Lợi nhuận SKU (F4)", icon: "💹", personas: ["ceo"] },
     ],
   },
   {

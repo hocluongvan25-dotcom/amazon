@@ -227,6 +227,91 @@ export type ProductTypeSchemaInput = {
   schema: Record<string, unknown>;
 };
 
+/* ---- Module 6 Đợt 2: F3 bồi hoàn FBA + F4 lợi nhuận SKU ---- */
+
+/** Dòng report GET_FBA_REIMBURSEMENTS_DATA (đã parse) — idempotent theo dedupeKey. */
+export type ReimbursementRowInput = {
+  reimbursementId: string | null;
+  caseId: string | null;
+  reason: string | null;
+  sku: string | null;
+  fnsku: string | null;
+  asin: string | null;
+  condition: string | null;
+  currency: string | null;
+  amountPerUnit: number | null;
+  amountTotal: number | null;
+  quantityReimbursedCash: number | null;
+  quantityReimbursedInventory: number | null;
+  quantityReimbursedTotal: number | null;
+  approvalDate: string | null;
+  originalReimbursementId: string | null;
+  originalReimbursementType: string | null;
+  dedupeKey: string;
+  marketplaceId: string | null;
+};
+
+/** Khoản nghi ngờ bồi hoàn (SOP-09) — worker chỉ chèn mới/refresh dòng suspected. */
+export type ReimbursementClaimRowInput = {
+  sku: string;
+  fnsku: string | null;
+  asin: string | null;
+  category: string;
+  source: string;
+  sourceRef: string;
+  sourceDate: string | null;
+  sourceReason: string | null;
+  quantity: number;
+  currency: string;
+  unitCost: number | null;
+  estimatedAmount: number | null;
+  marketplaceId: string;
+};
+
+/** Claim hiện có (đọc lại để đối chiếu + cảnh báo quá hạn SOP-09). */
+export type ReimbursementClaimRow = {
+  id: string;
+  sku: string | null;
+  status: string;
+  reimbursedAmount: number | null;
+  reimbursementId: string | null;
+  detectedAt: string;
+  filedAt: string | null;
+  ageHours: number | null;
+};
+
+/** Lợi nhuận SKU/ngày (F4) — worker tính, web chỉ đọc. */
+export type SkuProfitRowInput = {
+  sku: string;
+  day: string;
+  currency: string;
+  units: number;
+  revenue: number;
+  refunds: number;
+  amazonFees: number;
+  promo: number;
+  cogs: number | null;
+  adsSpend: number | null;
+  grossProfit: number | null;
+  unitCost: number | null;
+  feeSource: string;
+};
+
+/** Giá vốn hiệu lực (catalog.cost_inputs) cho worker tính F4/SOP-09 bước 3. */
+export type EffectiveCostRow = { sku: string; unitCost: number | null; currency: string };
+
+/** Dòng tiền đã quyết toán trong kỳ — đầu vào tính lợi nhuận SKU (F4). */
+export type FinancialEventQueryRow = {
+  sku: string | null;
+  eventType: string;
+  amountType: string | null;
+  amountDescription: string | null;
+  amount: number;
+  quantity: number | null;
+  currency: string | null;
+  eventDate: Date | string;
+};
+
 /** Một dòng hàng đợi publish do web đẩy vào (catalog.listing_publish_queue). */
 export type ListingPublishQueueRow = {
   queueId: string;
@@ -313,6 +398,31 @@ export interface DbAdapter {
   recordListingPublishResult(result: ListingPublishResultInput): Promise<void>;
   /** Ghi/cập nhật cache JSON Schema product type cho form động L3 */
   upsertProductTypeSchema(input: ProductTypeSchemaInput): Promise<void>;
+
+  /* ---- Module 6 Đợt 2 (F3/F4) ---- */
+  /** Nhập report GET_FBA_REIMBURSEMENTS_DATA (idempotent theo dedupeKey) */
+  upsertReimbursements(
+    sellerAccountId: string,
+    rows: ReimbursementRowInput[],
+  ): Promise<{ inserted: number; updated: number }>;
+  /** Ghi khoản nghi ngờ SOP-09; KHÔNG đụng khoản con người đang xử lý */
+  upsertReimbursementClaims(
+    sellerAccountId: string,
+    rows: ReimbursementClaimRowInput[],
+  ): Promise<{ inserted: number; refreshed: number; kept: number }>;
+  /** Đọc claim hiện có để đối chiếu với report reimbursement */
+  listReimbursementClaims(sellerAccountId: string, limit?: number): Promise<ReimbursementClaimRow[]>;
+  /** Ghi lợi nhuận SKU/ngày (thay thế theo khoá, không cộng dồn) */
+  upsertSkuProfit(sellerAccountId: string, rows: SkuProfitRowInput[]): Promise<number>;
+  /** Giá vốn hiệu lực tại một ngày (catalog.cost_inputs) */
+  listEffectiveCosts(sellerAccountId: string, on: string): Promise<EffectiveCostRow[]>;
+  /** Dòng tiền đã quyết toán trong khoảng ngày (đầu vào F4) */
+  listFinancialEvents(
+    sellerAccountId: string,
+    from: string,
+    to: string,
+    limit?: number,
+  ): Promise<FinancialEventQueryRow[]>;
 }
 
 /** In-memory — cho test & DEMO MODE */
@@ -333,6 +443,11 @@ export class MockDbAdapter implements DbAdapter {
   publishQueue: ListingPublishQueueRow[] = [];
   publishResults: ListingPublishResultInput[] = [];
   productTypeSchemas: ProductTypeSchemaInput[] = [];
+  /* Module 6 Đợt 2 (F3/F4) */
+  reimbursements: (ReimbursementRowInput & { sellerAccountId: string })[] = [];
+  reimbursementClaims: (ReimbursementClaimRowInput & { id: string; sellerAccountId: string; status: string })[] = [];
+  skuProfit: (SkuProfitRowInput & { sellerAccountId: string })[] = [];
+  effectiveCosts: (EffectiveCostRow & { sellerAccountId: string; effectiveFrom: string; effectiveTo: string | null })[] = [];
   healthIssues: AccountHealthIssueRowInput[] = [];
   settlements: SettlementRowInput[] = [];
   financialEvents: FinancialEventRowInput[] = [];
@@ -503,5 +618,131 @@ export class MockDbAdapter implements DbAdapter {
       (row) => `${row.marketplaceId}:${row.productType}:${row.requirements}` !== key,
     );
     this.productTypeSchemas.push(input);
+  }
+
+  /* ---- Module 6 Đợt 2 (F3/F4) ---- */
+
+  async upsertReimbursements(
+    sellerAccountId: string,
+    rows: ReimbursementRowInput[],
+  ): Promise<{ inserted: number; updated: number }> {
+    let inserted = 0;
+    let updated = 0;
+    for (const row of rows) {
+      const index = this.reimbursements.findIndex(
+        (r) => r.sellerAccountId === sellerAccountId && r.dedupeKey === row.dedupeKey,
+      );
+      if (index >= 0) {
+        this.reimbursements[index] = { ...row, sellerAccountId };
+        updated++;
+      } else {
+        this.reimbursements.push({ ...row, sellerAccountId });
+        inserted++;
+      }
+    }
+    return { inserted, updated };
+  }
+
+  async upsertReimbursementClaims(
+    sellerAccountId: string,
+    rows: ReimbursementClaimRowInput[],
+  ): Promise<{ inserted: number; refreshed: number; kept: number }> {
+    let inserted = 0;
+    let refreshed = 0;
+    let kept = 0;
+    for (const row of rows) {
+      const index = this.reimbursementClaims.findIndex(
+        (c) =>
+          c.sellerAccountId === sellerAccountId &&
+          c.source === row.source &&
+          c.sourceRef === row.sourceRef &&
+          c.sku === row.sku,
+      );
+      if (index < 0) {
+        this.reimbursementClaims.push({
+          ...row,
+          id: `claim-${this.reimbursementClaims.length + 1}`,
+          sellerAccountId,
+          status: "suspected",
+        });
+        inserted++;
+      } else if (this.reimbursementClaims[index].status === "suspected") {
+        this.reimbursementClaims[index] = { ...this.reimbursementClaims[index], ...row };
+        refreshed++;
+      } else {
+        kept++;
+      }
+    }
+    return { inserted, refreshed, kept };
+  }
+
+  async listReimbursementClaims(sellerAccountId: string, limit = 500): Promise<ReimbursementClaimRow[]> {
+    return this.reimbursementClaims
+      .filter((c) => c.sellerAccountId === sellerAccountId)
+      .slice(0, limit)
+      .map((c) => ({
+        id: c.id,
+        sku: c.sku,
+        status: c.status,
+        reimbursedAmount: null,
+        reimbursementId: null,
+        detectedAt: new Date().toISOString(),
+        filedAt: null,
+        ageHours: null,
+      }));
+  }
+
+  async upsertSkuProfit(sellerAccountId: string, rows: SkuProfitRowInput[]): Promise<number> {
+    for (const row of rows) {
+      const index = this.skuProfit.findIndex(
+        (r) =>
+          r.sellerAccountId === sellerAccountId &&
+          r.sku === row.sku &&
+          r.day === row.day &&
+          r.currency === row.currency,
+      );
+      if (index >= 0) this.skuProfit[index] = { ...row, sellerAccountId };
+      else this.skuProfit.push({ ...row, sellerAccountId });
+    }
+    return rows.length;
+  }
+
+  async listFinancialEvents(
+    sellerAccountId: string,
+    from: string,
+    to: string,
+    limit = 50000,
+  ): Promise<FinancialEventQueryRow[]> {
+    return this.financialEvents
+      .filter((row) => {
+        if (row.sellerAccountId !== sellerAccountId) return false;
+        const day = new Date(row.eventDate).toISOString().slice(0, 10);
+        return day >= from && day <= to;
+      })
+      .slice(0, limit)
+      .map((row) => ({
+        sku: row.sku ?? null,
+        eventType: row.eventType,
+        amountType: row.amountType ?? null,
+        amountDescription: row.amountDescription ?? null,
+        amount: row.amount,
+        quantity: row.quantity ?? null,
+        currency: row.currency,
+        eventDate: row.eventDate,
+      }));
+  }
+
+  async listEffectiveCosts(sellerAccountId: string, on: string): Promise<EffectiveCostRow[]> {
+    const bySku = new Map<string, EffectiveCostRow & { effectiveFrom: string }>();
+    for (const row of this.effectiveCosts) {
+      if (row.sellerAccountId !== sellerAccountId) continue;
+      if (row.effectiveFrom > on) continue;
+      if (row.effectiveTo !== null && row.effectiveTo <= on) continue;
+      const current = bySku.get(row.sku);
+      if (!current || row.effectiveFrom > current.effectiveFrom) {
+        bySku.set(row.sku, { sku: row.sku, unitCost: row.unitCost, currency: row.currency, effectiveFrom: row.effectiveFrom });
+      }
+    }
+    return [...bySku.values()].map(({ sku, unitCost, currency }) => ({ sku, unitCost, currency }));
   }
 }

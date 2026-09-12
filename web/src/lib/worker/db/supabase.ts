@@ -38,6 +38,12 @@ import type {
   ListingPublishQueueRow,
   ListingPublishResultInput,
   ProductTypeSchemaInput,
+  ReimbursementRowInput,
+  ReimbursementClaimRowInput,
+  ReimbursementClaimRow,
+  SkuProfitRowInput,
+  EffectiveCostRow,
+  FinancialEventQueryRow,
   ListingStateRow,
   NotificationRecord,
   OrderDailyRowInput,
@@ -83,6 +89,11 @@ const RPC_PATHS = {
   claimListingPublish: "/rest/v1/rpc/vexim_worker_claim_listing_publish",
   recordPublishResult: "/rest/v1/rpc/vexim_worker_record_publish_result",
   upsertProductTypeSchema: "/rest/v1/rpc/vexim_worker_upsert_product_type_schema",
+  upsertReimbursements: "/rest/v1/rpc/vexim_worker_upsert_reimbursements",
+  upsertClaims: "/rest/v1/rpc/vexim_worker_upsert_claims",
+  upsertProfit: "/rest/v1/rpc/vexim_worker_upsert_profit",
+  financialEvents: "/rest/v1/rpc/vexim_worker_financial_events",
+  effectiveCosts: "/rest/v1/rpc/vexim_worker_effective_costs",
 } as const;
 
 export class SupabaseDbAdapter implements DbAdapter {
@@ -655,6 +666,120 @@ export class SupabaseDbAdapter implements DbAdapter {
         p_schema: input.schema,
       },
     });
+  }
+
+  /* ---- Module 6 Đợt 2 (F3/F4) — qua RPC service_role của migration 0015 ---- */
+
+  /** Nhập report GET_FBA_REIMBURSEMENTS_DATA (idempotent theo dedupeKey). */
+  async upsertReimbursements(
+    sellerAccountId: string,
+    rows: ReimbursementRowInput[],
+  ): Promise<{ inserted: number; updated: number }> {
+    const result = await this.request<{ inserted: number; updated: number }[]>(
+      "POST",
+      RPC_PATHS.upsertReimbursements,
+      { body: { p_seller: sellerAccountId, p_rows: rows } },
+    );
+    const row = result?.[0];
+    return { inserted: row?.inserted ?? 0, updated: row?.updated ?? 0 };
+  }
+
+  /** Ghi khoản nghi ngờ SOP-09 (chỉ chèn mới/refresh dòng suspected). */
+  async upsertReimbursementClaims(
+    sellerAccountId: string,
+    rows: ReimbursementClaimRowInput[],
+  ): Promise<{ inserted: number; refreshed: number; kept: number }> {
+    const result = await this.request<{ inserted: number; refreshed: number; kept: number }[]>(
+      "POST",
+      RPC_PATHS.upsertClaims,
+      { body: { p_seller: sellerAccountId, p_rows: rows } },
+    );
+    const row = result?.[0];
+    return { inserted: row?.inserted ?? 0, refreshed: row?.refreshed ?? 0, kept: row?.kept ?? 0 };
+  }
+
+  /** Đọc claim hiện có (view public) để đối chiếu với report reimbursement. */
+  async listReimbursementClaims(sellerAccountId: string, limit = 500): Promise<ReimbursementClaimRow[]> {
+    const rows = await this.request<
+      {
+        id: string;
+        sku: string | null;
+        status: string;
+        reimbursed_amount: number | null;
+        reimbursement_id: string | null;
+        detected_at: string;
+        filed_at: string | null;
+        age_hours: number | null;
+      }[]
+    >("GET", "/rest/v1/vexim_reimbursement_claims", {
+      search: {
+        seller_account_id: `eq.${sellerAccountId}`,
+        select: "id,sku,status,reimbursed_amount,reimbursement_id,detected_at,filed_at,age_hours",
+        order: "detected_at.desc",
+        limit: String(limit),
+      },
+    });
+    return (rows ?? []).map((r) => ({
+      id: r.id,
+      sku: r.sku,
+      status: r.status,
+      reimbursedAmount: r.reimbursed_amount,
+      reimbursementId: r.reimbursement_id,
+      detectedAt: r.detected_at,
+      filedAt: r.filed_at,
+      ageHours: r.age_hours,
+    }));
+  }
+
+  /** Ghi lợi nhuận SKU/ngày (thay thế theo khoá, không cộng dồn). */
+  async upsertSkuProfit(sellerAccountId: string, rows: SkuProfitRowInput[]): Promise<number> {
+    const result = await this.request<{ upserted: number }[]>("POST", RPC_PATHS.upsertProfit, {
+      body: { p_seller: sellerAccountId, p_rows: rows },
+    });
+    return result?.[0]?.upserted ?? 0;
+  }
+
+  /** Giá vốn hiệu lực tại một ngày (catalog.cost_inputs). */
+  async listEffectiveCosts(sellerAccountId: string, on: string): Promise<EffectiveCostRow[]> {
+    const rows = await this.request<{ sku: string; unit_cost: number | null; currency: string }[]>(
+      "POST",
+      RPC_PATHS.effectiveCosts,
+      { body: { p_seller: sellerAccountId, p_on: on } },
+    );
+    return (rows ?? []).map((r) => ({ sku: r.sku, unitCost: r.unit_cost, currency: r.currency }));
+  }
+
+  /** Dòng tiền đã quyết toán trong khoảng ngày (đầu vào F4 — RPC 0015 §8B.4). */
+  async listFinancialEvents(
+    sellerAccountId: string,
+    from: string,
+    to: string,
+    limit = 50000,
+  ): Promise<FinancialEventQueryRow[]> {
+    const rows = await this.request<
+      {
+        sku: string | null;
+        event_type: string;
+        amount_type: string | null;
+        amount_description: string | null;
+        amount: number;
+        quantity: number | null;
+        currency: string | null;
+        event_date: string;
+      }[]
+    >("POST", RPC_PATHS.financialEvents, {
+      body: { p_seller: sellerAccountId, p_from: from, p_to: to, p_limit: limit },
+    });
+    return (rows ?? []).map((r) => ({
+      sku: r.sku,
+      eventType: r.event_type,
+      amountType: r.amount_type,
+      amountDescription: r.amount_description,
+      amount: r.amount,
+      quantity: r.quantity,
+      currency: r.currency,
+      eventDate: r.event_date,
+    }));
   }
 
   // ---------- Stubs cho Tier sau ----------

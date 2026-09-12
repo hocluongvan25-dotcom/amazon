@@ -1005,6 +1005,253 @@ await ex("reset role;");
 await ex("select set_config('request.jwt.claim.sub','',false);");
 await ex("rollback;");
 
+// ============================================================================
+console.log("\n=== BƯỚC 16: 0015 — F3 bồi hoàn FBA (claims) + F4 lợi nhuận SKU ===");
+// ============================================================================
+ok(
+  await ex(rd("migrations/0015_finance_claims_profit.sql"), "0015_finance_claims_profit.sql"),
+  "0015 chạy sạch (DO-block tự kiểm tra bảng/trigger/view/RPC/PII)",
+);
+await cmp(
+  "0015: 3 bảng F3-F4",
+  "select count(*) n from information_schema.tables where table_schema='finance' and table_name in ('reimbursement_claims','reimbursement_claim_events','sku_profit_daily')",
+  3,
+);
+await cmp(
+  "0015: 4 view public cho web",
+  "select count(*) n from information_schema.views where table_schema='public' and table_name in ('vexim_reimbursements','vexim_reimbursement_claims','vexim_reimbursement_claim_events','vexim_sku_profit')",
+  4,
+);
+await cmp(
+  "0015: 2 trigger (máy trạng thái + lịch sử) — đếm distinct tên",
+  "select count(distinct trigger_name) n from information_schema.triggers where event_object_schema='finance' and event_object_table='reimbursement_claims' and trigger_name in ('trg_reimbursement_claim_guard','trg_reimbursement_claim_history')",
+  2,
+);
+await cmp(
+  "0015: 3 bảng F3-F4 đều bật RLS",
+  "select count(*) n from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='finance' and c.relname in ('reimbursement_claims','reimbursement_claim_events','sku_profit_daily') and c.relrowsecurity",
+  3,
+);
+await cmp(
+  "0015: sku_profit_daily KHÔNG cho authenticated ghi (worker tính)",
+  "select count(*) n from pg_policies where schemaname='finance' and tablename='sku_profit_daily' and cmd <> 'SELECT'",
+  0,
+);
+await cmp(
+  "0015: view F3 không phơi email nội bộ/PII",
+  `select count(*) n from information_schema.columns where table_schema='public' and table_name like 'vexim_reimbursement%'
+     and column_name in ('actor_email','buyer_name','buyer_email','ship_address_1','recipient_name')`,
+  0,
+);
+ok(
+  await ex(rd("migrations/0015_finance_claims_profit.sql"), "0015 lần 2"),
+  "0015 idempotent",
+);
+await cmp(
+  "0015 lần 2: policy reimbursement_claims không nhân đôi",
+  "select count(*) n from pg_policies where schemaname='finance' and tablename='reimbursement_claims'",
+  3,
+);
+
+// --- F3: import report → khoản nghi ngờ → nộp case → duyệt → tiền về --------
+await ex("begin");
+const f3Shop = (await one("select id from connections.seller_accounts order by seller_id limit 1")).id;
+const f3Operator = "e1000000-0000-4000-8000-000000000001";
+const f3Lead     = "e1000000-0000-4000-8000-000000000002";
+const f3Outsider = "e1000000-0000-4000-8000-000000000003";
+await ex("reset role;");
+ok(
+  await ex(`insert into auth.users(id,email) values
+     ('${f3Operator}','local-f3-operator@example.test'),
+     ('${f3Lead}','local-f3-lead@example.test'),
+     ('${f3Outsider}','local-f3-outsider@example.test');
+   insert into iam.user_profiles(id,display_name,email) values
+     ('${f3Operator}','F3 operator','local-f3-operator@example.test'),
+     ('${f3Lead}','F3 trưởng phòng Tài chính','local-f3-lead@example.test'),
+     ('${f3Outsider}','F3 outsider','local-f3-outsider@example.test');
+   insert into iam.assignments(user_id,seller_account_id,module,can_write) values
+     ('${f3Operator}','${f3Shop}','finance',true),
+     ('${f3Lead}','${f3Shop}','finance',true);
+   insert into iam.role_assignments(user_id,role)
+     values ('${f3Operator}','operator');
+   insert into iam.role_assignments(user_id,role,department_id)
+     select '${f3Lead}','dept_lead',d.id from iam.departments d where d.code='finance';`),
+  "0015 F3 fixture: operator + trưởng phòng Tài chính + outsider",
+);
+
+// 1) worker import report GET_FBA_REIMBURSEMENTS_DATA (idempotent theo dedupe_key)
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role service_role;");
+const f3Import = await one(`select * from public.vexim_worker_upsert_reimbursements('${f3Shop}', '[
+  {"reimbursementId":"REIMB-1","caseId":"CASE-AMZ-1","reason":"Lost","sku":"SKU-F3","asin":"B0F3",
+   "currency":"USD","amountPerUnit":12.5,"amountTotal":25,"quantityReimbursedCash":2,
+   "approvalDate":"2026-09-01","dedupeKey":"REIMB-1:SKU-F3:Lost"},
+  {"reimbursementId":"REIMB-2","caseId":"CASE-AMZ-2","reason":"Damaged","sku":"SKU-F3","asin":"B0F3",
+   "currency":"USD","amountPerUnit":9.99,"amountTotal":9.99,"quantityReimbursedInventory":1,
+   "approvalDate":"2026-09-02","dedupeKey":"REIMB-2:SKU-F3:Damaged"}]'::jsonb)`);
+ok(f3Import?.inserted === 2, `0015 F3: import 2 dòng reimbursement (nhận ${f3Import?.inserted})`);
+const f3Import2 = await one(`select * from public.vexim_worker_upsert_reimbursements('${f3Shop}', '[
+  {"reimbursementId":"REIMB-1","reason":"Lost","sku":"SKU-F3","amountTotal":25,"dedupeKey":"REIMB-1:SKU-F3:Lost"}]'::jsonb)`);
+ok(
+  f3Import2?.inserted === 0 && f3Import2?.updated === 1,
+  `0015 F3: import lại KHÔNG nhân đôi (inserted=${f3Import2?.inserted}, updated=${f3Import2?.updated})`,
+);
+
+// 2) worker ghi khoản NGHI NGỜ (chưa có giá vốn → estimated_amount NULL, không bịa số)
+const f3Claims = await one(`select * from public.vexim_worker_upsert_claims('${f3Shop}', '[
+  {"sku":"SKU-F3","fnsku":"X00F3","asin":"B0F3","category":"lost_fc","source":"ledger",
+   "sourceRef":"LEDGER-REF-1","sourceDate":"2026-09-05","sourceReason":"MISSING","quantity":3,
+   "currency":"USD"}]'::jsonb)`);
+ok(f3Claims?.inserted === 1, `0015 F3: worker chèn 1 khoản nghi ngờ (nhận ${f3Claims?.inserted})`);
+const f3Claim = await one(`select id, status, estimated_amount, unit_cost from finance.reimbursement_claims where seller_account_id='${f3Shop}' and source_ref='LEDGER-REF-1'`);
+ok(
+  f3Claim?.status === "suspected" && f3Claim?.estimated_amount === null,
+  `0015 F3: thiếu giá vốn → estimated_amount NULL (nhận ${JSON.stringify(f3Claim?.estimated_amount)})`,
+);
+
+// 3) worker ĐƯỢC refresh khoản còn suspected
+const f3Refresh = await one(`select * from public.vexim_worker_upsert_claims('${f3Shop}', '[
+  {"sku":"SKU-F3","category":"lost_fc","source":"ledger","sourceRef":"LEDGER-REF-1",
+   "quantity":3,"unitCost":12.5,"estimatedAmount":37.5}]'::jsonb)`);
+const f3Claim2 = await one(`select estimated_amount from finance.reimbursement_claims where id='${f3Claim.id}'`);
+ok(
+  f3Refresh?.refreshed === 1 && Number(f3Claim2?.estimated_amount) === 37.5,
+  `0015 F3: refresh khoản suspected + giá trị ước tính 37.5 (nhận ${f3Claim2?.estimated_amount})`,
+);
+
+// 4) người dùng: suspected → to_claim → filed (phải có mã case) → approved (phải có kết luận)
+await ex("reset role;");
+await ex(`select set_config('request.jwt.claim.sub','${f3Operator}',false);`);
+await ex("set role authenticated;");
+const f3ToClaim = await one(`select * from public.vexim_update_reimbursement_claim('${f3Claim.id}', 'to_claim', null, null, 'Đủ căn cứ nộp')`);
+ok(f3ToClaim?.status === "to_claim", `0015 F3: suspected → to_claim (nhận ${f3ToClaim?.status})`);
+ok(
+  await mustBlock(`select * from public.vexim_update_reimbursement_claim('${f3Claim.id}', 'file', null, null, null)`),
+  "0015 F3 CHẶN: nộp case mà không có mã case Amazon",
+);
+const f3File = await one(`select * from public.vexim_update_reimbursement_claim('${f3Claim.id}', 'file', 'CASE-VEXIM-77', null, 'Đã nộp Seller Central')`);
+ok(f3File?.status === "filed", `0015 F3: to_claim → filed kèm mã case (nhận ${f3File?.status})`);
+ok(
+  await mustBlock(`select * from public.vexim_update_reimbursement_claim('${f3Claim.id}', 'approve', null, null, null)`),
+  "0015 F3 CHẶN: operator thường không được kết luận claim",
+);
+await ex("reset role;");
+await ex(`select set_config('request.jwt.claim.sub','${f3Lead}',false);`);
+await ex("set role authenticated;");
+const f3Approve = await one(`select * from public.vexim_update_reimbursement_claim('${f3Claim.id}', 'approve', 'CASE-VEXIM-77', null, 'Amazon đã duyệt')`);
+ok(f3Approve?.status === "approved", `0015 F3: trưởng phòng Tài chính duyệt được (nhận ${f3Approve?.status})`);
+ok(
+  await mustBlock(`select * from public.vexim_update_reimbursement_claim('${f3Claim.id}', 'paid', null, null, 'xong')`),
+  "0015 F3 CHẶN: đánh dấu đã về tiền mà không có số tiền thực nhận",
+);
+const f3Paid = await one(`select * from public.vexim_update_reimbursement_claim('${f3Claim.id}', 'paid', null, 37.5, 'Nhận đủ qua Finances')`);
+ok(f3Paid?.status === "paid", `0015 F3: approved → paid (nhận ${f3Paid?.status})`);
+const f3Age = await one(`select age_hours from public.vexim_reimbursement_claims where id='${f3Claim.id}'`);
+ok(typeof f3Age?.age_hours === "number" || f3Age?.age_hours !== undefined,
+   `0015 F3: view trả age_hours để áp SLA 48h (nhận ${f3Age?.age_hours})`);
+// Lịch sử: detected (insert) + updated (worker refresh) + 4 lần đổi trạng thái
+const f3Stages = await one(`select string_agg(distinct stage, ',' order by stage) stages,
+    count(*)::int total from finance.reimbursement_claim_events where claim_id='${f3Claim.id}'`);
+ok(
+  f3Stages?.stages === "approved,detected,filed,paid,to_claim,updated" && f3Stages?.total === 6,
+  `0015 F3: lịch sử claim đủ mốc (${f3Stages?.stages} · ${f3Stages?.total} dòng)`,
+);
+
+// 5) nhảy bước trái phép + đổi khoá nguồn — chạy bằng người CÓ quyền ghi trên
+//    shop, nếu không RLS chỉ làm câu lệnh khớp 0 dòng và trigger không được test.
+await ex("reset role;");
+await ex(`select set_config('request.jwt.claim.sub','${f3Operator}',false);`);
+await ex("set role authenticated;");
+ok(
+  await mustBlock(`update finance.reimbursement_claims set status='filed' where id='${f3Claim.id}'`),
+  "0015 F3 CHẶN: paid → filed (ngoài máy trạng thái)",
+);
+ok(
+  await mustBlock(`update finance.reimbursement_claims set sku='SKU-DOI-TEN' where id='${f3Claim.id}'`),
+  "0015 F3 CHẶN: đổi SKU của khoản claim",
+);
+// worker cũng không được đụng khoản con người đang giữ
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role service_role;");
+await one(`select * from public.vexim_worker_upsert_claims('${f3Shop}', '[
+  {"sku":"SKU-F3","category":"lost_fc","source":"ledger","sourceRef":"LEDGER-REF-1",
+   "quantity":99,"estimatedAmount":999}]'::jsonb)`);
+const f3AfterWorker = await one(`select quantity, estimated_amount from finance.reimbursement_claims where id='${f3Claim.id}'`);
+ok(
+  Number(f3AfterWorker?.quantity) === 3 && Number(f3AfterWorker?.estimated_amount) !== 999,
+  `0015 F3 CHẶN: worker không refresh được khoản đã rời suspected (quantity=${f3AfterWorker?.quantity})`,
+);
+
+// 6) RLS: user không được gán shop không đọc/ghi được claim
+await ex("reset role;");
+await ex(`select set_config('request.jwt.claim.sub','${f3Outsider}',false);`);
+await ex("set role authenticated;");
+await cmp(
+  "0015 F3: user ngoài shop thấy 0 khoản claim (RLS)",
+  `select count(*) n from public.vexim_reimbursement_claims where seller_account_id='${f3Shop}'`,
+  0,
+);
+ok(
+  await mustBlock(`select * from public.vexim_update_reimbursement_claim('${f3Claim.id}', 'close', null, null, 'x')`),
+  "0015 F3 CHẶN: user ngoài shop không ghi được claim",
+);
+
+// --- F4: giá vốn hiệu lực + lợi nhuận SKU ----------------------------------
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role service_role;");
+await ex(`insert into catalog.cost_inputs (seller_account_id, sku, unit_cost, currency, effective_from, effective_to)
+  values ('${f3Shop}','SKU-F4',10.00,'USD','2026-08-01','2026-09-01'),
+         ('${f3Shop}','SKU-F4',12.00,'USD','2026-09-01',null)`);
+const f4Cost = await one(`select * from public.vexim_worker_effective_costs('${f3Shop}', '2026-09-05')`);
+ok(
+  f4Cost?.sku === "SKU-F4" && Number(f4Cost?.unit_cost) === 12,
+  `0015 F4: giá vốn hiệu lực theo ngày = 12 (nhận ${f4Cost?.unit_cost})`,
+);
+const f4Old = await one(`select * from public.vexim_worker_effective_costs('${f3Shop}', '2026-08-15')`);
+ok(Number(f4Old?.unit_cost) === 10, `0015 F4: giá vốn hiệu lực ngày cũ = 10 (nhận ${f4Old?.unit_cost})`);
+
+const f4Profit = await one(`select * from public.vexim_worker_upsert_profit('${f3Shop}', '[
+  {"sku":"SKU-F4","day":"2026-09-05","currency":"USD","units":4,"revenue":200,"refunds":0,
+   "amazonFees":30,"promo":5,"cogs":48,"grossProfit":117,"unitCost":12,"feeSource":"settled"},
+  {"sku":"SKU-NOCOST","day":"2026-09-05","currency":"USD","units":1,"revenue":25,
+   "amazonFees":4,"feeSource":"settled"}]'::jsonb)`);
+ok(f4Profit?.upserted === 2, `0015 F4: worker ghi 2 dòng lợi nhuận (nhận ${f4Profit?.upserted})`);
+const f4Row = await one(`select gross_profit, cogs, fee_source from finance.sku_profit_daily
+   where seller_account_id='${f3Shop}' and sku='SKU-F4' and day='2026-09-05'`);
+ok(Number(f4Row?.gross_profit) === 117 && f4Row?.fee_source === "settled",
+   `0015 F4: lãi gộp lưu đúng (${f4Row?.gross_profit} · ${f4Row?.fee_source})`);
+const f4NoCost = await one(`select cogs, gross_profit from finance.sku_profit_daily
+   where seller_account_id='${f3Shop}' and sku='SKU-NOCOST'`);
+ok(f4NoCost?.cogs === null && f4NoCost?.gross_profit === null,
+   `0015 F4: thiếu giá vốn → lãi gộp NULL, KHÔNG bịa số (cogs=${f4NoCost?.cogs})`);
+// worker ghi lại cùng ngày → replace, không cộng dồn
+await one(`select * from public.vexim_worker_upsert_profit('${f3Shop}', '[
+  {"sku":"SKU-F4","day":"2026-09-05","currency":"USD","units":4,"revenue":200,"amazonFees":30,
+   "cogs":48,"grossProfit":122,"feeSource":"fees_api"}]'::jsonb)`);
+const f4Again = await one(`select count(*)::int n, max(gross_profit) gp from finance.sku_profit_daily
+   where seller_account_id='${f3Shop}' and sku='SKU-F4' and day='2026-09-05'`);
+ok(f4Again?.n === 1 && Number(f4Again?.gp) === 122,
+   `0015 F4: ghi lại cùng ngày thay thế (không cộng dồn) — ${f4Again?.n} dòng, lãi ${f4Again?.gp}`);
+
+// authenticated KHÔNG gọi được RPC worker của F4
+await ex("reset role;");
+await ex(`select set_config('request.jwt.claim.sub','${f3Operator}',false);`);
+await ex("set role authenticated;");
+ok(
+  await mustBlock(`select * from public.vexim_worker_upsert_profit('${f3Shop}', '[]'::jsonb)`),
+  "0015 F4 CHẶN: RPC ghi lợi nhuận chỉ dành cho service_role",
+);
+ok(
+  await mustBlock(`insert into finance.sku_profit_daily (seller_account_id, sku, day)
+     values ('${f3Shop}','SKU-F4','2026-09-06')`),
+  "0015 F4 CHẶN: authenticated không ghi thẳng bảng lợi nhuận",
+);
+
+await ex("reset role; rollback;");
+
 console.log(`\n${"=".repeat(70)}`);
 console.log(fails === 0 ? "TẤT CẢ PASS" : `${fails} MỤC FAIL`);
 console.log("=".repeat(70));

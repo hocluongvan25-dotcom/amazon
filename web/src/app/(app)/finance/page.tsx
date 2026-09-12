@@ -42,18 +42,18 @@ export default async function FinancePage() {
             {label}
           </a>
         ))}
-        <span
-          title="F3–F4 thuộc Đợt 2 (cấp độ 🟡) — đang khóa"
-          className="cursor-not-allowed rounded-full border border-dashed border-line px-4 py-1.5 text-[12.5px] font-bold text-soft"
+        <a
+          href="/finance/claims"
+          className="rounded-full border border-line bg-card px-4 py-1.5 text-[12.5px] font-bold text-muted transition hover:border-accent hover:bg-accent-soft hover:text-accent-ink"
         >
-          🧾 Bồi hoàn FBA (F3 · Đợt 2)
-        </span>
-        <span
-          title="F3–F4 thuộc Đợt 2 (cấp độ 🟡) — đang khóa"
-          className="cursor-not-allowed rounded-full border border-dashed border-line px-4 py-1.5 text-[12.5px] font-bold text-soft"
+          🧾 Bồi hoàn FBA (F3)
+        </a>
+        <a
+          href="/finance/profit"
+          className="rounded-full border border-line bg-card px-4 py-1.5 text-[12.5px] font-bold text-muted transition hover:border-accent hover:bg-accent-soft hover:text-accent-ink"
         >
-          💹 Lợi nhuận SKU (F4 · Đợt 2)
-        </span>
+          💹 Lợi nhuận SKU (F4)
+        </a>
       </div>
       <KpiGrid>
         {financeKpis.map((k) => (

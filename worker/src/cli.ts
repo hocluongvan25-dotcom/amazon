@@ -15,6 +15,7 @@ import {
 } from "./runtime/run-report-import.ts";
 import { runListingPublishCli } from "./runtime/run-listing-publish.ts";
 import { runListingSchemaCli } from "./runtime/run-listing-schema.ts";
+import { runFinanceClaimsCli } from "./runtime/run-finance-claims.ts";
 
 /** Đọc tham số dạng --key=value / --flag (không có giá trị) */
 function parseArgs(argv: string[]): { flags: Set<string>; values: Record<string, string> } {
@@ -182,6 +183,22 @@ async function main() {
       }
       break;
     }
+    case "finance:claims": {
+      // Module 6 Đợt 2: F3 bồi hoàn FBA (SOP-09) + F4 lợi nhuận SKU
+      const { values, flags } = parseArgs(process.argv.slice(3));
+      const result = await runFinanceClaimsCli({
+        sellerAccountId: values["seller"] ?? null,
+        ledgerFile: values["ledger"] ?? null,
+        reimbursementsFile: values["reimbursements"] ?? null,
+        month: values["month"] ?? null,
+        dryRun: flags.has("dry-run"),
+        stdout: process.stdout,
+      });
+      if (result.db === "mock") {
+        process.stdout.write("  ⚠ chạy trong bộ nhớ (dry-run / chưa đủ credentials) — KHÔNG ghi DB thật.\n");
+      }
+      break;
+    }
     case "help":
     case "--help":
     case "-h":
@@ -196,6 +213,7 @@ async function main() {
           "  account-health:sync  Nạp report performance V2 (Module 7): --file=performance.json",
           "  listing:publish      L3: gửi bản nháp đã duyệt lên Amazon (--seller=<uuid> [--limit=20])",
           "  listing:schema       L3: tải JSON Schema product type cho form động (--product-type=LUGGAGE)",
+          "  finance:claims       F3+F4: claim bồi hoàn FBA + lợi nhuận SKU (--ledger=<file> --reimbursements=<file>)",
           "",
           "Cờ dùng chung: --seller=<uuid> (bắt buộc khi >1 shop) · --dry-run (chỉ chạy trong bộ nhớ)",
           "",
