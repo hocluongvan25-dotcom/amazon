@@ -2,6 +2,45 @@
 
 > Cập nhật: 12/09/2026 · Thứ tự build đã chốt: **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** (21 màn Đợt 1)
 
+## Cập nhật 12/09 — L3: Trình soạn listing (Đợt 2, migration 0014)
+
+- **Migration `0014_listing_editor.sql`** (mới, idempotent + self-check):
+  - `catalog.listing_drafts` — bản nháp theo (shop, SKU): `payload`/`validation` jsonb,
+    trạng thái `draft → pending_approval → approved → publishing → published/failed`.
+  - `catalog.listing_draft_revisions` — lịch sử **append-only**: mỗi lần lưu/gửi/duyệt/
+    từ chối/publish là 1 revision + danh sách attribute thay đổi + before/after payload.
+  - `catalog.listing_publish_queue` — hàng đợi publish: `method` patch/put/feed, `status`
+    queued/blocked/sent/accepted/invalid/failed, `submission_id`, `issues`, `block_reason`.
+  - `catalog.listing_product_type_schemas` — cache JSON Schema product type để form động
+    dùng `required`/`maxLength` THẬT của Amazon.
+  - Trigger giữ **máy trạng thái + 4 mắt + cổng `validation.errorCount = 0`**; RLS theo shop;
+    không có policy DELETE (giữ lịch sử); web ghi qua RPC public (§7B), worker qua RPC §7C
+    (chỉ service_role).
+- **Hạn mức kiểm chứng tài liệu Amazon 09/2026** (`web/src/lib/listing/amazon-limits.ts`):
+  tiêu đề 75 ký tự (media 200; hiệu lực 27/07/2026), Item Highlight (`title_differentiation`)
+  125, bullet 10–255 × tối đa 5, mô tả 2.000, từ khóa backend **249 BYTE** (JP 500, IN 200),
+  9 ảnh. File ghi kèm `AMAZON_SOURCES` (URL + ngày kiểm chứng).
+- **Web:** trang `/listing/editor` (nav "Soạn listing (L3)") + `/api/listing/drafts`: lưu nháp,
+  gửi trưởng phòng duyệt, duyệt/từ chối (kèm lý do), publish (đẩy hàng đợi), xem lịch sử.
+  DEMO MODE xem/kiểm tra được nhưng KHÔNG lưu giả (thiếu Supabase → API trả 409).
+- **Worker:** `listing:publish` gọi `getListingsRestrictions` **TRƯỚC** khi gửi (blocked nếu
+  APPROVAL_REQUIRED/ASIN_NOT_FOUND/NOT_ELIGIBLE), rồi `patchListingsItem`/`putListingsItem`,
+  ghi ACCEPTED/INVALID + issues vào hàng đợi + lịch sử; `listing:schema` tải
+  `getDefinitionsProductType` vào cache. Cả hai chỉ gọi Amazon + ghi DB thật khi
+  `mode = production` và không `--dry-run`.
+- **Kiểm chứng local:** `supabase npm test` **TẤT CẢ PASS** (BƯỚC 1..15) · `worker npm test`
+  256/256 · `web npm test` 36/36 · `npx tsc --noEmit` sạch · `next build` 41/41 trang.
+
+### Chờ VEXIM (L3)
+
+- ☐ Chạy `supabase/migrations/0014_listing_editor.sql` trong SQL Editor (sau `0013`).
+- ☐ Khi có credentials SP-API: `npm run worker:listing-schema -- --product-type=<loại>` cho các
+  product type đang bán (form động mới có schema thật), rồi `npm run worker:listing-publish`.
+- ⚠ Đã biết: `op: "merge"` của Amazon chỉ hỗ trợ `fulfillment_availability.quantity` +
+  `purchasable_offer` (hiện patch theo whole-attribute); notification
+  `LISTINGS_ITEM_ISSUES_CHANGE` v1.0 đã bị Amazon ngừng (14–26/08/2026) — rà lại khi cấu hình
+  notification thật.
+
 ## Cập nhật 12/09 — migration 0011 + Module 4/6 đọc Supabase
 
 - Đã lưu **nguyên nội dung SQL VEXIM cung cấp** vào
