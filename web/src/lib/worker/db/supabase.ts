@@ -35,6 +35,9 @@ import type {
   FinancialEventRowInput,
   InventoryDailyRow,
   InventorySnapshotRow,
+  ListingPublishQueueRow,
+  ListingPublishResultInput,
+  ProductTypeSchemaInput,
   ListingStateRow,
   NotificationRecord,
   OrderDailyRowInput,
@@ -76,6 +79,10 @@ const REQUIRED_EXPOSED_SCHEMAS = [
 const RPC_PATHS = {
   activeProductionShops: "/rest/v1/rpc/active_production_shops",
   unitsSoldPerDay: "/rest/v1/rpc/units_sold_per_day",
+  // L3 (migration 0014 §7C) — worker nhận hàng đợi publish + ghi kết quả
+  claimListingPublish: "/rest/v1/rpc/vexim_worker_claim_listing_publish",
+  recordPublishResult: "/rest/v1/rpc/vexim_worker_record_publish_result",
+  upsertProductTypeSchema: "/rest/v1/rpc/vexim_worker_upsert_product_type_schema",
 } as const;
 
 export class SupabaseDbAdapter implements DbAdapter {
@@ -580,6 +587,72 @@ export class SupabaseDbAdapter implements DbAdapter {
         notification_type: row.notificationType,
         raw: (row.raw as Json) ?? null,
         received_at: row.receivedAt.toISOString(),
+      },
+    });
+  }
+
+  // ---------- Module 3 (L3): hàng đợi publish ----------
+  /**
+   * Nhận các dòng publish đang chờ qua RPC public.vexim_worker_claim_listing_publish
+   * (migration 0014) — RPC chỉ cho service_role, tự kiểm tra auth.uid() is null.
+   */
+  async listListingPublishQueue(sellerAccountId: string, limit = 20): Promise<ListingPublishQueueRow[]> {
+    const rows = await this.request<
+      {
+        queue_id: string;
+        draft_id: string;
+        sku: string;
+        asin: string | null;
+        marketplace_id: string;
+        product_type: string;
+        requirements: string;
+        method: string;
+        payload: Record<string, unknown>;
+        attempts: number;
+      }[]
+    >("POST", RPC_PATHS.claimListingPublish, {
+      body: { p_seller: sellerAccountId, p_limit: limit },
+    });
+    return (rows ?? []).map((row) => ({
+      queueId: row.queue_id,
+      sellerAccountId,
+      draftId: row.draft_id,
+      sku: row.sku,
+      asin: row.asin,
+      marketplaceId: row.marketplace_id,
+      productType: row.product_type,
+      requirements: row.requirements,
+      method: row.method,
+      payload: row.payload ?? {},
+      attempts: row.attempts ?? 0,
+    }));
+  }
+
+  /** Ghi kết quả publish (queue + trạng thái bản nháp + lịch sử qua trigger 0014). */
+  async recordListingPublishResult(result: ListingPublishResultInput): Promise<void> {
+    await this.request("POST", RPC_PATHS.recordPublishResult, {
+      body: {
+        p_queue_id: result.queueId,
+        p_status: result.status,
+        p_submission_id: result.submissionId ?? null,
+        p_issues: result.issues ?? [],
+        p_error: result.error ?? null,
+        p_block_reason: result.blockReason ?? null,
+      },
+    });
+  }
+
+  /**
+   * Ghi/cập nhật JSON Schema product type (getDefinitionsProductType) vào cache
+   * để form động L3 dùng lại. CHỈ service_role gọi được (RPC kiểm tra auth.uid()).
+   */
+  async upsertProductTypeSchema(input: ProductTypeSchemaInput): Promise<void> {
+    await this.request("POST", RPC_PATHS.upsertProductTypeSchema, {
+      body: {
+        p_marketplace: input.marketplaceId,
+        p_product_type: input.productType,
+        p_requirements: input.requirements,
+        p_schema: input.schema,
       },
     });
   }

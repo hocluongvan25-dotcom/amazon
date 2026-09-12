@@ -216,6 +216,48 @@ export type FinancialEventRowInput = {
   raw?: unknown;
 };
 
+/* ---- Module 3 (L3): hàng đợi publish listing ---- */
+
+/** JSON Schema product type (Product Type Definitions API) — nguồn cho form động L3. */
+export type ProductTypeSchemaInput = {
+  marketplaceId: string;
+  productType: string;
+  requirements: string;
+  /** JSON Schema THẬT (không phải wrapper getDefinitionsProductType) */
+  schema: Record<string, unknown>;
+};
+
+/** Một dòng hàng đợi publish do web đẩy vào (catalog.listing_publish_queue). */
+export type ListingPublishQueueRow = {
+  queueId: string;
+  sellerAccountId: string;
+  draftId: string;
+  sku: string;
+  asin: string | null;
+  marketplaceId: string;
+  productType: string;
+  requirements: string;
+  /** patch = listing đã tồn tại; put = tạo mới */
+  method: "patch" | "put" | "feed" | string;
+  /** body đã dựng sẵn (patches cho patch, attributes cho put) */
+  payload: Record<string, unknown>;
+  attempts: number;
+};
+
+export type ListingPublishResultInput = {
+  queueId: string;
+  /**
+   * sent = đã gửi, chờ xử lý; accepted/invalid = Amazon trả ngay;
+   * blocked = bị hạn chế danh mục (getListingsRestrictions); failed = lỗi mạng/5xx
+   */
+  status: "sent" | "accepted" | "invalid" | "blocked" | "failed";
+  submissionId?: string | null;
+  issues?: unknown[];
+  error?: string | null;
+  /** Lý do chặn trước khi gửi (thường là reasonCode của Listings Restrictions) */
+  blockReason?: string | null;
+};
+
 export interface DbAdapter {
   upsertInventorySnapshot(row: InventorySnapshotRow): Promise<void>;
   upsertInventoryDaily(row: InventoryDailyRow): Promise<void>;
@@ -263,6 +305,14 @@ export interface DbAdapter {
     settlementId: string,
     rows: FinancialEventRowInput[],
   ): Promise<void>;
+
+  /* ---- Module 3 (L3) ---- */
+  /** Lấy các dòng publish đang chờ của một shop (chỉ worker/service_role) */
+  listListingPublishQueue(sellerAccountId: string, limit?: number): Promise<ListingPublishQueueRow[]>;
+  /** Ghi kết quả publish: queue + trạng thái bản nháp + lịch sử */
+  recordListingPublishResult(result: ListingPublishResultInput): Promise<void>;
+  /** Ghi/cập nhật cache JSON Schema product type cho form động L3 */
+  upsertProductTypeSchema(input: ProductTypeSchemaInput): Promise<void>;
 }
 
 /** In-memory — cho test & DEMO MODE */
@@ -279,6 +329,10 @@ export class MockDbAdapter implements DbAdapter {
   returns: ReturnRowInput[] = [];
   orderDaily: OrderDailyRowInput[] = [];
   healthSnapshots: AccountHealthSnapshotRowInput[] = [];
+  /* Module 3 (L3) */
+  publishQueue: ListingPublishQueueRow[] = [];
+  publishResults: ListingPublishResultInput[] = [];
+  productTypeSchemas: ProductTypeSchemaInput[] = [];
   healthIssues: AccountHealthIssueRowInput[] = [];
   settlements: SettlementRowInput[] = [];
   financialEvents: FinancialEventRowInput[] = [];
@@ -434,5 +488,20 @@ export class MockDbAdapter implements DbAdapter {
       }
     }
     return Promise.resolve();
+  }
+  async listListingPublishQueue(sellerAccountId: string, limit = 20): Promise<ListingPublishQueueRow[]> {
+    return this.publishQueue.filter((row) => row.sellerAccountId === sellerAccountId).slice(0, limit);
+  }
+
+  async recordListingPublishResult(result: ListingPublishResultInput): Promise<void> {
+    this.publishResults.push(result);
+  }
+
+  async upsertProductTypeSchema(input: ProductTypeSchemaInput): Promise<void> {
+    const key = `${input.marketplaceId}:${input.productType}:${input.requirements}`;
+    this.productTypeSchemas = this.productTypeSchemas.filter(
+      (row) => `${row.marketplaceId}:${row.productType}:${row.requirements}` !== key,
+    );
+    this.productTypeSchemas.push(input);
   }
 }
