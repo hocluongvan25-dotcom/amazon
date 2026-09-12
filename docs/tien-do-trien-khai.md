@@ -78,6 +78,31 @@ Import trace: ./src/app/api/cron/inventory-sync/route.ts
 **Kiểm chứng:** build `web/` cô lập (không có `worker/` bên cạnh) → `BUILD_EXIT=0`,
 39/39 routes, có `/api/cron/inventory-sync`. Trước khi sửa: `BUILD_EXIT=1`.
 
+### Nguyên nhân THỨ HAI — `vercel.json` sai vị trí + schedule vượt giới hạn Hobby
+
+Sau khi dời `vercel.json` vào `web/` (bắt buộc, vì Root Directory = `web`), Vercel
+**bắt đầu đọc** file đó — và lập tức từ chối vì:
+
+> "Hobby accounts are limited to cron jobs that run once per day... Expressions like
+> `0 * * * *` (per-hour) or `*/30 * * * *` (every 30 minutes) will fail deployment."
+> — https://vercel.com/docs/cron-jobs/usage-and-pricing
+
+Schedule cũ là `*/30 * * * *`. Trước đây nó **không** gây lỗi chỉ vì file nằm ở repo
+root nên Vercel không đọc — tức cron chưa bao giờ được đăng ký.
+
+**Đã đổi thành `0 2 * * *`** (2h sáng — khớp lịch đối soát trong
+`docs/phan-tich-ky-thuat-module-3-kho-van.md`). Chạy được trên **mọi** gói Vercel.
+
+Muốn quay lại 30 phút/lần:
+- Gói **Pro**: sửa `web/vercel.json` → `"schedule": "*/30 * * * *"`, redeploy
+- Gói **Hobby**: giữ route nguyên vẹn và dùng scheduler ngoài (cron-job.org,
+  GitHub Actions `schedule`, …) gọi `GET /api/cron/inventory-sync` kèm header
+  `Authorization: Bearer <CRON_SECRET>`. Route là HTTP endpoint thường nên
+  không phụ thuộc Vercel Cron.
+
+Hiện tại chưa cần 30 phút: `AMAZON_LWA_*` chưa có và cả 6 shop vẫn
+`data_source='mock'` → `active_production_shops()` = 0 → sync chưa làm gì.
+
 
 ## Trạng thái tổng thể
 
