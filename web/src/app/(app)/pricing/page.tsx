@@ -9,6 +9,7 @@ import {
   Panel,
   tableCls,
 } from "@/components/ui";
+import { LivePricingPage } from "@/components/pricing/LivePricing";
 import { requireSession } from "@/lib/auth/session";
 import { pricingAlerts, pricingKpis, pricingRows } from "@/lib/data/mock";
 import type { PersonaKey } from "@/lib/roles";
@@ -58,13 +59,20 @@ export default async function PricingPage({
   if (!ALLOWED.includes(session.persona)) return <NoAccess />;
 
   const sp = await searchParams;
-  const state = {
+  const filters = {
     f: sp.f ?? "all",
     shop: sp.shop ?? "all",
     margin: sp.margin ?? "all",
     q: (sp.q ?? "").trim().toLowerCase(),
     sort: (sp.sort ?? "risk") as "risk" | "margin" | "sku" | "velocity",
   };
+
+  // Supabase mode
+  if (session.mode === "supabase") {
+    return <LivePricingPage filters={filters} />;
+  }
+
+  const state = filters;
 
   let rows = pricingRows.filter((r) => {
     if (state.f !== "all" && r.boxStatus !== state.f) return false;
