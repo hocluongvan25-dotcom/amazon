@@ -40,7 +40,7 @@ export default function ProfileClient({ session }: { session: Session }) {
     if (!supabase) return;
     (async () => {
       const { data, error } = await supabase
-        .from("iam.my_profile")
+        .schema("iam").from("my_profile")
         .select("*")
         .maybeSingle();
       if (data && !error) {
@@ -57,7 +57,7 @@ export default function ProfileClient({ session }: { session: Session }) {
     setSaving(true);
     setSaveMsg(null);
     const { error } = await supabase
-      .from("iam.user_profiles")
+      .schema("iam").from("user_profiles")
       .update({ display_name: name, phone })
       .eq("id", session.userId);
     setSaving(false);

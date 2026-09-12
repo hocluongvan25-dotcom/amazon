@@ -12,6 +12,8 @@
  *   4. Kiểm chứng 0006 dọn sạch fixture, giữ nguyên user thật
  *   5. Kiểm chứng 0007 tạo super_admin + alerts (không phụ thuộc auth.uid())
  *   6. Kiểm chứng view 0004 + RPC 0005 đọc được dữ liệu thật
+ *   7. Kiểm chứng 0008 tạo wrapper RPC trong schema public (chữa PGRST202)
+ *   8. Kiểm chứng 0009 đăng ký shop production AQMVYI4HJTI4C (US + CA)
  *
  * Không cần Docker, không cần Supabase project, không cần credentials.
  */
@@ -213,6 +215,85 @@ await cmp(
   "active_production_shops() (mọi shop data_source='mock')",
   "select count(*) n from connections.active_production_shops()",
   0,
+);
+
+// ===========================================================================
+console.log("\n=== BƯỚC 7: migration 0008 — public RPC wrappers (chữa PGRST202) ===");
+// ===========================================================================
+ok(
+  await ex(rd("migrations/0008_public_rpc_wrappers.sql"), "0008_public_rpc_wrappers.sql"),
+  "0008 chạy sạch",
+);
+// 0005 tạo RPC trong schema connections/inventory. PostgREST chỉ resolve mặc
+// định schema public → worker gọi /rest/v1/rpc/connections.active_production_shops
+// bị PGRST202. 0008 bọc lại trong public.
+await cmp(
+  "public.active_production_shops() (chưa có shop production)",
+  "select count(*) n from public.active_production_shops()",
+  0,
+);
+await cmp(
+  "public.units_sold_per_day() trả đúng kiểu (probe rỗng)",
+  "select count(*) n from public.units_sold_per_day('00000000-0000-0000-0000-000000000001','__probe__',14)",
+  0,
+);
+const fnSig = await one(
+  `select count(*) n from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
+   where ns.nspname = 'public' and p.proname in ('active_production_shops','units_sold_per_day')`,
+);
+ok(Number(fnSig.n) === 2, `2 wrapper nằm trong schema public (thấy ${fnSig.n})`);
+ok(
+  await ex(rd("migrations/0008_public_rpc_wrappers.sql"), "0008 chạy LẦN 2"),
+  "0008 idempotent",
+);
+
+// ===========================================================================
+console.log("\n=== BƯỚC 8: migration 0009 — shop production AQMVYI4HJTI4C (US + CA) ===");
+// ===========================================================================
+ok(
+  await ex(rd("migrations/0009_seed_production_shops.sql"), "0009_seed_production_shops.sql"),
+  "0009 chạy sạch",
+);
+await cmp(
+  "public.active_production_shops() sau 0009",
+  "select count(*) n from public.active_production_shops()",
+  2,
+);
+const prodShops = await db.query(
+  "select seller_id, marketplace, display_name from public.active_production_shops() order by marketplace",
+);
+console.log("   shop production:", JSON.stringify(prodShops.rows));
+ok(
+  prodShops.rows.every((r) => r.seller_id === "AQMVYI4HJTI4C"),
+  "cả 2 shop đều mang seller_id AQMVYI4HJTI4C",
+);
+ok(
+  prodShops.rows.map((r) => r.marketplace).sort().join(",") === "A2EUQ1WTGCTBG2,ATVPDKIKX0DER",
+  "đúng 2 marketplace: US (ATVPDKIKX0DER) + CA (A2EUQ1WTGCTBG2)",
+);
+await cmp(
+  "connections.active_production_shops() (hàm gốc, cùng kết quả)",
+  "select count(*) n from connections.active_production_shops()",
+  2,
+);
+await cmp(
+  "shop mock không bị nâng cấp nhầm",
+  "select count(*) n from connections.seller_accounts where data_source = 'mock'",
+  6,
+);
+ok(
+  await ex(rd("migrations/0009_seed_production_shops.sql"), "0009 chạy LẦN 2"),
+  "0009 idempotent",
+);
+await cmp(
+  "0009 lần 2: vẫn đúng 2 shop production",
+  "select count(*) n from public.active_production_shops()",
+  2,
+);
+await cmp(
+  "0009 lần 2: không tạo thêm seller_accounts",
+  "select count(*) n from connections.seller_accounts",
+  8,
 );
 
 console.log(`\n${"=".repeat(70)}`);

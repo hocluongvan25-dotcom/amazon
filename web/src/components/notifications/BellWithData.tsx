@@ -59,7 +59,7 @@ export default function BellWithData({ session }: { session: Session }) {
     setLoading(true);
     try {
       const { data, error } = await supabase
-        .from("ops.my_alerts")
+        .schema("ops").from("my_alerts")
         .select("id,severity,title,detail,status,fired_at,seller_label")
         .limit(30);
       if (!mountedRef.current) return;
@@ -103,14 +103,14 @@ export default function BellWithData({ session }: { session: Session }) {
     if (!open || !supabase || !live) return;
     try {
       const { data } = await supabase
-        .from("ops.my_alerts")
+        .schema("ops").from("my_alerts")
         .select("id")
         .eq("status", "open")
         .limit(20);
       const openIds = (data ?? []).map((r) => (r as { id: string }).id);
       if (openIds.length === 0) return;
       await supabase
-        .from("ops.alerts")
+        .schema("ops").from("alerts")
         .update({ status: "ack" })
         .in("id", openIds);
       load();

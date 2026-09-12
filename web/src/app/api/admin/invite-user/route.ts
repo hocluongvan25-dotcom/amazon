@@ -30,7 +30,7 @@ export async function POST(req: Request) {
 
     // 2. Kiểm tra caller có quyền admin
     const { data: myRoles } = await supabase
-      .from("iam.role_assignments")
+      .schema("iam").from("role_assignments")
       .select("role")
       .eq("user_id", user.id);
     const myRoleSet = new Set((myRoles ?? []).map((r) => r.role as string));
@@ -96,7 +96,7 @@ export async function POST(req: Request) {
     const newUserId = invited.id;
 
     // 5. Tạo bản ghi iam.user_profiles
-    const { error: pErr } = await supabase.from("iam.user_profiles").insert({
+    const { error: pErr } = await supabase.schema("iam").from("user_profiles").insert({
       id: newUserId,
       display_name: displayName,
       email,
@@ -112,7 +112,7 @@ export async function POST(req: Request) {
     let deptId: string | null = null;
     if (departmentCode) {
       const { data: dept } = await supabase
-        .from("iam.departments")
+        .schema("iam").from("departments")
         .select("id")
         .eq("code", departmentCode)
         .maybeSingle();
@@ -120,7 +120,7 @@ export async function POST(req: Request) {
     }
 
     // 7. Gán role
-    const { error: rErr } = await supabase.from("iam.role_assignments").insert({
+    const { error: rErr } = await supabase.schema("iam").from("role_assignments").insert({
       user_id: newUserId,
       role,
       department_id: deptId,
@@ -131,7 +131,7 @@ export async function POST(req: Request) {
 
     // 8. Gán shop (nếu có)
     if (Array.isArray(shopIds) && shopIds.length > 0) {
-      const { error: aErr } = await supabase.from("iam.assignments").insert(
+      const { error: aErr } = await supabase.schema("iam").from("assignments").insert(
         shopIds.map((sellerId: string) => ({
           user_id: newUserId,
           seller_account_id: sellerId,
@@ -147,7 +147,7 @@ export async function POST(req: Request) {
 
     // 9. Ghi audit
     try {
-      await supabase.from("iam.audit_logs").insert({
+      await supabase.schema("iam").from("audit_logs").insert({
         actor_id: user.id,
         module: "account_health",
         action: "user.invite",

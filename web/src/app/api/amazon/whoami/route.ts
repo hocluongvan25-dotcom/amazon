@@ -15,6 +15,16 @@ import { discoverSellerIdentity } from "@/lib/spapi/whoami";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
+/**
+ * Shop production đã chốt (xem supabase/migrations/0009_seed_production_shops.sql).
+ * Dùng để đối chiếu: nếu refresh_token đang cấu hình trả sellerId KHÁC, tức
+ * Vercel đang dùng token của shop khác → cron sẽ sync sai shop.
+ */
+const PRODUCTION_SHOP = {
+  sellerId: "AQMVYI4HJTI4C",
+  marketplaces: ["ATVPDKIKX0DER", "A2EUQ1WTGCTBG2"], // US + CA
+} as const;
+
 type AuthResult =
   | { ok: true }
   | { ok: false; status: 401 | 500; error: string; hint?: string };
@@ -80,16 +90,31 @@ export async function GET(req: Request) {
     const result = await discoverSellerIdentity({
       spapi,
       region: cfg.region,
+      // Ưu tiên US khi shop tham gia nhiều marketplace (US + CA).
+      preferredMarketplaceId: PRODUCTION_SHOP.marketplaces[0],
     });
+    const matchesProductionShop = result.sellerId === PRODUCTION_SHOP.sellerId;
+
     return NextResponse.json({
       ...result,
       spapiConfigured: true,
       cronSecretConfigured: !!process.env.CRON_SECRET,
+      productionShop: {
+        ...PRODUCTION_SHOP,
+        source: "supabase/migrations/0009_seed_production_shops.sql",
+        matchesRefreshToken: matchesProductionShop,
+      },
       notes: [
         "Không trả access_token / refresh_token / cookie value.",
         "sellerId lấy từ feesEstimate.FeesEstimateIdentifier.SellerId — Amazon không có endpoint whoami chính thức.",
-        "Dùng seller_id + marketplace để khai connections.seller_accounts.",
-      ],
+        "Marketplace được ưu tiên ATVPDKIKX0DER (US) — shop production bán cả US + CA.",
+        result.usedFallbackAsin
+          ? `Inventory trống (0 SKU): đã mượn ASIN dự phòng ${result.asin} để vẫn lấy được SellerId.`
+          : null,
+        matchesProductionShop
+          ? null
+          : `sellerId từ token (${result.sellerId ?? "—"}) KHÁC shop production đã chốt (${PRODUCTION_SHOP.sellerId}) — kiểm tra lại AMAZON_LWA_REFRESH_TOKEN trên Vercel.`,
+      ].filter((n): n is string => Boolean(n)),
     });
   } catch (e) {
     return NextResponse.json(

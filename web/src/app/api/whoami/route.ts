@@ -44,7 +44,7 @@ export async function GET() {
     if (data.user) {
       authUser = { id: data.user.id, email: data.user.email ?? null };
       const { data: row, error: pErr } = await supabase
-        .from("iam.my_profile")
+        .schema("iam").from("my_profile")
         .select("id,display_name,email,role,department,vexim_employee")
         .maybeSingle();
       if (pErr) profileError = pErr.message;
