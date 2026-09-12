@@ -1,3 +1,4 @@
+import { LiveHealth } from "@/components/health/LiveHealth";
 import {
   Chip,
   Grid2,
@@ -18,13 +19,14 @@ const ALLOWED: PersonaKey[] = ["ceo"];
 export default async function HealthPage() {
   const session = await requireSession();
   if (!ALLOWED.includes(session.persona)) return <NoAccess />;
+  if (session.mode === "supabase") return <LiveHealth />;
 
   return (
     <>
       <PageHeader
         title="Vận hành & Account Health"
-        sub="Hôm nay · 14 shop"
-        desc="Nguồn: GET_V1_SELLER_PERFORMANCE_REPORT + notification ACCOUNT_STATUS_CHANGED (Selling Partner Insights)."
+        sub="DEMO · dữ liệu minh họa"
+        desc="Nguồn: GET_V2_SELLER_PERFORMANCE_REPORT + notification ACCOUNT_STATUS_CHANGED (Selling Partner Insights)."
       />
       <div className="mb-4 flex flex-wrap gap-2">
         <a

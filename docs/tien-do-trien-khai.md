@@ -2,6 +2,44 @@
 
 > Cập nhật: 12/09/2026 · Thứ tự build đã chốt: **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** (21 màn Đợt 1)
 
+## Cập nhật tiếp nối 12/09 — Module 7 đọc Supabase (H1/H2)
+
+- **VEXIM xác nhận:** đã chạy migration 0010, 0011 và expose đủ 11 schemas.
+  Đây là xác nhận của người vận hành, chưa kiểm tra trực tiếp DB từ phiên dev này.
+- **Lưu ý đồng bộ repo:** `origin/main` ở commit `3866fed` chỉ có migration đến
+  `0010`; cần bổ sung bản SQL `0011` đã chạy vào Git để có thể tái lập DB.
+  Đợt này không tạo/chạy lại migration và không thay đổi DB production.
+- `/health` và `/health/violations`: khi session ở Supabase mode, đọc
+  `public.vexim_shop_health` và `public.vexim_health_issues` bằng anon client
+  kèm cookie của user; giữ nguyên RLS/security-invoker, không dùng service role.
+- Demo mode vẫn có dữ liệu mẫu, gắn nhãn DEMO. DB trống có empty state;
+  truy vấn lỗi có error state và **không fallback mock**. KPI lấy từ dữ liệu
+  đọc được, phân biệt shop với shop/marketplace và nhóm vi phạm với case.
+- Hiển thị ngày báo cáo, thời điểm thu thập, AHR/ODR/late ship; null là “—”,
+  giữ nguyên màu đỏ và unknown. H2 sort severity, dùng issue UUID làm key,
+  không gọi reporting_from là ngày mở case. Đã sửa nguồn report V1 → V2.
+- Phân trang truy vấn 500 dòng để không cắt KPI ở giới hạn mặc định PostgREST.
+- Không hiển thị tác vụ/SLA demo trong màn thật. Luồng ghi/appeal vẫn không bật.
+
+**Kiểm chứng local:** `cd web && npm test` (6/6 PASS),
+`npm run typecheck` PASS, `npm run build` PASS (39/39 trang sinh thành công).
+Chưa kiểm chứng trình duyệt đăng nhập production hoặc RLS trên project thật.
+`npm ci` báo 2 advisory dependency (1 moderate, 1 high); chưa thay dependency
+ngoài phạm vi tính năng này.
+
+**Kiểm tra sau deploy:**
+1. Đăng nhập Supabase → `/health`, `/health/violations`: có nhãn SUPABASE,
+   không còn số shop/case/tác vụ demo. DB chưa import report thì hiển thị trống.
+2. Sau sync report thật: so AHR/ODR/late ship, marketplace và ngày với report;
+   xác nhận các nhóm Critical/High lên đầu H2.
+3. Đăng nhập user giới hạn shop: chỉ thấy snapshot/issue được RLS cho phép.
+4. Trên môi trường test, mô phỏng mất quyền view → thông báo lỗi, không mock.
+
+**Tiếp theo:** nối Module 4 (Orders/FBM/Returns), rồi Module 6
+(Settlements/Financial events); hoàn thiện RBAC session (code hiện vẫn gán
+persona `ceo` cho user Supabase — phạm vi dữ liệu ở hai màn trên do RLS quyết định).
+Không coi Module 7 là đã kiểm chứng production trước các bước kiểm tra trên.
+
 ## ⚠️ SỰ CỐ 12/09 — fixture test lọt vào DB production (ĐÃ SỬA)
 
 VEXIM tạo project Supabase thật (`pitmyzovjwflkyoqjbkz`) và set 14 biến môi trường trên
