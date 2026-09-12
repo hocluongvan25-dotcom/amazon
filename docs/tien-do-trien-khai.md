@@ -2,6 +2,98 @@
 
 > Cập nhật: 12/09/2026 · Thứ tự build đã chốt: **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** (21 màn Đợt 1)
 
+## Cập nhật 12/09 — ĐỢT A: gỡ chặn dữ liệu lõi (migration 0016 · giá vốn · ghi listing · P1 dùng giá vốn)
+
+Ba việc chặn nhau suốt Đợt 1 đã được gỡ theo đúng thứ tự **giá vốn → ghi listing → pricing**:
+
+- **Migration `0016_core_data_unblock.sql`** (idempotent + self-check 11 mục: cột / 6 view / 6 RPC /
+  quyền / PII / `pricing_defaults` / `effective_cost()` khớp `cost_inputs`):
+  - `catalog.listings` thêm **11 cột** để GHI được dữ liệu thật: `issues jsonb` (issue nguyên văn Amazon),
+    `buyable`, `discoverable`, `product_type`, `quantity`, `stranded_reason`, `issue_errors`,
+    `issue_warnings`, `enforcement_actions jsonb`, `last_source`, `last_synced_at` + 2 index.
+  - `catalog.cost_inputs` thêm cột vết (`updated_at`, `updated_by`, `source_ref`) + unique
+    `(shop, sku, effective_from)` để **import lại không nhân đôi** bậc giá vốn.
+  - `catalog.pricing_defaults` (1 dòng cấu hình: referral 15% · biên tối thiểu 10% · phí khác 0) và
+    `catalog.effective_cost_row()` / `catalog.effective_cost()` — **một luật giá vốn hiệu lực duy nhất**.
+  - `public.vexim_worker_upsert_listings(p_seller, p_rows)` — RPC ghi listing cho worker (**chỉ
+    `service_role`**): whitelist trạng thái (`ACTIVE|INACTIVE|SUPPRESSED|STRANDED|REMOVED|CLOSED|DELETED`,
+    dòng mới chưa rõ → `UNKNOWN` chứ không bịa `ACTIVE`), `issues` dạng mảng = **thay** chi tiết,
+    `null` = **giữ** dữ liệu cũ, chỉ có số đếm thì **xoá** mảng issue cũ, `stranded_reason` theo
+    “key có mặt” để hết stranded là xoá được lý do, parse số an toàn (`1.299,99` → 1299.99, rác → NULL).
+  - View: `vexim_listings` / `vexim_listing_queue` (đếm issue **ưu tiên mảng chi tiết**, queue nối thêm
+    `buyable`/`discoverable`), `vexim_cost_inputs` (+`is_current`), `vexim_cost_coverage` (SKU đang bán
+    **thiếu giá vốn / lệch tiền tệ** — chính là danh sách gỡ chặn), `vexim_shops` (bộ chọn shop, RLS lọc
+    sẵn, **không phơi `seller_id`**). Tất cả `security_invoker = true`.
+  - RPC giá vốn cho web: `iam.is_cost_editor()`, `vexim_upsert_cost_input`, `vexim_import_cost_inputs`
+    (**chạy thử → hoàn tác → ghi thật**: 1 dòng lỗi thì KHÔNG ghi dòng nào, trả lỗi theo số dòng),
+    `vexim_close_cost_input`, `vexim_delete_cost_input` (chỉ admin/trưởng phòng Tài chính) — mỗi lần ghi
+    đều có `iam.audit_logs`. Helper parse đặt ở DB (`catalog.parse_amount`, `catalog.parse_day`: nhận
+    `YYYY-MM-DD` và `DD/MM/YYYY`, **từ chối `MM/DD/YYYY` mơ hồ**) để luật parse chỉ có một bản.
+  - **`vexim_pricing` nay dùng giá vốn hiệu lực** thay vì “giá sàn ≈ tổng phí” của 0013: thêm `unit_cost`,
+    `cost_currency`, `cost_effective_from`, `cost_source`, `referral_rate_used`, `min_margin_rate`,
+    `other_fee_per_unit`, `floor_price`, `gross_profit`, `margin_pct`, `below_floor`, `cost_basis`
+    (`cost+fees | cost_only | fees_only | currency_mismatch`). Thiếu giá vốn → **NULL + nhãn lý do**,
+    không lấy phí làm sàn. Công thức khớp `worker/src/domain/pricing.ts`:
+    `floor = (vốn + FBA + khác) / (1 − referral − biên tối thiểu)`.
+- **Worker — `upsertListing()` hết là stub rỗng, có runner `listings:sync`:**
+  - `web/src/lib/worker/db/listing-payload.ts` (mới): dựng payload theo luật
+    *undefined = không gửi (DB giữ nguyên)* / *null = chưa biết* / *`[]` = biết là rỗng*;
+    `parseReportNumber` đọc số kiểu local. `DbAdapter.upsertListings()` (ghi cả lô) +
+    `MockDbAdapter` **nhại đúng ngữ nghĩa RPC** để test không xanh giả.
+  - `db/supabase.ts`: `upsertListing`/`upsertListings` gọi `POST /rest/v1/rpc/vexim_worker_upsert_listings`
+    (nhóm theo shop, **không prefix schema**, không `Content-Profile` — đúng bài học sự cố 12/09).
+  - `jobs/listings-sync.job.ts` viết lại: gộp report ALL + INACTIVE + STRANDED → **một lần ghi lô**,
+    dựng hàng đợi L4 (`buildListingQueueEntry`), hook `fetchDetail` gọi `getListingsItem` cho **SKU có
+    vấn đề** (trần mặc định 50, throttle ~4,5 rps) để lấy `issues`/`productType`/cờ BUYABLE,
+    alert `listing_inactive` (đỏ nếu có stranded) hoặc tự đóng khi sạch, `sync_jobs` kiểu `listings.sync`.
+  - `amazon/listings.ts`: `extractListingState` trả **mảng issue nguyên văn Amazon**
+    (code/message/severity/attributeNames/categories/enforcements.actions) thay vì chỉ số đếm.
+  - Runner mới `runtime/run-listings-sync.ts` + CLI `worker listings:sync --all=<listings.tsv>
+    [--inactive=…] [--stranded=…] [--seller=<uuid>] [--details] [--detail-limit=50] [--dry-run]`
+    (script `npm run worker:listings-sync`); **chỉ ghi DB thật khi production + đủ credentials**,
+    còn lại chạy trong bộ nhớ và in rõ “KHÔNG ghi DB thật”.
+- **Web — `/finance/costs` (mới) để NHẬP giá vốn thật:**
+  - Nhập tay một bậc (SKU · giá vốn · tiền tệ · hiệu lực từ/đến · ghi chú) + **import CSV theo template**
+    (tải ở `/api/finance/cost-template`): xem trước số dòng hợp lệ/lỗi theo số dòng **trước khi ghi**,
+    all-or-nothing; “Kết thúc hiệu lực” (giữ lịch sử cho F4) và “Xoá” (chỉ admin/trưởng phòng Tài chính).
+  - Panel **“SKU đang bán nhưng chưa dùng được giá vốn”** (từ `vexim_cost_coverage`) kèm nút nhập nhanh —
+    đây chính là danh sách đang chặn F3/F4/P1; thang giá vốn theo SKU có nhãn *đang áp dụng / sắp hiệu lực*.
+  - Ghi qua Server Action → RPC 0016 bằng anon client + phiên đăng nhập (quyền do
+    `iam.can_write_seller_account()` + `iam.is_cost_editor()` chốt ở DB, web không dùng `service_role`).
+    Thêm mục nav “Giá vốn (F3/F4/P1)” + chip ở `/finance`.
+  - **P1/P2 dùng số thật:** `pricing-model` đọc 12 cột mới, ô giá sàn/biên hiện “—” kèm nhãn
+    `cost_basis` và link sang `/finance/costs` khi thiếu giá vốn, thêm bộ lọc “Chưa có giá vốn”,
+    KPI “SKU dưới giá sàn” đếm theo `below_floor`, breakdown giá sàn ở trang chi tiết liệt kê
+    vốn hiệu lực + FBA + phí khác + tỷ lệ referral + biên tối thiểu.
+  - **L1/L2/L4 dùng số thật:** tồn theo `quantity` (hết cảnh 0 giả), product type, cờ BUYABLE/DISCOVERABLE,
+    lý do stranded, enforcement Amazon, nguồn ghi gần nhất; L2 chuẩn hoá `enforcements.actions`
+    (trước đây cột enforcement luôn trống); L4 nêu nguyên nhân theo thứ tự
+    *stranded → enforcement → mã issue → trạng thái* và đề xuất sửa đúng bệnh; trạng thái lạ → `UNKNOWN`
+    (không ép về INACTIVE). Sửa luôn `readListingQueue` dùng select riêng vì view queue **không có**
+    cột `buy_box_*` (select thừa cột là PostgREST trả PGRST204 → sập cả trang L4).
+- **Kiểm chứng local (chạy thật, không suy luận):** `supabase npm test` **TẤT CẢ PASS** (BƯỚC 1..17;
+  BƯỚC 17 chạy 0016 hai lần để kiểm idempotent + thang giá vốn + import CSV lỗi/atomic + quyền
+  close/delete + ngữ nghĩa upsert listing + queue + `vexim_pricing` ra sàn 60.67/biên 39.5% +
+  `unit_cost ≡ effective_cost()` ở mọi dòng + RLS + độ phủ + `vexim_shops`) · `worker npm test`
+  **293/293** · `web npm test` **83/83** · `npx tsc --noEmit` sạch · 6 trang demo trả HTTP 200 ·
+  chạy thử `listings:sync --dry-run` trên report mẫu: 4 listing / 2 stranded / 4 SKU vào hàng đợi L4.
+
+### Chờ VEXIM (Đợt A)
+
+- ☐ Chạy `supabase/migrations/0016_core_data_unblock.sql` trong SQL Editor (sau `0015`).
+  **Không cần** thêm schema `catalog` vào *Exposed schemas*: web chỉ gọi RPC/view trong `public`.
+- ☐ Vào `/finance/costs` → tải template → **nhập giá vốn** cho SKU đang bán (tay hoặc CSV).
+  Chưa nhập thì F3 để trống giá trị claim, F4 để trống lãi gộp và P1 để trống giá sàn/biên (có chủ đích).
+- ☐ Chỉnh `catalog.pricing_defaults` (id=1) nếu tỷ lệ referral / biên tối thiểu của VEXIM khác 15% / 10%.
+- ☐ Tải 3 report trong Seller Central rồi nạp: `npm run worker:listings-sync -- --seller=<uuid>
+  --all=<merchant-listings-all.tsv> --inactive=<inactive.tsv> --stranded=<stranded.tsv>`
+  (thêm `--details` khi đã có `AMAZON_LWA_*` để lấy issue chi tiết cho L2).
+- ☐ Cấp quyền nhập giá vốn: user Tài chính cần `role_assignments` (admin / `dept_lead` phòng `finance`)
+  hoặc `iam.assignments` module `finance` + `can_write = true` trên đúng shop đó.
+- ⚠ Đã biết: `getListingsItem` giới hạn ~5 rps (burst 10) nên `--details` chỉ soi SKU có vấn đề,
+  trần mặc định 50 lần chạy (`--detail-limit` để đổi); report Merchant Listings chỉ cho **số đếm** issue,
+  muốn có mã lỗi/nội dung thật thì phải gọi API.
+
 ## Cập nhật 12/09 — Module 6 Đợt 2: F3 bồi hoàn FBA + F4 lợi nhuận SKU (migration 0015)
 
 - **Migration `0015_finance_claims_profit.sql`** (idempotent + self-check 3 bảng / 4 view / 2 trigger / 6 RPC):
@@ -44,10 +136,10 @@
 ### Chờ VEXIM (Module 6 Đợt 2)
 
 - ☐ Chạy `supabase/migrations/0015_finance_claims_profit.sql` trong SQL Editor (sau `0014`).
-- ☐ Thêm schema `catalog` vào Supabase → Settings → API → *Exposed schemas* nếu muốn trang nhập giá vốn
-  đọc trực tiếp (worker/service_role không phụ thuộc bước này).
-- ☐ **Nhập giá vốn** cho các SKU đang bán (`catalog.cost_inputs`) — chưa có giá vốn thì F3 để trống
-  “giá trị ước tính” và F4 để trống lãi gộp (hệ thống cố ý không đoán).
+- ☐ ~~Thêm schema `catalog` vào *Exposed schemas*~~ — **không cần**: Đợt A (0016) đã có trang
+  `/finance/costs` ghi qua RPC trong schema `public` (xem mục ĐỢT A ở đầu file).
+- ☐ **Nhập giá vốn** cho các SKU đang bán tại **`/finance/costs`** (nhập tay hoặc CSV theo template) —
+  chưa có giá vốn thì F3 để trống “giá trị ước tính” và F4 để trống lãi gộp (hệ thống cố ý không đoán).
 - ☐ Khi có credentials SP-API: chạy `npm run worker:finance-claims -- --seller=<uuid> --ledger=<file>`
   (và `--reimbursements=<file>`) theo nhịp tuần cho SOP-09; F4 chạy lại sau mỗi kỳ settlement.
 - ⚠ Đã biết: `GET_FBA_ESTIMATED_FBA_FEES_TXT_DATA` (Fee Preview) chỉ cho **1 request/ngày/seller** và
@@ -434,11 +526,12 @@ nên không phụ thuộc bước này).
 - ✅ Tạo project Supabase (`pitmyzovjwflkyoqjbkz`) + set 14 biến môi trường trên Vercel — **xong 12/09**
 - ☐ **Chạy `0006` rồi `0007` trong SQL Editor** (dọn fixture test + tạo super_admin/alerts)
 - ☐ Chạy `0008` → `0009` → **`0010`** (wrapper RPC · shop production · hạ tầng Module 4/6/7)
-- ☐ ✅ `0011`/`0012`/`0013` đã chạy · ☐ **`0014`** (trình soạn listing L3) · ☐ **`0015`** (bồi hoàn FBA + lợi nhuận SKU)
+- ☐ ✅ `0011`/`0012`/`0013` đã chạy · ☐ **`0014`** (trình soạn listing L3) · ☐ **`0015`** (bồi hoàn FBA + lợi nhuận SKU) · ☐ **`0016`** (Đợt A: giá vốn + ghi listing + `vexim_pricing` dùng giá vốn)
 - ☐ **Thêm `CRON_SECRET` trên Vercel** (Production + Preview) → Redeploy
 - ☐ `AMAZON_LWA_CLIENT_ID` / `_CLIENT_SECRET` / `_REFRESH_TOKEN` khi Developer Profile được duyệt — thiếu 3 biến này thì worker chỉ chạy demo trong bộ nhớ (an toàn, không ghi DB thật)
 - ☐ 4 thông tin thật cho landing page (email/phone/địa chỉ/tên pháp lý)
-- ☐ Chốt 2–3 shop pilot + file giá vốn theo template CSV
+- ☐ Chốt 2–3 shop pilot + file giá vốn theo template CSV (tải template ngay trong app:
+  `/finance/costs` → “⬇ Tải template CSV”, hoặc `GET /api/finance/cost-template`)
 - ☐ Hải Anh: báo ngày nộp hồ sơ + tạo Sandbox Application ngay sau khi nộp
 
 ### Biến môi trường Vercel: cái nào code thật sự đọc

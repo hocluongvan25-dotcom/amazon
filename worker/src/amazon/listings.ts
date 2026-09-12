@@ -28,6 +28,7 @@
  * Body không có field nào khác ngoài productType / patches / attributes.
  */
 import { LwaTokenManager } from "./lwa.ts";
+import type { ListingIssueRecord } from "../db/adapter.ts";
 
 export type ItemSummary = {
   marketplaceId?: string;
@@ -354,6 +355,8 @@ export function extractListingState(item: ListingsItem): {
   productType: string | null;
   buyable: boolean | null;
   discoverable: boolean | null;
+  /** issue NGUYÊN VĂN theo shape Amazon — màn L2 hiện đúng mã lỗi, không chỉ số đếm */
+  issues: ListingIssueRecord[];
   issueErrors: number;
   issueWarnings: number;
   enforcementActions: string[];
@@ -371,6 +374,18 @@ export function extractListingState(item: ListingsItem): {
     productType: s?.productType ?? null,
     buyable: flags.length > 0 ? flags.includes("BUYABLE") : null,
     discoverable: flags.length > 0 ? flags.includes("DISCOVERABLE") : null,
+    // Chỉ giữ những field Amazon thật sự trả về — không thêm nhãn tự chế,
+    // để L2 phân biệt được "Amazon không nói" với "Amazon nói không có".
+    issues: issues.map((i) => ({
+      ...(i.code !== undefined ? { code: i.code } : {}),
+      ...(i.message !== undefined ? { message: i.message } : {}),
+      ...(i.severity !== undefined ? { severity: i.severity } : {}),
+      ...(i.attributeNames !== undefined ? { attributeNames: i.attributeNames } : {}),
+      ...(i.categories !== undefined ? { categories: i.categories } : {}),
+      ...(i.enforcements?.actions !== undefined
+        ? { enforcements: { actions: i.enforcements.actions } }
+        : {}),
+    })),
     issueErrors: issues.filter((i) => i.severity === "ERROR").length,
     issueWarnings: issues.filter((i) => i.severity === "WARNING").length,
     enforcementActions: [...enforcementActions],

@@ -12,8 +12,9 @@ import {
 import { LivePricingPage } from "@/components/pricing/LivePricing";
 import { requireSession } from "@/lib/auth/session";
 import { pricingAlerts, pricingKpis, pricingRows } from "@/lib/data/mock";
+import { COST_BASIS_VI, isCostBlocked } from "@/lib/data/pricing-model";
 import type { PersonaKey } from "@/lib/roles";
-import type { BoxStatus } from "@/lib/types";
+import type { BoxStatus, PricingRow } from "@/lib/types";
 
 const ALLOWED: PersonaKey[] = ["ceo"];
 
@@ -34,12 +35,24 @@ function usd(v: number | null) {
   if (v === null) return "—";
   return `$${v.toFixed(2)}`;
 }
-function marginCls(m: number, tone: "red" | "amber" | "green") {
+function marginCls(m: number, tone: "red" | "amber" | "green" | "gray") {
   return tone === "red"
     ? "font-extrabold text-red"
     : tone === "amber"
       ? "font-bold text-amber"
-      : "text-green font-semibold";
+      : tone === "gray"
+        ? "text-soft"
+        : "text-green font-semibold";
+}
+/** Ô giá sàn: chưa có giá vốn → "—" kèm lý do (không lấy phí làm sàn). */
+function floorCell(r: PricingRow) {
+  if (r.floorPrice === null) {
+    return `— · ${COST_BASIS_VI[r.costBasis]}`;
+  }
+  return usd(r.floorPrice);
+}
+function marginCell(r: PricingRow) {
+  return r.currentMargin === null ? "—" : `${r.currentMargin.toFixed(1)}%`;
 }
 
 function chipHref(base: Record<string, string | undefined>, key: string, value: string) {
@@ -77,8 +90,9 @@ export default async function PricingPage({
   let rows = pricingRows.filter((r) => {
     if (state.f !== "all" && r.boxStatus !== state.f) return false;
     if (state.shop !== "all" && r.shop !== state.shop) return false;
-    if (state.margin === "below_floor" && r.marginTone !== "red") return false;
-    if (state.margin === "thin" && !(r.currentMargin < 15 && r.marginTone !== "red")) return false;
+    if (state.margin === "below_floor" && r.belowFloor !== true) return false;
+    if (state.margin === "thin" && !(r.currentMargin !== null && r.currentMargin < 15 && r.marginTone !== "red")) return false;
+    if (state.margin === "no_cost" && !isCostBlocked(r)) return false;
     if (state.q) {
       const hay = `${r.sku} ${r.asin} ${r.title}`.toLowerCase();
       if (!hay.includes(state.q)) return false;
@@ -88,7 +102,8 @@ export default async function PricingPage({
   rows = [...rows].sort((a, b) => {
     switch (state.sort) {
       case "margin":
-        return a.currentMargin - b.currentMargin;
+        // SKU chưa tính được biên xếp cuối — không chen lên đầu như thể biên thấp nhất
+        return (a.currentMargin ?? Number.POSITIVE_INFINITY) - (b.currentMargin ?? Number.POSITIVE_INFINITY);
       case "sku":
         return a.sku.localeCompare(b.sku);
       case "velocity":
@@ -100,7 +115,8 @@ export default async function PricingPage({
           let s = 0;
           if (r.boxStatus === "lost") s += 100;
           if (r.boxStatus === "at_risk") s += 50;
-          if (r.marginTone === "red") s += 80;
+          if (r.belowFloor === true) s += 80;
+          if (isCostBlocked(r)) s += 30;
           if (r.foepDelta && r.foepDelta > 2) s += 20;
           s += r.velocity30d / 10;
           return s;
@@ -236,6 +252,7 @@ export default async function PricingPage({
           ["all", "Mọi biên"],
           ["below_floor", "Dưới giá sàn"],
           ["thin", "Biên mỏng (<15%)"],
+          ["no_cost", `Chưa có giá vốn · ${pricingRows.filter(isCostBlocked).length}`],
         ] as [string, string][]).map(([key, label]) => (
           <a key={key} href={chipHref({ ...sp, q: sp.q }, "margin", key)} className={chip(state.margin === key)}>
             {label}
@@ -321,13 +338,13 @@ export default async function PricingPage({
                   {r.referencePrice === null ? <span className="text-soft">—</span> : usd(r.referencePrice)}
                 </td>
                 <td className={tableCls.tdNum}>
-                  {usd(r.floorPrice)}
-                  {r.marginTone === "red" ? (
+                  {floorCell(r)}
+                  {r.belowFloor === true ? (
                     <div className="text-[11px] font-bold text-red">dưới sàn!</div>
                   ) : null}
                 </td>
-                <td className={`${tableCls.tdNum} ${marginCls(r.currentMargin, r.marginTone)}`}>
-                  {r.currentMargin.toFixed(1)}%
+                <td className={`${tableCls.tdNum} ${marginCls(r.currentMargin ?? 0, r.marginTone)}`}>
+                  {marginCell(r)}
                 </td>
                 <td className={tableCls.tdNum}>
                   {r.competitorCount}

@@ -2,24 +2,15 @@ import { Chip, NoAccess, PageHeader, Panel, tableCls } from "@/components/ui";
 import { LiveListingList } from "@/components/listing/LiveListing";
 import { requireSession } from "@/lib/auth/session";
 import { listingList } from "@/lib/data/mock";
+import { LISTING_STATUS_TONE, LISTING_STATUS_VI } from "@/lib/data/listing-model";
 import type { PersonaKey } from "@/lib/roles";
 import type { ListingListRow, ListingStatus } from "@/lib/types";
 
 const ALLOWED: PersonaKey[] = ["ceo"];
 
-const statusTone: Record<ListingStatus, "green" | "amber" | "red" | "gray"> = {
-  ACTIVE: "green",
-  INACTIVE: "amber",
-  STRANDED: "red",
-  SUPPRESSED: "red",
-};
-
-const statusLabel: Record<ListingStatus, string> = {
-  ACTIVE: "Active",
-  INACTIVE: "Inactive",
-  STRANDED: "Stranded",
-  SUPPRESSED: "Bị ẩn (suppressed)",
-};
+// Trạng thái: dùng bản chung của listing-model (0016 thêm REMOVED/CLOSED/DELETED/UNKNOWN)
+const statusTone = LISTING_STATUS_TONE;
+const statusLabel = LISTING_STATUS_VI;
 
 function chipHref(base: Record<string, string | undefined>, key: string, value: string) {
   const params = new URLSearchParams();
@@ -84,7 +75,9 @@ export default async function ListingListPage({
   const csv =
     "sku,asin,shop,brand,status,price,stock,errors,warnings,owner\n" +
     rows
-      .map((r) => [r.sku, r.asin, r.shop, r.brand, r.status, r.price, r.stock, r.issueErrors, r.issueWarnings, r.owner].join(","))
+      .map((r) =>
+        [r.sku, r.asin, r.shop, r.brand, r.status, r.price, r.stock ?? "", r.issueErrors, r.issueWarnings, r.owner].join(","),
+      )
       .join("\n");
 
   return (
@@ -234,7 +227,9 @@ export default async function ListingListPage({
                 <td className={tableCls.td}>{r.shop}</td>
                 <td className={tableCls.td}>{r.brand}</td>
                 <td className={tableCls.tdNum}>{r.price}</td>
-                <td className={tableCls.tdNum}>{r.stock}</td>
+                <td className={tableCls.tdNum}>
+                  {r.stock === null ? <span className="text-soft">—</span> : r.stock.toLocaleString("en-US")}
+                </td>
                 <td className={tableCls.tdNum}>
                   {r.issueErrors > 0 ? (
                     <span className="font-extrabold text-red">{r.issueErrors} lỗi</span>

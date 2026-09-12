@@ -355,6 +355,17 @@ export type FinancialEventRow = {
 
 export type BoxStatus = "holding" | "at_risk" | "lost" | "no_box";
 
+/**
+ * Nguồn số liệu của giá sàn/biên (cột `cost_basis` của view vexim_pricing, migration 0016).
+ * Người dùng phải biết số nào tính từ giá vốn thật, số nào chỉ từ phí ước tính.
+ */
+export type CostBasis =
+  | "cost+fees" // giá vốn hiệu lực + phí Amazon thật/ước tính → tin được nhất
+  | "cost_only" // có giá vốn, chưa có fees estimate → referral dùng tỷ lệ cấu hình
+  | "fees_only" // CHƯA có giá vốn → không tính được sàn/biên (đang chặn P1)
+  | "currency_mismatch" // giá vốn khác tiền tệ giá bán → không cộng được
+  | "unavailable"; // chưa có gì
+
 export type PricingRow = {
   sku: string;
   asin: string;
@@ -365,14 +376,30 @@ export type PricingRow = {
   foep: number | null; // Featured Offer Expected Price
   foepDelta: number | null; // ourPrice - foep (dương = đang cao hơn FOEP → nguy cơ mất box)
   referencePrice: number | null; // giá tham chiếu thấp nhất của đối thủ (landed)
-  floorPrice: number; // giá sàn = vốn + referral fee + FBA fee + biên tối thiểu
-  currentMargin: number; // % biên hiện tại (ourPrice - floorCost) / ourPrice
-  marginTone: "red" | "amber" | "green"; // <0 đỏ · <biên tối thiểu vàng
+  /**
+   * Giá sàn = (giá vốn + FBA fee + phí khác) / (1 − tỷ lệ referral − biên tối thiểu).
+   * NULL khi chưa có giá vốn hoặc lệch tiền tệ — KHÔNG lấy phí làm sàn (lỗi của 0013).
+   */
+  floorPrice: number | null;
+  /** % biên tại giá hiện tại; NULL khi chưa tính được (cùng điều kiện với floorPrice). */
+  currentMargin: number | null;
+  marginTone: "red" | "amber" | "green" | "gray"; // <0 đỏ · <biên tối thiểu vàng · gray = chưa tính được
   boxStatus: BoxStatus;
   competitorCount: number;
   velocity30d: number; // đơn/ngày — để ước tính tổn thất khi mất box
   lastPriceChange: string;
   owner: string;
+  /* ↓ migration 0016: giá vốn hiệu lực + các thành phần của công thức sàn */
+  unitCost: number | null; // giá vốn hiệu lực hôm nay (catalog.effective_cost)
+  costCurrency: string | null;
+  costEffectiveFrom: string | null; // bậc giá vốn bắt đầu từ ngày nào
+  costSource: string | null; // manual | csv | api
+  grossProfit: number | null; // lãi gộp/đơn vị tại giá hiện tại
+  belowFloor: boolean | null; // giá đang DƯỚI sàn → phải xử lý trước khi áp giá
+  referralRateUsed: number | null; // tỷ lệ referral thật sự dùng (suy ra từ phí hoặc cấu hình)
+  minMarginRate: number | null; // biên tối thiểu theo cấu hình (catalog.pricing_defaults)
+  otherFeePerUnit: number | null; // phí khác/đơn vị (đóng gói, đầu VN…)
+  costBasis: CostBasis;
 };
 
 export type CompetitorOffer = {
@@ -435,7 +462,22 @@ export type PriceApprovalItem = {
 
 /* ---------- Module 1 — Listing (L1/L2/L4) ---------- */
 
-export type ListingStatus = "ACTIVE" | "INACTIVE" | "STRANDED" | "SUPPRESSED";
+/**
+ * Trạng thái listing — đúng tập worker/RPC 0016 chấp nhận, cộng UNKNOWN cho dòng
+ * report ghi trạng thái không đọc được (KHÔNG suy diễn thành ACTIVE/INACTIVE).
+ */
+export type ListingStatus =
+  | "ACTIVE"
+  | "INACTIVE"
+  | "STRANDED"
+  | "SUPPRESSED"
+  | "REMOVED"
+  | "CLOSED"
+  | "DELETED"
+  | "UNKNOWN";
+
+/** Nguồn ghi dòng listing gần nhất (cột last_source của 0016). */
+export type ListingSource = "report" | "api" | "notification" | "manual";
 
 export type ListingListRow = {
   sku: string;
@@ -445,12 +487,25 @@ export type ListingListRow = {
   brand: string;
   status: ListingStatus;
   price: string;
-  stock: number;
+  /** Tồn theo report/API; NULL = chưa biết (không hiện 0 giả). */
+  stock: number | null;
   issueErrors: number;
   issueWarnings: number;
   owner: string;
   revenue30d: number; // USD — để sort
   updated: string;
+  /* ↓ migration 0016: chi tiết để L1/L2 giải thích được "vì sao" */
+  /** Issue nguyên văn từ Amazon, đã chuẩn hoá để hiển thị (L2). */
+  issues: ListingIssueItem[];
+  productType: string | null;
+  buyable: boolean | null; // mất BUYABLE → không mua được dù listing "ACTIVE"
+  discoverable: boolean | null; // mất DISCOVERABLE → bị ẩn khỏi tìm kiếm
+  /** Lý do stranded từ report Stranded — có lý do mới biết sửa gì (SOP-03 bước 6). */
+  strandedReason: string | null;
+  /** Hành động Amazon đang áp: LISTING_SUPPRESSED / SEARCH_SUPPRESSED… */
+  enforcementActions: string[];
+  lastSource: ListingSource | string | null;
+  lastSyncedAt: string | null;
 };
 
 export type ListingIssueItem = {

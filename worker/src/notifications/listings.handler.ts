@@ -102,6 +102,7 @@ export async function handleListingsItemStatusChange(
       status,
       buyable: flags.length > 0 ? flags.includes("BUYABLE") : null,
       discoverable: flags.length > 0 ? flags.includes("DISCOVERABLE") : null,
+      source: "notification",
       updatedAt: now,
     });
   }
@@ -150,9 +151,14 @@ export async function handleListingsItemIssuesChange(
       sku: payload.Sku,
       asin: payload.Asin ?? state.asin,
       itemName: state.itemName,
+      productType: state.productType,
+      // issues NGUYÊN VĂN từ getListingsItem → L2 hiện đúng mã lỗi Amazon.
+      // `[]` (không còn issue) khác null (chưa biết): RPC 0016 phân biệt được.
+      issues: state.issues,
       issueErrors: state.issueErrors,
       issueWarnings: state.issueWarnings,
       enforcementActions: state.enforcementActions.length > 0 ? state.enforcementActions : enforcementActions,
+      source: "notification",
       updatedAt: now,
     });
     detailFetched = true;

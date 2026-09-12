@@ -1252,6 +1252,458 @@ ok(
 
 await ex("reset role; rollback;");
 
+// ============================================================================
+console.log("\n=== BƯỚC 17: 0016 — ĐỢT A gỡ chặn dữ liệu lõi (giá vốn · listing · pricing) ===");
+// ============================================================================
+ok(
+  await ex(rd("migrations/0016_core_data_unblock.sql"), "0016_core_data_unblock.sql"),
+  "0016 chạy sạch (DO-block tự kiểm tra cột/view/RPC/quyền/PII)",
+);
+await cmp(
+  "0016: catalog.listings đủ 11 cột để GHI dữ liệu thật (L1/L2/L4)",
+  `select count(*) n from information_schema.columns
+    where table_schema='catalog' and table_name='listings'
+      and column_name in ('issues','buyable','discoverable','product_type','quantity',
+                          'stranded_reason','issue_errors','issue_warnings',
+                          'enforcement_actions','last_source','last_synced_at')`,
+  11,
+);
+// Web đọc hai view này bằng chuỗi select cố định (LISTINGS_SELECT / LISTING_QUEUE_SELECT
+// trong web/src/lib/data/listing-model.ts) → thiếu 1 cột là PostgREST trả PGRST204 và
+// SẬP CẢ TRANG, nên chốt ở đây thay vì để production phát hiện.
+await cmp(
+  "0016: vexim_listings phơi đủ 8 cột mới cho L1/L2 (web select bằng tên)",
+  `select count(*) n from information_schema.columns
+    where table_schema='public' and table_name='vexim_listings'
+      and column_name in ('product_type','buyable','discoverable','quantity',
+                          'stranded_reason','enforcement_actions','last_source','last_synced_at')`,
+  8,
+);
+await cmp(
+  "0016: vexim_listing_queue phơi đủ 10 cột mới cho L4 (kể cả buyable/discoverable)",
+  `select count(*) n from information_schema.columns
+    where table_schema='public' and table_name='vexim_listing_queue'
+      and column_name in ('product_type','buyable','discoverable','quantity','stranded_reason',
+                          'enforcement_actions','last_source','last_synced_at','issues','error_count')`,
+  10,
+);
+await cmp(
+  "0016: queue KHÔNG có cột offer (web dùng select riêng — tránh PGRST204)",
+  `select count(*) n from information_schema.columns
+    where table_schema='public' and table_name='vexim_listing_queue'
+      and column_name in ('buy_box_won','buy_box_price','competitor_price','offer_captured_at')`,
+  0,
+);
+await cmp(
+  "0016: catalog.cost_inputs có cột vết (updated_at/updated_by/source_ref)",
+  `select count(*) n from information_schema.columns
+    where table_schema='catalog' and table_name='cost_inputs'
+      and column_name in ('updated_at','updated_by','source_ref')`,
+  3,
+);
+await cmp(
+  "0016: 6 view public (2 listing + pricing + 2 giá vốn + shops)",
+  `select count(*) n from information_schema.views where table_schema='public'
+     and table_name in ('vexim_listings','vexim_listing_queue','vexim_pricing',
+                        'vexim_cost_inputs','vexim_cost_coverage','vexim_shops')`,
+  6,
+);
+await cmp(
+  "0016: vexim_pricing có giá vốn + giá sàn + biên + nhãn nguồn",
+  `select count(*) n from information_schema.columns
+    where table_schema='public' and table_name='vexim_pricing'
+      and column_name in ('unit_cost','cost_currency','cost_effective_from','floor_price',
+                          'gross_profit','margin_pct','below_floor','cost_basis',
+                          'referral_rate_used','min_margin_rate')`,
+  10,
+);
+await cmp(
+  "0016: cả 6 view đều security_invoker (RLS bảng gốc vẫn áp)",
+  `select count(*) n from pg_class c join pg_namespace n on n.oid=c.relnamespace
+    where n.nspname='public'
+      and c.relname in ('vexim_listings','vexim_listing_queue','vexim_pricing',
+                        'vexim_cost_inputs','vexim_cost_coverage','vexim_shops')
+      and 'security_invoker=true'=any(c.reloptions)`,
+  6,
+);
+await cmp(
+  "0016: RPC worker bị revoke khỏi authenticated (chỉ service_role)",
+  `select count(*) n from pg_proc p join pg_namespace ns on ns.oid=p.pronamespace
+    where ns.nspname='public'
+      and p.proname = 'vexim_worker_upsert_listings'
+      and has_function_privilege('authenticated', p.oid, 'EXECUTE')`,
+  0,
+);
+await cmp(
+  "0016: view mới KHÔNG phơi PII/email nội bộ/merchant token",
+  `select count(*) n from information_schema.columns where table_schema='public'
+     and table_name in ('vexim_listings','vexim_listing_queue','vexim_pricing',
+                        'vexim_cost_inputs','vexim_cost_coverage','vexim_shops')
+     and column_name in ('buyer_name','buyer_email','buyer_phone_number','ship_address_1',
+                         'recipient_name','actor_email','email','imported_by_email','seller_id')`,
+  0,
+);
+ok(
+  await ex(rd("migrations/0016_core_data_unblock.sql"), "0016 lần 2"),
+  "0016 idempotent",
+);
+await cmp(
+  "0016 lần 2: policy không nhân đôi",
+  "select count(*) n from pg_policies where schemaname='catalog' and tablename='cost_inputs'",
+  2,
+);
+await cmp(
+  "0016 lần 2: pricing_defaults vẫn đúng 1 dòng cấu hình",
+  "select count(*) n from catalog.pricing_defaults",
+  1,
+);
+
+// PGlite trả cột `date` dưới dạng Date → chuẩn về chuỗi để so sánh
+const dstr = (v) => (v && typeof v.toISOString === "function" ? v.toISOString() : String(v ?? ""));
+/** gọi hàm returns jsonb và bóc kết quả (select f(...) → 1 cột tên hàm) */
+const rpc = async (sql) => (await one(`select ${sql} as res`)).res;
+
+await ex("begin");
+const aShop = (await one("select id from connections.seller_accounts order by seller_id limit 1")).id;
+const aOtherShop = (await one(`select id from connections.seller_accounts where id <> '${aShop}' limit 1`)).id;
+const aFin      = "a1000000-0000-4000-8000-000000000001";  // operator module finance
+const aListing  = "a1000000-0000-4000-8000-000000000002";  // operator module listings
+const aStranger = "a1000000-0000-4000-8000-000000000003";  // không được gán shop
+await ex("reset role;");
+ok(
+  await ex(`insert into auth.users(id,email) values
+     ('${aFin}','local-a-fin@example.test'),
+     ('${aListing}','local-a-listing@example.test'),
+     ('${aStranger}','local-a-stranger@example.test');
+   insert into iam.user_profiles(id,display_name,email) values
+     ('${aFin}','A finance','local-a-fin@example.test'),
+     ('${aListing}','A listing','local-a-listing@example.test'),
+     ('${aStranger}','A stranger','local-a-stranger@example.test');
+   insert into iam.assignments(user_id,seller_account_id,module,can_write) values
+     ('${aFin}','${aShop}','finance',true),
+     ('${aListing}','${aShop}','listings',true);
+   insert into iam.role_assignments(user_id,role) values
+     ('${aFin}','operator'),('${aListing}','operator');`),
+  "0016 fixture: 3 user (finance / listings / ngoài shop)",
+);
+const asA = async (u) => {
+  await ex("reset role;");
+  await ex(`select set_config('request.jwt.claim.sub','${u ?? ""}',false);`);
+  await ex("set role authenticated;");
+};
+
+// --- 1. Nhập giá vốn TAY: thang hiệu lực, không nhân đôi ---------------------
+await asA(aFin);
+let res = await rpc(`public.vexim_upsert_cost_input('${aShop}','sku-a',10,'USD','2026-08-01',null,'lô 1')`);
+ok(res?.inserted === 1, `0016 giá vốn: nhập bậc đầu (inserted=${res?.inserted})`);
+res = await rpc(`public.vexim_upsert_cost_input('${aShop}','sku-a',12,'USD','2026-09-01',null,'lô 2')`);
+ok(res?.inserted === 1 && res?.closed_previous === 1,
+   `0016 giá vốn: bậc mới TỰ cắt ngọn bậc cũ tại mốc hiệu lực (closed=${res?.closed_previous})`);
+const ladder = await db.query(
+  `select unit_cost, effective_from, effective_to from catalog.cost_inputs
+    where seller_account_id='${aShop}' and sku='SKU-A' order by effective_from`);
+ok(
+  ladder.rows.length === 2 &&
+  dstr(ladder.rows[0].effective_to).startsWith("2026-09-01") &&
+  ladder.rows[1].effective_to === null,
+  `0016 giá vốn: thang 2 bậc [08-01→09-01) = 10, [09-01→∞) = 12 — ${JSON.stringify(ladder.rows.map(r => [r.unit_cost, dstr(r.effective_to)]))}`,
+);
+res = await rpc(`public.vexim_upsert_cost_input('${aShop}','sku-a',13,'USD','2026-09-01',null,'sửa lô 2')`);
+ok(res?.updated === 1 && res?.superseded === 1,
+   `0016 giá vốn: nhập lại cùng mốc = CẬP NHẬT, không nhân đôi bậc (updated=${res?.updated})`);
+await cmp(
+  "0016 giá vốn: vẫn đúng 2 bậc sau khi sửa",
+  `select count(*) n from catalog.cost_inputs where seller_account_id='${aShop}' and sku='SKU-A'`,
+  2,
+);
+ok(
+  Number((await one(`select catalog.effective_cost('${aShop}','SKU-A','2026-09-05') as v`)).v) === 13,
+  "0016 giá vốn: effective_cost() ngày hiện hành = 13",
+);
+ok(
+  Number((await one(`select catalog.effective_cost('${aShop}','SKU-A','2026-08-15') as v`)).v) === 10,
+  "0016 giá vốn: effective_cost() ngày cũ = 10 (F4 tính đúng theo thời điểm)",
+);
+ok(
+  await mustBlock(`select public.vexim_upsert_cost_input('${aShop}','sku-b',5,'USD','2026-09-01','2026-08-01',null)`),
+  "0016 giá vốn CHẶN: effective_to trước effective_from",
+);
+ok(
+  await mustBlock(`select public.vexim_upsert_cost_input('${aShop}','SKU-A',-1,'USD','2026-10-01',null,null)`),
+  "0016 giá vốn CHẶN: giá vốn âm",
+);
+ok(
+  await mustBlock(`select public.vexim_upsert_cost_input('${aShop}','AAAAAAAAAA-BBBBBBBBBB-CCCCCCCCCC-DDDDDDDDDDD',1,'USD','2026-10-01',null,null)`),
+  "0016 giá vốn CHẶN: SKU dài hơn 40 ký tự (giới hạn seller-sku Amazon)",
+);
+
+// --- 2. Quyền nhập giá vốn --------------------------------------------------
+await asA(aListing);
+ok(
+  await mustBlock(`select public.vexim_upsert_cost_input('${aShop}','sku-c',7,'USD','2026-09-01',null,null)`),
+  "0016 giá vốn CHẶN: user có can_write nhưng KHÔNG thuộc module finance",
+);
+await asA(aStranger);
+ok(
+  await mustBlock(`select public.vexim_upsert_cost_input('${aOtherShop}','sku-c',7,'USD','2026-09-01',null,null)`),
+  "0016 giá vốn CHẶN: user ngoài shop (RLS + can_write_seller_account)",
+);
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role service_role;");
+ok(
+  await mustBlock(`select public.vexim_upsert_cost_input('${aShop}','sku-c',7,'USD','2026-09-01',null,null)`),
+  "0016 giá vốn CHẶN: worker (không phiên đăng nhập) không dùng RPC nhập tay",
+);
+
+// --- 3. Import CSV: parse số/ngày kiểu local + ATOMIC -----------------------
+await asA(aFin);
+res = await rpc(`public.vexim_import_cost_inputs('${aShop}', '[
+  {"sku":"CSV-1","unit_cost":"9,5","currency":"usd","effective_from":"2026-07-01","effective_to":"","note":"lô 7"},
+  {"sku":"CSV-2","unit_cost":"1.234,56","currency":"USD","effective_from":"01/07/2026"},
+  {"sku":"CSV-3","unit_cost":4.2,"currency":"USD","effective_from":"2026-07-01"}
+]'::jsonb, 'gia-von-2026-07.csv')`);
+ok(res?.ok === true && res?.rows === 3 && res?.inserted === 3,
+   `0016 CSV: import 3 dòng thành công (${JSON.stringify(res)})`);
+const csv2 = await one(`select unit_cost, effective_from, currency from catalog.cost_inputs
+   where seller_account_id='${aShop}' and sku='CSV-2'`);
+ok(Number(csv2?.unit_cost) === 1234.56 && dstr(csv2?.effective_from).startsWith("2026-07-01"),
+   `0016 CSV: parse số "1.234,56" → 1234.56 và ngày "01/07/2026" → 2026-07-01 (nhận ${csv2?.unit_cost} · ${dstr(csv2?.effective_from)})`);
+const csv1 = await one(`select unit_cost, currency, source, source_ref from catalog.cost_inputs
+   where seller_account_id='${aShop}' and sku='CSV-1'`);
+ok(Number(csv1?.unit_cost) === 9.5 && csv1?.currency === "USD" && csv1?.source === "csv"
+     && csv1?.source_ref === "gia-von-2026-07.csv",
+   `0016 CSV: parse "9,5", chuẩn hoá currency thường → USD, ghi source + tên file (nhận ${JSON.stringify(csv1)})`);
+
+const nBefore = (await one("select count(*)::int n from catalog.cost_inputs")).n;
+res = await rpc(`public.vexim_import_cost_inputs('${aShop}', '[
+  {"sku":"CSV-OK","unit_cost":"3","currency":"USD","effective_from":"2026-07-01"},
+  {"sku":"CSV-BAD","unit_cost":"abc","currency":"USD","effective_from":"2026-07-01"},
+  {"sku":"","unit_cost":"3","currency":"USD","effective_from":"2026-07-01"}
+]'::jsonb, 'loi.csv')`);
+const nAfter = (await one("select count(*)::int n from catalog.cost_inputs")).n;
+ok(res?.ok === false && Array.isArray(res?.errors) && res.errors.length === 2
+     && res.errors[0].line === 2 && res.errors[1].line === 3,
+   `0016 CSV: lô có lỗi → ok=false + báo đúng SỐ DÒNG (${JSON.stringify(res?.errors)})`);
+ok(nBefore === nAfter, `0016 CSV ATOMIC: có 1 dòng lỗi thì KHÔNG ghi dòng nào (${nBefore} → ${nAfter})`);
+res = await rpc(`public.vexim_import_cost_inputs('${aShop}', '[
+  {"sku":"CSV-MMDD","unit_cost":"3","currency":"USD","effective_from":"07/20/2026"}]'::jsonb, null)`);
+ok(res?.ok === false && /tháng > 12/.test(res?.errors?.[0]?.message ?? ""),
+   `0016 CSV: từ chối MM/DD/YYYY mơ hồ thay vì đoán (${res?.errors?.[0]?.message})`);
+
+// --- 4. Kết thúc hiệu lực / xoá + audit ------------------------------------
+const closeId = (await one(`select id from catalog.cost_inputs
+   where seller_account_id='${aShop}' and sku='CSV-1'`)).id;
+res = await rpc(`public.vexim_close_cost_input('${closeId}','2026-08-15','hết lô')`);
+const closedRow = await one(`select effective_to, note from catalog.cost_inputs where id='${closeId}'`);
+ok(res?.ok === true && dstr(closedRow?.effective_to).startsWith("2026-08-15") && closedRow?.note === "hết lô",
+   `0016 giá vốn: kết thúc hiệu lực một bậc (không xoá lịch sử) — ${dstr(closedRow?.effective_to)}`);
+ok(
+  await mustBlock(`select public.vexim_close_cost_input('${closeId}','2026-07-01',null)`),
+  "0016 giá vốn CHẶN: ngày kết thúc trước ngày hiệu lực",
+);
+ok(
+  await mustBlock(`select public.vexim_delete_cost_input('${closeId}')`),
+  "0016 giá vốn CHẶN: operator không được XOÁ bậc giá vốn (chỉ admin/trưởng phòng Tài chính)",
+);
+// 3 lần nhập tay + 3 lần import (1 thành công, 2 lô lỗi cũng PHẢI log) + 1 lần kết thúc
+await cmp(
+  "0016 giá vốn: mọi thao tác (kể cả lô import BỊ TỪ CHỐI) đều để lại audit log",
+  `select count(*) n from iam.audit_logs
+    where action in ('cost.upsert','cost.import','cost.close') and seller_account_id='${aShop}'`,
+  7,
+);
+await cmp(
+  "0016 giá vốn: lô import lỗi cũng bị ghi log với kết quả error",
+  `select count(*) n from iam.audit_logs
+    where action='cost.import' and result like 'error:%' and seller_account_id='${aShop}'`,
+  2,
+);
+
+// --- 5. Worker GHI listing (thay stub rỗng) --------------------------------
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role service_role;");
+res = await one(`select * from public.vexim_worker_upsert_listings('${aShop}', '[
+  {"sku":"L-1","asin":"B0001","title":"Vali 20","status":"active","price":"129.99","currency":"usd",
+   "quantity":"142","product_type":"LUGGAGE",
+   "issues":[{"code":"8541","message":"thiếu thuộc tính","severity":"ERROR","attributeNames":["item_name"]},
+             {"code":"90220","message":"thiếu mô tả","severity":"WARNING"}],
+   "stranded_reason":null,"source":"report","synced_at":"2026-09-12T02:00:00Z"}]'::jsonb)`);
+ok(res?.upserted === 1 && res?.active_count === 1,
+   `0016 listing: worker ghi được listing (upserted=${res?.upserted})`);
+const l1 = await one(`select status, price, currency, quantity, product_type, issue_errors, issue_warnings,
+   stranded_reason, last_source from catalog.listings where seller_account_id='${aShop}' and sku='L-1'`);
+ok(l1?.status === "ACTIVE" && Number(l1?.price) === 129.99 && l1?.currency === "USD"
+     && l1?.quantity === 142 && l1?.issue_errors === 1 && l1?.issue_warnings === 1
+     && l1?.last_source === "report",
+   `0016 listing: chuẩn hoá status/price/currency + ĐẾM issue từ mảng jsonb — ${JSON.stringify(l1)}`);
+
+await one(`select * from public.vexim_worker_upsert_listings('${aShop}', '[
+  {"sku":"L-1","status":null,"price":null,"title":null,"source":"report"}]'::jsonb)`);
+const l2 = await one(`select status, price, title, issue_errors from catalog.listings
+   where seller_account_id='${aShop}' and sku='L-1'`);
+ok(l2?.status === "ACTIVE" && Number(l2?.price) === 129.99 && l2?.title === "Vali 20" && l2?.issue_errors === 1,
+   `0016 listing: NULL = "chưa biết" → KHÔNG đè dữ liệu cũ — ${JSON.stringify(l2)}`);
+
+await one(`select * from public.vexim_worker_upsert_listings('${aShop}', '[{"sku":"L-1","issues":[]}]'::jsonb)`);
+const l3 = await one(`select issues, issue_errors, issue_warnings from catalog.listings
+   where seller_account_id='${aShop}' and sku='L-1'`);
+ok(JSON.stringify(l3?.issues) === "[]" && l3?.issue_errors === 0 && l3?.issue_warnings === 0,
+   `0016 listing: issues=[] nghĩa là "đã xác nhận hết lỗi" → xoá bộ đếm cũ (${JSON.stringify(l3)})`);
+
+await one(`select * from public.vexim_worker_upsert_listings('${aShop}', '[
+  {"sku":"L-1","issues":null,"issue_errors":2,"issue_warnings":1,
+   "enforcement_actions":["SEARCH_SUPPRESSED"]}]'::jsonb)`);
+const l4 = await one(`select issues, issue_errors from catalog.listings
+   where seller_account_id='${aShop}' and sku='L-1'`);
+const v4 = await one(`select error_count, warning_count from public.vexim_listings
+   where seller_account_id='${aShop}' and sku='L-1'`);
+ok(l4?.issues === null && Number(v4?.error_count) === 2 && Number(v4?.warning_count) === 1,
+   `0016 listing: notification chỉ cho SỐ → xoá mảng chi tiết lỗi thời, view đếm = 2/1 (${JSON.stringify(v4)})`);
+
+await one(`select * from public.vexim_worker_upsert_listings('${aShop}', '[
+  {"sku":"L-1","status":"STRANDED","stranded_reason":"Listing error (product type invalid)"}]'::jsonb)`);
+ok((await one(`select stranded_reason from catalog.listings
+   where seller_account_id='${aShop}' and sku='L-1'`)).stranded_reason?.startsWith("Listing error"),
+   "0016 listing: ghi lý do stranded cho L4/SOP-03");
+await one(`select * from public.vexim_worker_upsert_listings('${aShop}', '[
+  {"sku":"L-1","status":"ACTIVE","stranded_reason":null}]'::jsonb)`);
+ok((await one(`select stranded_reason from catalog.listings
+   where seller_account_id='${aShop}' and sku='L-1'`)).stranded_reason === null,
+   "0016 listing: hết stranded → XOÁ lý do (key có mặt + null), không giữ oan trong queue");
+await one(`select * from public.vexim_worker_upsert_listings('${aShop}', '[
+  {"sku":"L-2","status":"INACTIVE","stranded_reason":"No listing exists for inventory"}]'::jsonb)`);
+await one(`select * from public.vexim_worker_upsert_listings('${aShop}', '[{"sku":"L-2","status":"INACTIVE"}]'::jsonb)`);
+ok((await one(`select stranded_reason from catalog.listings
+   where seller_account_id='${aShop}' and sku='L-2'`)).stranded_reason === "No listing exists for inventory",
+   "0016 listing: key VẮNG → giữ nguyên lý do stranded cũ");
+await one(`select * from public.vexim_worker_upsert_listings('${aShop}', '[{"sku":"L-4"}]'::jsonb)`);
+ok((await one(`select status from catalog.listings
+   where seller_account_id='${aShop}' and sku='L-4'`)).status === "UNKNOWN",
+   "0016 listing: dòng mới chưa rõ trạng thái → 'UNKNOWN', KHÔNG bịa 'active'");
+ok(
+  await mustBlock(`select public.vexim_worker_upsert_listings('${aShop}', '[{"sku":"L-5","status":"Banana"}]'::jsonb)`),
+  "0016 listing CHẶN: trạng thái ngoài tập hợp lệ",
+);
+const queueSkus = (await db.query(
+  `select sku from public.vexim_listing_queue where seller_account_id='${aShop}' order by sku`)).rows.map(r => r.sku);
+ok(queueSkus.join(",") === "L-1,L-2",
+   `0016 L4: queue chỉ chứa dòng có vấn đề (L-1 còn 2 lỗi, L-2 inactive; L-4 UNKNOWN thì không) — ${queueSkus.join(",")}`);
+await asA(aFin);
+ok(
+  await mustBlock(`select public.vexim_worker_upsert_listings('${aShop}', '[]'::jsonb)`),
+  "0016 listing CHẶN: authenticated không gọi RPC ghi của worker",
+);
+
+// --- 6. vexim_pricing dùng GIÁ VỐN HIỆU LỰC (thay floor ≈ phí của 0013) -----
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role service_role;");
+await ex(`insert into catalog.listings(seller_account_id,sku,asin,title,status,price,currency) values
+  ('${aShop}','P-COST','B0P1','có vốn + có phí','ACTIVE',100,'USD'),
+  ('${aShop}','P-NOCOST','B0P2','không vốn','ACTIVE',100,'USD'),
+  ('${aShop}','P-COSTONLY','B0P3','có vốn, chưa có phí','ACTIVE',100,'USD'),
+  ('${aShop}','P-FX','B0P4','vốn EUR, giá bán USD','ACTIVE',100,'USD');
+ insert into catalog.fees_estimates(seller_account_id,sku,referral_fee,fba_fee,total_fee,currency,estimated_at) values
+  ('${aShop}','P-COST',15,5.5,20.5,'USD',now()),
+  ('${aShop}','P-NOCOST',15,5.5,20.5,'USD',now());`);
+await asA(aFin);
+await rpc(`public.vexim_upsert_cost_input('${aShop}','P-COST',40,'USD','2026-09-01',null,null)`);
+await rpc(`public.vexim_upsert_cost_input('${aShop}','P-COSTONLY',40,'USD','2026-09-01',null,null)`);
+await rpc(`public.vexim_upsert_cost_input('${aShop}','P-FX',40,'EUR','2026-09-01',null,null)`);
+const pricing = {};
+for (const row of (await db.query(
+  `select sku, unit_cost, cost_basis, floor_price, gross_profit, margin_pct, below_floor, referral_rate_used
+     from public.vexim_pricing where seller_account_id='${aShop}' and sku like 'P-%' order by sku`)).rows) {
+  pricing[row.sku] = row;
+}
+ok(Number(pricing["P-COST"]?.unit_cost) === 40 && pricing["P-COST"]?.cost_basis === "cost+fees",
+   `0016 P1: view đọc giá vốn hiệu lực (40) + nhãn nguồn cost+fees — ${JSON.stringify(pricing["P-COST"])}`);
+ok(Number(pricing["P-COST"]?.floor_price) === 60.67,
+   `0016 P1: giá sàn = (40 vốn + 5.5 FBA) / (1 − 0.15 referral − 0.10 biên) = 60.67 (nhận ${pricing["P-COST"]?.floor_price})`);
+ok(Number(pricing["P-COST"]?.gross_profit) === 39.5 && Number(pricing["P-COST"]?.margin_pct) === 39.5
+     && pricing["P-COST"]?.below_floor === false,
+   `0016 P1: lãi gộp 39.50 / biên 39.5% (nhận ${pricing["P-COST"]?.gross_profit} · ${pricing["P-COST"]?.margin_pct})`);
+ok(pricing["P-NOCOST"]?.unit_cost === null && pricing["P-NOCOST"]?.floor_price === null
+     && pricing["P-NOCOST"]?.margin_pct === null && pricing["P-NOCOST"]?.cost_basis === "fees_only",
+   `0016 P1: THIẾU giá vốn → sàn/biên NULL + basis fees_only (không lấy phí làm sàn như 0013) — ${JSON.stringify(pricing["P-NOCOST"])}`);
+ok(pricing["P-COSTONLY"]?.cost_basis === "cost_only" && Number(pricing["P-COSTONLY"]?.floor_price) === 53.33
+     && Number(pricing["P-COSTONLY"]?.gross_profit) === 45,
+   `0016 P1: chưa có fees estimate → dùng tỷ lệ cấu hình 15% (sàn 53.33, lãi 45) — ${JSON.stringify(pricing["P-COSTONLY"])}`);
+ok(pricing["P-FX"]?.cost_basis === "currency_mismatch" && pricing["P-FX"]?.floor_price === null,
+   `0016 P1: vốn EUR ≠ giá bán USD → KHÔNG cộng, báo currency_mismatch (${JSON.stringify(pricing["P-FX"])})`);
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role service_role;");
+await ex(`update catalog.listings set price = 50 where seller_account_id='${aShop}' and sku='P-COST'`);
+const belowFloor = await one(`select below_floor, margin_pct from public.vexim_pricing
+   where seller_account_id='${aShop}' and sku='P-COST'`);
+ok(belowFloor?.below_floor === true && Number(belowFloor?.margin_pct) < 0,
+   `0016 P1: hạ giá 50 < sàn 60.67 → below_floor=true, biên âm (${belowFloor?.margin_pct}%)`);
+await cmp(
+  "0016 P1: vexim_pricing.unit_cost KHỚP catalog.effective_cost() ở MỌI dòng",
+  `select count(*) n from public.vexim_pricing p
+    where p.unit_cost is distinct from catalog.effective_cost(p.seller_account_id, p.sku, current_date)`,
+  0,
+);
+
+// --- 7. RLS view giá vốn + độ phủ ------------------------------------------
+await ex("reset role;");
+await ex(`select set_config('request.jwt.claim.sub','${aStranger}',false);`);
+await ex("set role authenticated;");
+await cmp(
+  "0016 RLS: user ngoài shop KHÔNG thấy giá vốn",
+  `select count(*) n from public.vexim_cost_inputs where seller_account_id='${aShop}'`,
+  0,
+);
+await cmp(
+  "0016 RLS: user ngoài shop KHÔNG thấy độ phủ giá vốn",
+  `select count(*) n from public.vexim_cost_coverage where seller_account_id='${aShop}'`,
+  0,
+);
+await ex(`select set_config('request.jwt.claim.sub','${aFin}',false);`);
+const coverage = await one(`select count(*)::int total,
+   count(*) filter (where missing_cost)::int missing
+   from public.vexim_cost_coverage where seller_account_id='${aShop}'`);
+ok(coverage?.total >= 4 && coverage?.missing >= 1,
+   `0016 độ phủ: liệt kê SKU còn THIẾU giá vốn để gỡ chặn F3/F4/P1 (${coverage?.missing}/${coverage?.total} SKU)`);
+await cmp(
+  "0016 độ phủ: SKU đã nhập giá vốn thì missing_cost = false",
+  `select count(*) n from public.vexim_cost_coverage
+    where seller_account_id='${aShop}' and sku='P-COST' and missing_cost = false`,
+  1,
+);
+
+// --- 8. vexim_shops: bộ chọn shop trên /finance/costs -----------------------
+// Người dùng PHẢI thấy shop mình được gán kể cả khi shop chưa có listing/giá vốn nào
+// (nếu không thì trang giá vốn không chọn được shop để nhập lần đầu).
+await cmp(
+  "0016 vexim_shops: người được gán finance thấy shop của mình",
+  `select count(*) n from public.vexim_shops where seller_account_id='${aShop}'`,
+  1,
+);
+await cmp(
+  "0016 vexim_shops: user ngoài KHÔNG thấy shop lạ (RLS seller_accounts vẫn áp)",
+  `select count(*) n from public.vexim_shops where seller_account_id='${aShop}'
+     and not iam.can_read_seller_account(seller_account_id)`,
+  0,
+);
+await cmp(
+  "0016 vexim_shops: không phơi merchant token (seller_id)",
+  `select count(*) n from information_schema.columns
+    where table_schema='public' and table_name='vexim_shops' and column_name='seller_id'`,
+  0,
+);
+await ex(`select set_config('request.jwt.claim.sub','${aStranger}',false);`);
+await cmp(
+  "0016 RLS vexim_shops: user lạ không thấy shop nào của org",
+  `select count(*) n from public.vexim_shops where seller_account_id='${aShop}'`,
+  0,
+);
+
+await ex("reset role; rollback;");
+
 console.log(`\n${"=".repeat(70)}`);
 console.log(fails === 0 ? "TẤT CẢ PASS" : `${fails} MỤC FAIL`);
 console.log("=".repeat(70));

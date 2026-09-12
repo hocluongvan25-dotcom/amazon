@@ -34,6 +34,31 @@ export type NotificationRecord = {
 /** Trạng thái vòng đời listing cho màn L1/L4 (Đợt 1) */
 export type ListingLifecycleStatus = "ACTIVE" | "INACTIVE" | "SUPPRESSED" | "STRANDED";
 
+/**
+ * Một issue đúng shape Amazon trả về (getListingsItem · includedData=issues).
+ * Lưu NGUYÊN VĂN vào `catalog.listings.issues` để màn L2 hiện đúng mã lỗi
+ * (8541, 90220…) thay vì một con số đếm vô danh.
+ */
+export type ListingIssueRecord = {
+  code?: string;
+  message?: string;
+  severity?: "ERROR" | "WARNING" | "INFO";
+  attributeNames?: string[];
+  categories?: string[];
+  enforcements?: { actions?: string[]; exemption?: { status?: string } };
+};
+
+/** Nguồn đã ghi dòng listing — hiện trên L1 để biết số này từ đâu ra. */
+export type ListingSource = "report" | "api" | "notification" | "manual";
+
+/**
+ * Trạng thái listing mà worker biết tại một thời điểm.
+ *
+ * QUY TẮC null (khớp RPC `public.vexim_worker_upsert_listings` của migration 0016):
+ *   • `undefined` / `null`  → NGUỒN KHÔNG CHO BIẾT → DB GIỮ giá trị cũ.
+ *   • `issues: []`          → ĐÃ XÁC NHẬN không còn issue → thay thế.
+ *   • `strandedReason: null` (key có mặt) → hết stranded → xoá lý do cũ.
+ */
 export type ListingStateRow = {
   sellerAccountId: string;
   sku: string;
@@ -42,12 +67,18 @@ export type ListingStateRow = {
   status: ListingLifecycleStatus | null;
   buyable?: boolean | null;
   discoverable?: boolean | null;
+  productType?: string | null;
+  /** Mảng issue chi tiết (L2). undefined/null = chưa biết. */
+  issues?: ListingIssueRecord[] | null;
   issueErrors?: number;
   issueWarnings?: number;
   enforcementActions?: string[];
+  /** Chuỗi thô từ report ("129.99" / "1.299,99") — tầng ghi sẽ parse. */
   price?: string | null;
+  currency?: string | null;
   quantity?: number | null;
   strandedReason?: string | null;
+  source?: ListingSource | null;
   updatedAt: Date;
 };
 
@@ -347,7 +378,13 @@ export interface DbAdapter {
   upsertInventorySnapshot(row: InventorySnapshotRow): Promise<void>;
   upsertInventoryDaily(row: InventoryDailyRow): Promise<void>;
   recordNotification(row: NotificationRecord): Promise<void>;
+  /**
+   * Ghi 1 listing. `null` = "nguồn không cho biết" → GIỮ giá trị cũ (luật của
+   * RPC 0016). MockDbAdapter áp đúng luật đó để test không "đẹp giả".
+   */
   upsertListing(row: ListingStateRow): Promise<void>;
+  /** Ghi theo LÔ (1 lần gọi = 1 request) — report Merchant Listings có thể vài nghìn SKU. */
+  upsertListings(rows: ListingStateRow[]): Promise<void>;
   /** Đơn vị bán theo ngày gần nhất (đầu tiên = gần nhất) — dùng tính velocity */
   getSellingDays(sellerAccountId: string, sku: string, days: number): Promise<number[]>;
   /** Danh sách shop active production để worker lặp qua */
@@ -484,11 +521,53 @@ export class MockDbAdapter implements DbAdapter {
   }
 
   async upsertListing(row: ListingStateRow): Promise<void> {
-    const i = this.listings.findIndex(
-      (l) => l.sellerAccountId === row.sellerAccountId && l.sku === row.sku,
-    );
-    if (i >= 0) this.listings[i] = { ...this.listings[i], ...row };
-    else this.listings.push(row);
+    await this.upsertListings([row]);
+  }
+
+  /**
+   * Áp ĐÚNG luật ghi của RPC `public.vexim_worker_upsert_listings` (0016):
+   * null/undefined = "chưa biết" → giữ giá trị cũ. Nếu mock cứ ghi đè null thì
+   * test sẽ xanh trong khi bản Supabase thật lại hành xử khác — loại lỗi đó đã
+   * xảy ra với upsertListing() stub rỗng, nên mock phải khó tính như DB thật.
+   */
+  async upsertListings(rows: ListingStateRow[]): Promise<void> {
+    for (const row of rows) {
+      const i = this.listings.findIndex(
+        (l) => l.sellerAccountId === row.sellerAccountId && l.sku === row.sku,
+      );
+      if (i < 0) {
+        this.listings.push({ ...row });
+        continue;
+      }
+      const merged: ListingStateRow = { ...this.listings[i] };
+      const keepIfNull = [
+        "asin",
+        "itemName",
+        "status",
+        "price",
+        "currency",
+        "quantity",
+        "productType",
+        "buyable",
+        "discoverable",
+        "issueErrors",
+        "issueWarnings",
+        "enforcementActions",
+        "source",
+      ] as const;
+      for (const key of keepIfNull) {
+        const v = row[key];
+        if (v !== undefined && v !== null) {
+          (merged as unknown as Record<string, unknown>)[key] = v;
+        }
+      }
+      // issues: mảng (kể cả RỖNG) = đã xác nhận → thay thế; null/undefined = giữ
+      if (Array.isArray(row.issues)) merged.issues = row.issues;
+      // strandedReason: key CÓ MẶT thì ghi kể cả null (hết stranded → xoá lý do)
+      if ("strandedReason" in row) merged.strandedReason = row.strandedReason ?? null;
+      merged.updatedAt = row.updatedAt;
+      this.listings[i] = merged;
+    }
   }
 
   async getSellingDays(sellerAccountId: string, sku: string, days: number): Promise<number[]> {

@@ -16,6 +16,7 @@ import {
 import { runListingPublishCli } from "./runtime/run-listing-publish.ts";
 import { runListingSchemaCli } from "./runtime/run-listing-schema.ts";
 import { runFinanceClaimsCli } from "./runtime/run-finance-claims.ts";
+import { runListingsSyncCli } from "./runtime/run-listings-sync.ts";
 
 /** Đọc tham số dạng --key=value / --flag (không có giá trị) */
 function parseArgs(argv: string[]): { flags: Set<string>; values: Record<string, string> } {
@@ -183,6 +184,32 @@ async function main() {
       }
       break;
     }
+    case "listings:sync": {
+      // Module 1: nạp report listing → L1 (danh sách) + L2 (issues) + L4 (queue)
+      if (loaded) process.stderr.write(`[worker] loaded env from ${loaded}\n`);
+      const { values, flags } = parseArgs(process.argv.slice(3));
+      if (!values.all && !values.inactive && !values.stranded) {
+        process.stderr.write(
+          "Thiếu report. Chạy: worker listings:sync --all=<merchant-listings-all.tsv>" +
+            " [--inactive=<inactive.tsv>] [--stranded=<stranded.tsv>]" +
+            " [--seller=<uuid>] [--details] [--detail-limit=50] [--dry-run]\n",
+        );
+        process.exitCode = 2;
+        break;
+      }
+      // Runner tự in bản tóm tắt (đã có nhãn db=mock/supabase) → không in trùng
+      await runListingsSyncCli({
+        allFile: values.all ?? null,
+        inactiveFile: values.inactive ?? null,
+        strandedFile: values.stranded ?? null,
+        sellerAccountId: values.seller ?? null,
+        withDetails: flags.has("details"),
+        detailLimit: values["detail-limit"] ? Number(values["detail-limit"]) : undefined,
+        dryRun: flags.has("dry-run"),
+        stdout: process.stdout,
+      });
+      break;
+    }
     case "finance:claims": {
       // Module 6 Đợt 2: F3 bồi hoàn FBA (SOP-09) + F4 lợi nhuận SKU
       const { values, flags } = parseArgs(process.argv.slice(3));
@@ -211,6 +238,7 @@ async function main() {
           "  orders:sync          Nạp report đơn hàng (Module 4): --file=orders.tsv [--returns=returns.tsv]",
           "  finance:sync         Nạp report settlement V2 (Module 6): --file=settlement.tsv",
           "  account-health:sync  Nạp report performance V2 (Module 7): --file=performance.json",
+          "  listings:sync        Nạp report listing (Module 1 → L1/L2/L4): --all=listings.tsv [--inactive=…] [--stranded=…] [--details]",
           "  listing:publish      L3: gửi bản nháp đã duyệt lên Amazon (--seller=<uuid> [--limit=20])",
           "  listing:schema       L3: tải JSON Schema product type cho form động (--product-type=LUGGAGE)",
           "  finance:claims       F3+F4: claim bồi hoàn FBA + lợi nhuận SKU (--ledger=<file> --reimbursements=<file>)",

@@ -237,3 +237,66 @@ test("7. CHỐT CHẶN: path có dấu chấm (schema.table) bị từ chối ng
   });
   assert.equal(calls.length, 0, "phải throw TRƯỚC khi gọi fetch");
 });
+
+test("8. upsertListing → RPC public (0016), KHÔNG prefix schema, KHÔNG profile header", async () => {
+  const { calls, fetchFn } = makeFetch([{ upserted: 1, active_count: 1, flagged_count: 0 }]);
+  const db = new SupabaseDbAdapter(URL_BASE, KEY, fetchFn);
+
+  await db.upsertListing({
+    sellerAccountId: SHOP_ROW.id,
+    sku: "XMO-950-BLK",
+    asin: "B0C7T31F",
+    itemName: "XMO 950 Hardside Spinner",
+    status: "ACTIVE",
+    price: "1.299,99", // số kiểu local — tầng ghi phải parse, không đẩy chuỗi lạ xuống DB
+    quantity: 142,
+    strandedReason: null, // key CÓ MẶT → hết stranded thì xoá được lý do cũ
+    source: "report",
+    updatedAt: new Date("2026-09-12T02:00:00Z"),
+  });
+
+  assert.equal(calls.length, 1);
+  assertNoSchemaPrefix(calls);
+  const [c] = calls;
+  assert.equal(new URL(c.url).pathname, "/rest/v1/rpc/vexim_worker_upsert_listings");
+  assert.equal(c.method, "POST");
+  // RPC nằm trong schema public → KHÔNG được gửi Accept/Content-Profile (bài học 0008)
+  assert.equal(c.headers["Accept-Profile"], undefined);
+  assert.equal(c.headers["Content-Profile"], undefined);
+
+  const body = c.body as { p_seller: string; p_rows: Record<string, unknown>[] };
+  assert.equal(body.p_seller, SHOP_ROW.id);
+  assert.equal(body.p_rows.length, 1);
+  const row = body.p_rows[0];
+  assert.equal(row.sku, "XMO-950-BLK");
+  assert.equal(row.status, "ACTIVE");
+  assert.equal(row.price, 1299.99, "1.299,99 phải thành số 1299.99");
+  assert.equal(row.stranded_reason, null, "stranded_reason phải CÓ trong payload để xoá lý do cũ");
+  assert.equal(row.source, "report");
+  assert.equal(row.updated_at, "2026-09-12T02:00:00.000Z");
+});
+
+test("9. upsertListings: cả lô = 1 request, nhóm theo shop, lô rỗng không gọi mạng", async () => {
+  const { calls, fetchFn } = makeFetch([{ upserted: 3, active_count: 2, flagged_count: 1 }]);
+  const db = new SupabaseDbAdapter(URL_BASE, KEY, fetchFn);
+  const other = "22222222-2222-4222-8222-222222222222";
+
+  await db.upsertListings([]);
+  assert.equal(calls.length, 0, "lô rỗng không được gọi mạng");
+
+  await db.upsertListings([
+    { sellerAccountId: SHOP_ROW.id, sku: "A", status: "ACTIVE", updatedAt: new Date("2026-09-12T02:00:00Z") },
+    { sellerAccountId: SHOP_ROW.id, sku: "B", status: null, updatedAt: new Date("2026-09-12T02:00:00Z") },
+    { sellerAccountId: other, sku: "C", status: "STRANDED", strandedReason: "No listing", updatedAt: new Date("2026-09-12T02:00:00Z") },
+  ]);
+
+  assertNoSchemaPrefix(calls);
+  assert.equal(calls.length, 2, "mỗi shop 1 request (RPC nhận p_seller)");
+  const bodies = calls.map((c) => c.body as { p_seller: string; p_rows: Record<string, unknown>[] });
+  assert.equal(bodies[0].p_seller, SHOP_ROW.id);
+  assert.equal(bodies[0].p_rows.length, 2);
+  assert.equal(bodies[1].p_seller, other);
+  assert.equal(bodies[1].p_rows[0].stranded_reason, "No listing");
+  // status null = "chưa biết" → vẫn đưa key vào để RPC tự giữ giá trị cũ
+  assert.equal(bodies[0].p_rows[1].status, null);
+});

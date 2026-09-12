@@ -52,6 +52,7 @@ import type {
   SettlementRowInput,
   SyncJobRecord,
 } from "./adapter.ts";
+import { buildListingPayload, type ListingUpsertPayload } from "./listing-payload.ts";
 
 type Json = unknown;
 
@@ -94,6 +95,9 @@ const RPC_PATHS = {
   upsertProfit: "/rest/v1/rpc/vexim_worker_upsert_profit",
   financialEvents: "/rest/v1/rpc/vexim_worker_financial_events",
   effectiveCosts: "/rest/v1/rpc/vexim_worker_effective_costs",
+  // Đợt A (migration 0016) — ghi listing (L1/L2/L4). Giá vốn worker vẫn đọc qua
+  // vexim_worker_effective_costs của 0015 (không tạo RPC trùng chức năng).
+  upsertListings: "/rest/v1/rpc/vexim_worker_upsert_listings",
 } as const;
 
 export class SupabaseDbAdapter implements DbAdapter {
@@ -782,6 +786,34 @@ export class SupabaseDbAdapter implements DbAdapter {
     }));
   }
 
-  // ---------- Stubs cho Tier sau ----------
-  async upsertListing(_row: ListingStateRow): Promise<void> {}
+  // ---------- Module 1: Listing (L1/L2/L4) ----------
+  /**
+   * Ghi listing qua RPC `public.vexim_worker_upsert_listings` (migration 0016).
+   *
+   * Vì sao KHÔNG ghi thẳng `/rest/v1/listings` với header Content-Profile: catalog?
+   * Vì schema `catalog` chưa chắc nằm trong Supabase → Settings → API → "Exposed
+   * schemas"; thiếu nó PostgREST trả PGRST205 và lần đồng bộ chết im lặng (đúng
+   * sự cố 12/09/2026 của migration 0008). RPC nằm trong `public` nên luôn resolve.
+   *
+   * Luật "null = chưa biết → giữ nguyên" do RPC thực thi; xem ./listing-payload.ts.
+   */
+  async upsertListing(row: ListingStateRow): Promise<void> {
+    await this.upsertListings([row]);
+  }
+
+  /** Ghi cả lô trong 1 request — report Merchant Listings có thể vài nghìn SKU. */
+  async upsertListings(rows: ListingStateRow[]): Promise<void> {
+    if (rows.length === 0) return;
+    const bySeller = new Map<string, ListingUpsertPayload[]>();
+    for (const row of rows) {
+      const list = bySeller.get(row.sellerAccountId) ?? [];
+      list.push(buildListingPayload(row));
+      bySeller.set(row.sellerAccountId, list);
+    }
+    for (const [sellerAccountId, payload] of bySeller) {
+      await this.request("POST", RPC_PATHS.upsertListings, {
+        body: { p_seller: sellerAccountId, p_rows: payload },
+      });
+    }
+  }
 }

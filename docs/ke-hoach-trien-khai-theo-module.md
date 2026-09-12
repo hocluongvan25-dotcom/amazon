@@ -320,7 +320,7 @@ Alert `account_health`, `odr_threshold` → SOP-08. KPI: số shop xanh/vàng/đ
 | 1 | Danh sách màn hình | **Giữ đúng 21 màn Đợt 1** — không thêm, không bớt. Editor content (L3) ở Đợt 2: Đợt 1 phòng Listing dùng L1+L2+L4 (hiển thị + hàng đợi + checklist sửa, thao tác sửa tại Seller Central) |
 | 2 | Role Amazon Fulfillment | **NỘP KÈM trong Developer Profile** (biến thể A, 497 ký tự). Nếu hồ sơ đã nộp thiếu role: đề nghị bổ sung ngay sau khi được duyệt, trước khi bắt đầu Đợt 2 |
 | 3 | Log tin nhắn buyer (O5) | **Đợt 1: form nhập thủ công 30 giây/tin** (CSKH). **Đợt 2: inbound email parse tự động** (Postmark/Resend webhook → Supabase Edge Function → `buyer_messages`) |
-| 4 | Giá vốn | **Import Excel/CSV theo template + nhập tay SKU lẻ** — lưu theo khoảng thời gian hiệu lực (bảng `catalog.cost_inputs`, migration 0003). API nội bộ: cân nhắc ở Đợt 3 |
+| 4 | Giá vốn | **Import Excel/CSV theo template + nhập tay SKU lẻ** — lưu theo khoảng thời gian hiệu lực (bảng `catalog.cost_inputs`, migration 0003). API nội bộ: cân nhắc ở Đợt 3 · ✅ **ĐÃ XONG (Đợt A, 12/09)**: trang `/finance/costs` + template CSV tải trong app + import atomic (migration 0016) |
 | 5 | Thứ tự build Đợt 1 | **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** — Listing-đọc lên trước Giá (là dữ liệu nền SKU master cho Giá & Kho) |
 | + | Buyer Communication, A+ (L5), auto-pricing (P4), MCF | **Defer đúng kế hoạch** 🟡/🔵 — không xin role/module trước khi có tính năng thật |
 
