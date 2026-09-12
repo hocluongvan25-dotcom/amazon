@@ -4,6 +4,10 @@
     {
       "path": "/api/cron/inventory-sync",
       "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/cron/report-pull",
+      "schedule": "0 3 * * *"
     }
   ]
 }

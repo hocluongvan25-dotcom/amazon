@@ -16,6 +16,9 @@ import {
 import { runListingPublishCli } from "./runtime/run-listing-publish.ts";
 import { runListingSchemaCli } from "./runtime/run-listing-schema.ts";
 import { runFinanceClaimsCli } from "./runtime/run-finance-claims.ts";
+import { runListingsSyncCli } from "./runtime/run-listings-sync.ts";
+import { runInventoryFcSyncCli } from "./runtime/run-inventory-fc-sync.ts";
+import { runReportPullCli } from "./runtime/run-report-pull.ts";
 
 /** Đọc tham số dạng --key=value / --flag (không có giá trị) */
 function parseArgs(argv: string[]): { flags: Set<string>; values: Record<string, string> } {
@@ -183,6 +186,77 @@ async function main() {
       }
       break;
     }
+    case "listings:sync": {
+      // Module 1: nạp report listing → L1 (danh sách) + L2 (issues) + L4 (queue)
+      if (loaded) process.stderr.write(`[worker] loaded env from ${loaded}\n`);
+      const { values, flags } = parseArgs(process.argv.slice(3));
+      if (!values.all && !values.inactive && !values.stranded) {
+        process.stderr.write(
+          "Thiếu report. Chạy: worker listings:sync --all=<merchant-listings-all.tsv>" +
+            " [--inactive=<inactive.tsv>] [--stranded=<stranded.tsv>]" +
+            " [--seller=<uuid>] [--details] [--detail-limit=50] [--dry-run]\n",
+        );
+        process.exitCode = 2;
+        break;
+      }
+      // Runner tự in bản tóm tắt (đã có nhãn db=mock/supabase) → không in trùng
+      await runListingsSyncCli({
+        allFile: values.all ?? null,
+        inactiveFile: values.inactive ?? null,
+        strandedFile: values.stranded ?? null,
+        sellerAccountId: values.seller ?? null,
+        withDetails: flags.has("details"),
+        detailLimit: values["detail-limit"] ? Number(values["detail-limit"]) : undefined,
+        dryRun: flags.has("dry-run"),
+        stdout: process.stdout,
+      });
+      break;
+    }
+    case "inventory:fc": {
+      // Module 3 nâng cao (0018): phân bổ tồn theo FC (I2) + lịch sử nhận hàng
+      if (loaded) process.stderr.write(`[worker] loaded env from ${loaded}\n`);
+      const { values, flags } = parseArgs(process.argv.slice(3));
+      if (!values.fc && !values.receipts) {
+        process.stderr.write(
+          "Thiếu report. Chạy: worker inventory:fc --fc=<fba-daily-inventory-history.tsv>" +
+            " [--receipts=<fba-received-inventory.tsv>] [--seller=<uuid>] [--top-fc=10] [--dry-run]\n",
+        );
+        process.exitCode = 2;
+        break;
+      }
+      // Runner tự in bản tóm tắt (kèm nhãn db=mock/supabase) → không in trùng
+      await runInventoryFcSyncCli({
+        fcFile: values.fc ?? null,
+        receiptsFile: values.receipts ?? null,
+        sellerAccountId: values.seller ?? null,
+        topFcLimit: values["top-fc"] ? Number(values["top-fc"]) : undefined,
+        dryRun: flags.has("dry-run"),
+        stdout: process.stdout,
+      });
+      break;
+    }
+    case "reports:pull": {
+      // Module 3 nâng cao (0019): TỰ KÉO 4 report FBA qua Reports API, hoặc nạp
+      // file TSV local. Đây là lệnh mà Vercel Cron (/api/cron/report-pull) chạy
+      // mỗi ngày — CLI để nạp tay / kiểm tra / nạp dữ liệu lịch sử.
+      if (loaded) process.stderr.write(`[worker] loaded env from ${loaded}\n`);
+      const { values, flags } = parseArgs(process.argv.slice(3));
+      await runReportPullCli({
+        type: values.type ?? null,
+        days: values.days ? Number(values.days) : null,
+        sellerAccountId: values.seller ?? null,
+        files: {
+          fc: values.fc ?? null,
+          receipts: values.receipts ?? null,
+          "storage-fees": values["storage-fees"] ?? null,
+          noncompliance: values.noncompliance ?? null,
+        },
+        dryRun: flags.has("dry-run"),
+        pollAttempts: values.poll ? Number(values.poll) : undefined,
+        stdout: process.stdout,
+      });
+      break;
+    }
     case "finance:claims": {
       // Module 6 Đợt 2: F3 bồi hoàn FBA (SOP-09) + F4 lợi nhuận SKU
       const { values, flags } = parseArgs(process.argv.slice(3));
@@ -211,9 +285,13 @@ async function main() {
           "  orders:sync          Nạp report đơn hàng (Module 4): --file=orders.tsv [--returns=returns.tsv]",
           "  finance:sync         Nạp report settlement V2 (Module 6): --file=settlement.tsv",
           "  account-health:sync  Nạp report performance V2 (Module 7): --file=performance.json",
+          "  listings:sync        Nạp report listing (Module 1 → L1/L2/L4): --all=listings.tsv [--inactive=…] [--stranded=…] [--details]",
           "  listing:publish      L3: gửi bản nháp đã duyệt lên Amazon (--seller=<uuid> [--limit=20])",
           "  listing:schema       L3: tải JSON Schema product type cho form động (--product-type=LUGGAGE)",
           "  finance:claims       F3+F4: claim bồi hoàn FBA + lợi nhuận SKU (--ledger=<file> --reimbursements=<file>)",
+          "  inventory:fc         M3 nâng cao: phân bổ tồn theo FC + lịch sử nhận hàng (--fc=<file> [--receipts=<file>])",
+          "  reports:pull         M3 nâng cao: TỰ KÉO 4 report FBA qua Reports API (--type=all|fc|receipts|storage-fees|noncompliance",
+          "                       [--days=7] [--poll=3]) hoặc nạp file: --storage-fees=<tsv> --noncompliance=<tsv>",
           "",
           "Cờ dùng chung: --seller=<uuid> (bắt buộc khi >1 shop) · --dry-run (chỉ chạy trong bộ nhớ)",
           "",

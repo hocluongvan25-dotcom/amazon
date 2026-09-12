@@ -2,24 +2,20 @@ import { Chip, NoAccess, PageHeader, Panel, tableCls } from "@/components/ui";
 import { LiveListingList } from "@/components/listing/LiveListing";
 import { requireSession } from "@/lib/auth/session";
 import { listingList } from "@/lib/data/mock";
+import {
+  formatRevenue30d,
+  LISTING_STATUS_TONE,
+  LISTING_STATUS_VI,
+  revenueSortValue,
+} from "@/lib/data/listing-model";
 import type { PersonaKey } from "@/lib/roles";
 import type { ListingListRow, ListingStatus } from "@/lib/types";
 
 const ALLOWED: PersonaKey[] = ["ceo"];
 
-const statusTone: Record<ListingStatus, "green" | "amber" | "red" | "gray"> = {
-  ACTIVE: "green",
-  INACTIVE: "amber",
-  STRANDED: "red",
-  SUPPRESSED: "red",
-};
-
-const statusLabel: Record<ListingStatus, string> = {
-  ACTIVE: "Active",
-  INACTIVE: "Inactive",
-  STRANDED: "Stranded",
-  SUPPRESSED: "Bị ẩn (suppressed)",
-};
+// Trạng thái: dùng bản chung của listing-model (0016 thêm REMOVED/CLOSED/DELETED/UNKNOWN)
+const statusTone = LISTING_STATUS_TONE;
+const statusLabel = LISTING_STATUS_VI;
 
 function chipHref(base: Record<string, string | undefined>, key: string, value: string) {
   const params = new URLSearchParams();
@@ -69,7 +65,8 @@ export default async function ListingListPage({
   rows =
     filters.sort === "sku"
       ? [...rows].sort((a, b) => a.sku.localeCompare(b.sku))
-      : [...rows].sort((a, b) => b.revenue30d - a.revenue30d);
+      // SKU CHƯA CÓ ĐƠN (revenue NULL) xếp cuối — không chen lên đầu như thể doanh thu thấp
+      : [...rows].sort((a, b) => revenueSortValue(b) - revenueSortValue(a));
 
   const shops = [...new Set(listingList.map((r) => r.shop))];
   const brands = [...new Set(listingList.map((r) => r.brand))];
@@ -84,7 +81,9 @@ export default async function ListingListPage({
   const csv =
     "sku,asin,shop,brand,status,price,stock,errors,warnings,owner\n" +
     rows
-      .map((r) => [r.sku, r.asin, r.shop, r.brand, r.status, r.price, r.stock, r.issueErrors, r.issueWarnings, r.owner].join(","))
+      .map((r) =>
+        [r.sku, r.asin, r.shop, r.brand, r.status, r.price, r.stock ?? "", r.issueErrors, r.issueWarnings, r.owner].join(","),
+      )
       .join("\n");
 
   return (
@@ -205,6 +204,7 @@ export default async function ListingListPage({
               <th className={tableCls.th}>Brand</th>
               <th className={`${tableCls.th} text-right`}>Giá</th>
               <th className={`${tableCls.th} text-right`}>Tồn</th>
+              <th className={`${tableCls.th} text-right`}>Doanh thu 30 ngày</th>
               <th className={`${tableCls.th} text-right`}>Issues</th>
               <th className={tableCls.th}>Trạng thái</th>
               <th className={tableCls.th}>Phụ trách</th>
@@ -234,7 +234,15 @@ export default async function ListingListPage({
                 <td className={tableCls.td}>{r.shop}</td>
                 <td className={tableCls.td}>{r.brand}</td>
                 <td className={tableCls.tdNum}>{r.price}</td>
-                <td className={tableCls.tdNum}>{r.stock}</td>
+                <td className={tableCls.tdNum}>
+                  {r.stock === null ? <span className="text-soft">—</span> : r.stock.toLocaleString("en-US")}
+                </td>
+                <td className={tableCls.tdNum}>
+                  <div className="font-bold">{formatRevenue30d(r.revenue30d, r.revenueCurrency)}</div>
+                  <div className="text-[11px] text-soft">
+                    {r.units30d === null ? "chưa có đơn" : `${r.units30d.toLocaleString("en-US")} đơn vị`}
+                  </div>
+                </td>
                 <td className={tableCls.tdNum}>
                   {r.issueErrors > 0 ? (
                     <span className="font-extrabold text-red">{r.issueErrors} lỗi</span>
@@ -255,7 +263,7 @@ export default async function ListingListPage({
             ))}
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={10} className={`${tableCls.td} text-center text-soft`}>
+                <td colSpan={11} className={`${tableCls.td} text-center text-soft`}>
                   Không có SKU nào khớp bộ lọc.
                 </td>
               </tr>

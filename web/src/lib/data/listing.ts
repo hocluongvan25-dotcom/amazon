@@ -6,6 +6,7 @@
 import { createClient } from "@/lib/supabase/server";
 import {
   LISTINGS_SELECT,
+  LISTING_QUEUE_SELECT,
   type ListingRaw,
   readAll,
 } from "./listing-model";
@@ -31,7 +32,9 @@ export async function readListingQueue(): Promise<ListingRaw[]> {
   return readAll<ListingRaw>((from, to) =>
     client
       .from("vexim_listing_queue")
-      .select(LISTINGS_SELECT)
+      // vexim_listing_queue không có cột buy_box_* → select riêng, nếu không PostgREST
+      // trả PGRST204 và cả trang L4 sập (không phải "chỉ thiếu một cột").
+      .select(LISTING_QUEUE_SELECT)
       .order("error_count", { ascending: false })
       .order("sku")
       .range(from, to),

@@ -52,10 +52,10 @@ Mỗi module gồm 6 phần:
 
 | # | Màn hình | Nội dung chính | Cấp |
 |---|---|---|---|
-| L1 | **Danh sách listing** | Bảng: ảnh, SKU, ASIN, tiêu đề, trạng thái (ACTIVE/INACTIVE/STRANDED…), giá, tồn, số issues, người phụ trách. Filter: shop / trạng thái / loại lỗi / brand. Tìm kiếm, sort theo doanh thu/SKU. Hành động hàng loạt: export, gán người xử lý | 🟢 |
+| L1 | **Danh sách listing** | Bảng: ảnh, SKU, ASIN, tiêu đề, trạng thái (ACTIVE/INACTIVE/STRANDED…), giá, tồn, số issues, người phụ trách. Filter: shop / trạng thái / loại lỗi / brand. Tìm kiếm, sort theo doanh thu/SKU. Hành động hàng loạt: export, gán người xử lý · ✅ **0017**: doanh thu + đơn vị 30 ngày (`vexim_sku_sales_30d`) và người phụ trách (`iam.module_owner`) — hết cảnh sort theo toàn số 0 | 🟢 |
 | L2 | **Chi tiết listing** | Đầy đủ thuộc tính hiện có trên Amazon (theo product type), danh sách **issues** đúng mã lỗi Amazon (thiếu ảnh, thiếu thuộc tính bắt buộc…), lịch sử thay đổi, tình trạng offer & Buy Box, doanh thu 30 ngày của SKU | 🟢 |
 | L3 | **Trình soạn/sửa listing** (content editor) | Form **động theo product type** (trường bắt buộc/bắt buộc có điều kiện lấy từ schema Amazon): tiêu đề, bullet points, mô tả, từ khóa backend, ảnh, variation, `fulfillment_availability`, `purchasable_offer`. Luồng: **Draft → Trưởng phòng duyệt → Publish**. Kiểm tra hạn chế danh mục trước khi đăng | 🟡 |
-| L4 | **Hàng đợi inactive/stranded** | Queue theo SOP-03: mỗi dòng = 1 SKU lỗi + nguyên nhân + đề xuất sửa + ai giữ | 🟢 |
+| L4 | **Hàng đợi inactive/stranded** | Queue theo SOP-03: mỗi dòng = 1 SKU lỗi + nguyên nhân + đề xuất sửa + ai giữ · ✅ **0017**: thêm "tiền đang mất"/ngày và xếp hàng đợi theo mức ưu tiên → doanh thu 30 ngày | 🟢 |
 | L5 | **A+ Content** | Danh sách & quản lý A+ của shop (yêu cầu Brand Registry) | 🔵 |
 
 ### Ánh xạ API (đã kiểm chứng docs Amazon)
@@ -93,7 +93,7 @@ Checklist nội dung chuẩn khi tạo listing mới (tiêu đề theo formula, 
 
 | # | Màn hình | Nội dung chính | Cấp |
 |---|---|---|---|
-| P1 | **Bảng giá & Featured Offer** | Mỗi SKU: giá hiện tại, **FOEP** (giá để vào Featured Offer), giá cạnh tranh tham chiếu, đang giữ box hay không, **giá sàn** (vốn + phí + biên tối thiểu), biên lãi hiện tại. Lọc: SKU mất box / sắp mất / dưới giá sàn | 🟢 |
+| P1 | **Bảng giá & Featured Offer** | Mỗi SKU: giá hiện tại, **FOEP** (giá để vào Featured Offer), giá cạnh tranh tham chiếu, đang giữ box hay không, **giá sàn** (vốn + phí + biên tối thiểu), biên lãi hiện tại. Lọc: SKU mất box / sắp mất / dưới giá sàn · ✅ **0017**: velocity 30 ngày (đơn vị/ngày) + doanh thu 30 ngày để ước thiệt hại khi mất box, và người phụ trách module pricing | 🟢 |
 | P2 | **Chi tiết giá 1 SKU** | Lịch sử giá 30–90 ngày, danh sách offer đối thủ (giá + vận chuyển + kênh fulfil), breakdown giá sàn: giá vốn + referral fee + FBA fee + biên | 🟢 |
 | P3 | **Duyệt & áp giá** | Hàng chờ duyệt: SKU, giá cũ → mới, % thay đổi, lý do (đề xuất tự động hoặc thủ công). Áp: ≤2% operator tự duyệt, >2% trưởng phòng duyệt. Ghi audit + rollback được | 🟢 |
 | P4 | **Quy tắc giá tự động** | Luật kiểu "nếu mất box > 2h và còn dư trên giá sàn → điều theo FOEP" (chạy có giới hạn + duyệt) | 🔵 |
@@ -131,10 +131,10 @@ Giá vốn từng SKU (import Excel/API nội bộ), biên tối thiểu %, ngư
 
 | # | Màn hình | Nội dung chính | Cấp |
 |---|---|---|---|
-| I1 | **Tồn kho theo SKU** | Bảng: SKU, ảnh, tồn khả dụng / reserved / đang về (inbound), **days of cover**, velocity 14 ngày, SKU sắp hết (đỏ), tồn lâu. Sort theo doanh thu/SKU | 🟢 |
-| I2 | **Chi tiết tồn 1 SKU** | Biểu đồ tồn + doanh số 90 ngày, phân bổ theo fulfillment center, lịch sử nhận hàng | 🟢 |
-| I3 | **Kế hoạch nhập hàng** | Danh sách SKU cần nhập (đề xuất tự động = velocity × (lead time + safety) − tồn − đang về) → chốt số lượng + giá vốn → duyệt → **tạo inbound plan** → theo dõi | 🟡 (đọc 🟢) |
-| I4 | **Inbound shipments** | Bảng lô hàng: trạng thái (WORKING/SHIPPED/RECEIVING/CLOSED…), số lượng, FC đích, ETA; cảnh báo "nhận thiếu so với kế hoạch" | 🟡 (đọc 🟢) |
+| I1 | **Tồn kho theo SKU** | Bảng: SKU, ảnh, tồn khả dụng / reserved / đang về (inbound), **days of cover**, velocity 14 ngày, SKU sắp hết (đỏ), tồn lâu. Sort theo doanh thu/SKU · ✅ **0017**: **giá trị tồn kho** = Σ (khả dụng + reserved + đang về) × giá vốn hiệu lực, theo tiền của giá vốn; SKU thiếu giá vốn hiện "—" và đếm riêng ở KPI | 🟢 |
+| I2 | **Chi tiết tồn 1 SKU** | Biểu đồ tồn + doanh số 90 ngày, phân bổ theo fulfillment center, lịch sử nhận hàng · ✅ **0017**: panel "Giá trị tồn kho" diễn giải vốn hiệu lực → khả dụng × vốn → cộng reserved + đang về · ✅ **0018**: **phân bổ theo FC** (FC · tổng · % của SKU · bán được/không bán được/không rõ) và **lịch sử nhận hàng** (ngày · lô · FC · thực nhận) chạy bằng số thật từ 2 report FBA — API không có hai số này · ✅ **0019**: thêm khối **Phí lưu kho theo FC** của SKU (kỳ mới nhất + chênh lệch kỳ phí, khớp theo SKU ∨ FNSKU ∨ ASIN vì report phí không có SKU người bán) | 🟢 |
+| I3 | **Kế hoạch nhập hàng** | Danh sách SKU cần nhập (đề xuất tự động = velocity × (lead time + safety) − tồn − đang về) → chốt số lượng + giá vốn → duyệt → **tạo inbound plan** → theo dõi · ✅ **0017**: cột giá vốn + **giá trị lô** = đề xuất × giá vốn hiệu lực (thiếu giá vốn thì ghi rõ "— chưa có giá vốn", không in $0) | 🟡 (đọc 🟢) |
+| I4 | **Inbound shipments** | Bảng lô hàng: trạng thái (WORKING/SHIPPED/RECEIVING/CLOSED…), số lượng, FC đích, ETA; cảnh báo "nhận thiếu so với kế hoạch" · ✅ **0018**: cột *FC đích* + *Đối soát nhận* hết placeholder — ghép report receipts theo mã lô (Nhận đủ / Thiếu → SOP-09 / Thừa / Chưa rõ số gửi) và panel "lô có số nhận nhưng không còn trong danh sách" · ✅ **0019**: cột **Phí / vấn đề inbound** (số vấn đề + tiền phạt của lô) + 3 panel *lô nặng nhất* · *từng vấn đề kèm coaching & phí* · *lô mồ côi* từ report noncompliance | 🟡 (đọc 🟢) |
 
 ### Ánh xạ API (đã kiểm chứng)
 
@@ -152,7 +152,7 @@ Giá vốn từng SKU (import Excel/API nội bộ), biên tối thiểu %, ngư
 - Notification **`FBA_SHIPMENT_STATUS`**? — dùng báo cáo + `getShipment` theo lịch cho I4 (an toàn hơn vì không phải shop nào cũng có notification type này)
 
 ### Đầu ra cho dashboard
-Alert `stockout_risk` → SOP-01 (toàn bộ vòng đời nằm ở I3). KPI: số SKU sắp hết, in-stock %, giá trị tồn.
+Alert `stockout_risk` → SOP-01 (toàn bộ vòng đời nằm ở I3). KPI: số SKU sắp hết, in-stock %, giá trị tồn (✅ **0017** đã tính được từ giá vốn hiệu lực), số lô nhận thiếu so với số gửi (✅ **0018** — `vexim_inbound_receipt_shipments.reconcile_state = 'short'` → đầu vào SOP-09), **phí lưu kho theo FC** và **tiền phạt inbound noncompliance** (✅ **0019** — `vexim_storage_fee_by_fc`, `vexim_inbound_issue_shipments`; đầu vào SOP-09 và quyết định chuyển FC / xả hàng tồn lâu).
 
 ### Input VEXIM
 Lead time nhập hàng (VN→US theo từng đường: nhanh/chậm), tồn kho ngoài Amazon (nếu có), safety stock chuẩn.
@@ -320,8 +320,11 @@ Alert `account_health`, `odr_threshold` → SOP-08. KPI: số shop xanh/vàng/đ
 | 1 | Danh sách màn hình | **Giữ đúng 21 màn Đợt 1** — không thêm, không bớt. Editor content (L3) ở Đợt 2: Đợt 1 phòng Listing dùng L1+L2+L4 (hiển thị + hàng đợi + checklist sửa, thao tác sửa tại Seller Central) |
 | 2 | Role Amazon Fulfillment | **NỘP KÈM trong Developer Profile** (biến thể A, 497 ký tự). Nếu hồ sơ đã nộp thiếu role: đề nghị bổ sung ngay sau khi được duyệt, trước khi bắt đầu Đợt 2 |
 | 3 | Log tin nhắn buyer (O5) | **Đợt 1: form nhập thủ công 30 giây/tin** (CSKH). **Đợt 2: inbound email parse tự động** (Postmark/Resend webhook → Supabase Edge Function → `buyer_messages`) |
-| 4 | Giá vốn | **Import Excel/CSV theo template + nhập tay SKU lẻ** — lưu theo khoảng thời gian hiệu lực (bảng `catalog.cost_inputs`, migration 0003). API nội bộ: cân nhắc ở Đợt 3 |
+| 4 | Giá vốn | **Import Excel/CSV theo template + nhập tay SKU lẻ** — lưu theo khoảng thời gian hiệu lực (bảng `catalog.cost_inputs`, migration 0003). API nội bộ: cân nhắc ở Đợt 3 · ✅ **ĐÃ XONG (Đợt A, 12/09)**: trang `/finance/costs` + template CSV tải trong app + import atomic (migration 0016) |
 | 5 | Thứ tự build Đợt 1 | **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** — Listing-đọc lên trước Giá (là dữ liệu nền SKU master cho Giá & Kho) |
+| 6 | Doanh số 30 ngày · người phụ trách · giá trị tồn | ✅ **ĐÃ XONG (Đợt B, 12/09)** — migration `0017`: view `vexim_sku_sales_30d` (loại đơn huỷ, SKU không có đơn → NULL chứ không 0), `iam.module_owner()` (security definer vì RLS `iam.*` chỉ cho đọc chính mình; chỉ trả TÊN, không email/uuid), 7 cột nối cuối `vexim_pricing`/`vexim_listings`/`vexim_listing_queue`, 8 cột giá trị nối cuối `vexim_inventory_latest`, và sửa `effective_cost_row()` tra SKU không phân biệt hoa/thường |
+| 7 | Phân bổ tồn theo FC · lịch sử nhận hàng (Module 3 nâng cao) | ✅ **ĐÃ XONG (12/09)** — migration `0018`: 2 bảng `inventory.fc_allocation` + `inventory.receipts` (khoá đúng theo report, RLS chỉ đọc, ghi qua 2 RPC service_role idempotent + cộng dòng trùng khoá), 4 view `security_invoker` (`vexim_inventory_fc`, `vexim_inventory_fc_rows`, `vexim_inventory_receipts`, `vexim_inbound_receipt_shipments` đối soát thực nhận vs số gửi của Inbound API), worker `inventory:fc` (parser đọc cột theo tên · ngày về ISO · dòng rác đếm `skipped`), I2/I4 hết placeholder. **Không cần thêm biến env**; Đợt 2 mới tự đặt lịch report qua Reports API (trần 4 giờ/lần với report daily) |
+| 8 | Phí lưu kho theo FC · phí inbound noncompliance · tự động kéo Reports API (Module 3 nâng cao phần 2) | ✅ **ĐÃ XONG (12/09)** — migration `0019`: 3 bảng `finance.storage_fees` + `inventory.inbound_noncompliance` + `connections.report_requests` (khoá đúng theo report · RLS chỉ đọc · 3 RPC service_role idempotent nhận JSON camelCase · helper `num_or_null`/`bool_or_null` để giá trị lạ thành NULL chứ không đoán 0), 5 view `security_invoker` (`vexim_storage_fees` kèm `sku` suy ra + nhãn `sku_source`, `vexim_storage_fee_by_fc` nhóm theo shop × tháng × FC × **currency**, `vexim_inbound_issues`, `vexim_inbound_issue_shipments`, `vexim_report_requests`); engine Reports API (`createReport` → poll `getReport` → `getReportDocument` + gunzip) đặt trong `web/src/lib/worker/` để **Vercel Cron** `/api/cron/report-pull` (03:00 UTC) và CLI `npm run worker:reports-pull` dùng chung một bộ luật: cooldown **4 giờ/loại report**, đang chờ thì **poll tiếp reportId cũ** chứ không tạo mới, `DONE` rỗng → `no_data`, `FATAL`/`CANCELLED` → ghi lỗi, `--dry-run` không ghi gì. UI: overview *Phí lưu kho theo FC* · I2 *phí của SKU + chênh lệch kỳ* · I4 *cột phí/vấn đề + 3 panel* · Module 0 *Report đã kéo qua Reports API*. **Không thêm biến env** (dùng lại `AMAZON_LWA_*` + Supabase + `CRON_SECRET` đã có) |
 | + | Buyer Communication, A+ (L5), auto-pricing (P4), MCF | **Defer đúng kế hoạch** 🟡/🔵 — không xin role/module trước khi có tính năng thật |
 
 ---

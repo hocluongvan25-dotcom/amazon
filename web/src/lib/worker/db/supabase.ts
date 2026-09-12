@@ -32,12 +32,20 @@ import type {
   ActiveShop,
   AlertRowInput,
   DbAdapter,
+  FcAllocationRowInput,
   FinancialEventRowInput,
   InventoryDailyRow,
   InventorySnapshotRow,
   ListingPublishQueueRow,
   ListingPublishResultInput,
   ProductTypeSchemaInput,
+  ReceiptRowInput,
+  FeeUpsertCounts,
+  NoncomplianceRowInput,
+  ReportUpsertCounts,
+  ReportRequestInput,
+  ReportRequestRow,
+  StorageFeeRowInput,
   ReimbursementRowInput,
   ReimbursementClaimRowInput,
   ReimbursementClaimRow,
@@ -52,6 +60,8 @@ import type {
   SettlementRowInput,
   SyncJobRecord,
 } from "./adapter.ts";
+import { normalizeReportRequestStatus } from "./adapter.ts";
+import { buildListingPayload, type ListingUpsertPayload } from "./listing-payload.ts";
 
 type Json = unknown;
 
@@ -94,7 +104,107 @@ const RPC_PATHS = {
   upsertProfit: "/rest/v1/rpc/vexim_worker_upsert_profit",
   financialEvents: "/rest/v1/rpc/vexim_worker_financial_events",
   effectiveCosts: "/rest/v1/rpc/vexim_worker_effective_costs",
+  // Đợt A (migration 0016) — ghi listing (L1/L2/L4). Giá vốn worker vẫn đọc qua
+  // vexim_worker_effective_costs của 0015 (không tạo RPC trùng chức năng).
+  upsertListings: "/rest/v1/rpc/vexim_worker_upsert_listings",
+  // Module 3 nâng cao (migration 0018) — nhập 2 report FBA inventory:
+  // phân bổ tồn theo FC (I2) + lịch sử nhận hàng (I2/I4 đối soát).
+  upsertFcAllocation: "/rest/v1/rpc/vexim_worker_upsert_fc_allocation",
+  upsertReceipts: "/rest/v1/rpc/vexim_worker_upsert_receipts",
+  /* 0019 — phí theo FC + trạng thái report */
+  upsertStorageFees: "/rest/v1/rpc/vexim_worker_upsert_storage_fees",
+  upsertNoncompliance: "/rest/v1/rpc/vexim_worker_upsert_noncompliance",
+  setReportRequest: "/rest/v1/rpc/vexim_worker_set_report_request",
 } as const;
+
+/**
+ * RPC 0018 trả (inserted, updated, skipped, merged, units, snapshots|shipments).
+ * PostgREST có thể trả số dưới dạng chuỗi → ép Number để tầng trên cộng được.
+ */
+type RpcReportCounts = {
+  inserted?: number | string | null;
+  updated?: number | string | null;
+  skipped?: number | string | null;
+  merged?: number | string | null;
+};
+
+function toReportCounts(row?: RpcReportCounts | null): ReportUpsertCounts {
+  const num = (v: number | string | null | undefined) => Number(v ?? 0) || 0;
+  return {
+    inserted: num(row?.inserted),
+    updated: num(row?.updated),
+    skipped: num(row?.skipped),
+    merged: num(row?.merged),
+  };
+}
+
+/**
+ * RPC 0019 trả (inserted, updated, skipped, merged, months|shipments, currencies).
+ * `currencies` là chuỗi "CAD,USD" (rỗng nếu report không có cột tiền) → tách mảng.
+ * KHÔNG có tổng tiền: cộng hai tiền tệ là vô nghĩa, việc cộng để tầng view làm.
+ */
+type RpcFeeCounts = {
+  inserted?: number | string | null;
+  updated?: number | string | null;
+  skipped?: number | string | null;
+  merged?: number | string | null;
+  months?: number | string | null;
+  shipments?: number | string | null;
+  currencies?: string | null;
+};
+
+function toFeeCounts(row?: RpcFeeCounts | null): FeeUpsertCounts {
+  const num = (v: number | string | null | undefined) => Number(v ?? 0) || 0;
+  return {
+    inserted: num(row?.inserted),
+    updated: num(row?.updated),
+    skipped: num(row?.skipped),
+    merged: num(row?.merged),
+    groups: num(row?.months ?? row?.shipments),
+    currencies: (row?.currencies ?? "")
+      .split(",")
+      .map((c) => c.trim())
+      .filter((c) => c !== ""),
+  };
+}
+
+/** Trạng thái report đọc từ connections.report_requests (rắn → camelCase). */
+function toReportRequestRow(r: {
+  id: string;
+  seller_account_id: string;
+  report_type: string;
+  marketplace_id?: string | null;
+  data_start?: string | null;
+  data_end?: string | null;
+  report_id?: string | null;
+  report_document_id?: string | null;
+  status?: string | null;
+  rows_imported?: number | string | null;
+  attempts?: number | string | null;
+  last_error?: string | null;
+  requested_at?: string | null;
+  completed_at?: string | null;
+  imported_at?: string | null;
+}): ReportRequestRow {
+  const num = (v: number | string | null | undefined) => (v === null || v === undefined ? null : Number(v));
+  return {
+    id: r.id,
+    sellerAccountId: r.seller_account_id,
+    reportType: r.report_type,
+    marketplaceId: r.marketplace_id ?? null,
+    dataStart: r.data_start ? String(r.data_start).slice(0, 10) : null,
+    dataEnd: r.data_end ? String(r.data_end).slice(0, 10) : null,
+    reportId: r.report_id ?? null,
+    reportDocumentId: r.report_document_id ?? null,
+    status: normalizeReportRequestStatus(r.status),
+    rowsImported: num(r.rows_imported),
+    attempts: num(r.attempts) ?? 0,
+    lastError: r.last_error ?? null,
+    requestedAt: r.requested_at ?? null,
+    completedAt: r.completed_at ?? null,
+    importedAt: r.imported_at ?? null,
+  };
+}
 
 export class SupabaseDbAdapter implements DbAdapter {
   private readonly url: string;
@@ -668,6 +778,121 @@ export class SupabaseDbAdapter implements DbAdapter {
     });
   }
 
+  /* ---- Module 3 nâng cao (0018) — qua RPC service_role của migration 0018 ---- */
+
+  /**
+   * Nhập report GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA (phân bổ tồn theo FC).
+   * RPC tự khử trùng theo (shop, ngày, SKU, FC, disposition) và CỘNG dồn dòng
+   * trùng khoá → nhập lại cùng file không nhân đôi tồn.
+   */
+  async upsertFcAllocation(
+    sellerAccountId: string,
+    rows: FcAllocationRowInput[],
+  ): Promise<ReportUpsertCounts> {
+    const result = await this.request<RpcReportCounts[]>("POST", RPC_PATHS.upsertFcAllocation, {
+      body: { p_seller: sellerAccountId, p_rows: rows },
+    });
+    return toReportCounts(result?.[0]);
+  }
+
+  /** Nhập report GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA (lịch sử nhận hàng). */
+  async upsertReceipts(
+    sellerAccountId: string,
+    rows: ReceiptRowInput[],
+  ): Promise<ReportUpsertCounts> {
+    const result = await this.request<RpcReportCounts[]>("POST", RPC_PATHS.upsertReceipts, {
+      body: { p_seller: sellerAccountId, p_rows: rows },
+    });
+    return toReportCounts(result?.[0]);
+  }
+
+  /* ---- Module 3 nâng cao (0019): phí theo FC + trạng thái report ---- */
+
+  /** Nhập report GET_FBA_STORAGE_FEE_CHARGES_DATA (phí lưu kho theo FC × tháng). */
+  async upsertStorageFees(
+    sellerAccountId: string,
+    rows: StorageFeeRowInput[],
+  ): Promise<FeeUpsertCounts> {
+    const result = await this.request<RpcFeeCounts[]>("POST", RPC_PATHS.upsertStorageFees, {
+      body: { p_seller: sellerAccountId, p_rows: rows },
+    });
+    return toFeeCounts(result?.[0]);
+  }
+
+  /** Nhập report GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA (phí inbound). */
+  async upsertNoncompliance(
+    sellerAccountId: string,
+    rows: NoncomplianceRowInput[],
+  ): Promise<FeeUpsertCounts> {
+    const result = await this.request<RpcFeeCounts[]>("POST", RPC_PATHS.upsertNoncompliance, {
+      body: { p_seller: sellerAccountId, p_rows: rows },
+    });
+    return toFeeCounts(result?.[0]);
+  }
+
+  /**
+   * Ghi trạng thái một lần yêu cầu report. Khoá (shop, loại report, khoảng ngày)
+   * nên gọi lại nhiều lần trong lúc poll KHÔNG tạo dòng mới — chỉ tăng attempts.
+   */
+  async setReportRequest(
+    sellerAccountId: string,
+    req: ReportRequestInput,
+  ): Promise<ReportRequestRow> {
+    const result = await this.request<
+      { id: string; status: string | null; report_id: string | null }[]
+    >("POST", RPC_PATHS.setReportRequest, {
+      body: {
+        p_seller: sellerAccountId,
+        p_req: {
+          reportType: req.reportType,
+          marketplaceId: req.marketplaceId ?? null,
+          dataStart: req.dataStart ?? null,
+          dataEnd: req.dataEnd ?? null,
+          reportId: req.reportId ?? null,
+          reportDocumentId: req.reportDocumentId ?? null,
+          status: req.status,
+          rowsImported: req.rowsImported ?? null,
+          lastError: req.lastError ?? null,
+          requestedAt: req.requestedAt ?? null,
+          completedAt: req.completedAt ?? null,
+          importedAt: req.importedAt ?? null,
+        },
+      },
+    });
+    const row = result?.[0];
+    return {
+      ...req,
+      id: row?.id ?? "",
+      sellerAccountId,
+      status: normalizeReportRequestStatus(row?.status ?? req.status),
+      reportId: row?.report_id ?? req.reportId ?? null,
+      attempts: 1,
+    };
+  }
+
+  /** Đọc trạng thái report (bảng connections.report_requests — service_role bypass RLS). */
+  async listReportRequests(
+    sellerAccountId: string,
+    opts?: { reportType?: string; limit?: number },
+  ): Promise<ReportRequestRow[]> {
+    const search: Record<string, string> = {
+      seller_account_id: `eq.${sellerAccountId}`,
+      select:
+        "id,seller_account_id,report_type,marketplace_id,data_start,data_end,report_id," +
+        "report_document_id,status,rows_imported,attempts,last_error,requested_at," +
+        "completed_at,imported_at",
+      order: "requested_at.desc",
+      limit: String(opts?.limit ?? 200),
+    };
+    if (opts?.reportType) search.report_type = `eq.${opts.reportType}`;
+    const rows = await this.request<Parameters<typeof toReportRequestRow>[0][]>(
+      "GET",
+      "/rest/v1/report_requests",
+      { search, schema: "connections" },
+    );
+    return (rows ?? []).map(toReportRequestRow);
+  }
+
   /* ---- Module 6 Đợt 2 (F3/F4) — qua RPC service_role của migration 0015 ---- */
 
   /** Nhập report GET_FBA_REIMBURSEMENTS_DATA (idempotent theo dedupeKey). */
@@ -782,6 +1007,34 @@ export class SupabaseDbAdapter implements DbAdapter {
     }));
   }
 
-  // ---------- Stubs cho Tier sau ----------
-  async upsertListing(_row: ListingStateRow): Promise<void> {}
+  // ---------- Module 1: Listing (L1/L2/L4) ----------
+  /**
+   * Ghi listing qua RPC `public.vexim_worker_upsert_listings` (migration 0016).
+   *
+   * Vì sao KHÔNG ghi thẳng `/rest/v1/listings` với header Content-Profile: catalog?
+   * Vì schema `catalog` chưa chắc nằm trong Supabase → Settings → API → "Exposed
+   * schemas"; thiếu nó PostgREST trả PGRST205 và lần đồng bộ chết im lặng (đúng
+   * sự cố 12/09/2026 của migration 0008). RPC nằm trong `public` nên luôn resolve.
+   *
+   * Luật "null = chưa biết → giữ nguyên" do RPC thực thi; xem ./listing-payload.ts.
+   */
+  async upsertListing(row: ListingStateRow): Promise<void> {
+    await this.upsertListings([row]);
+  }
+
+  /** Ghi cả lô trong 1 request — report Merchant Listings có thể vài nghìn SKU. */
+  async upsertListings(rows: ListingStateRow[]): Promise<void> {
+    if (rows.length === 0) return;
+    const bySeller = new Map<string, ListingUpsertPayload[]>();
+    for (const row of rows) {
+      const list = bySeller.get(row.sellerAccountId) ?? [];
+      list.push(buildListingPayload(row));
+      bySeller.set(row.sellerAccountId, list);
+    }
+    for (const [sellerAccountId, payload] of bySeller) {
+      await this.request("POST", RPC_PATHS.upsertListings, {
+        body: { p_seller: sellerAccountId, p_rows: payload },
+      });
+    }
+  }
 }

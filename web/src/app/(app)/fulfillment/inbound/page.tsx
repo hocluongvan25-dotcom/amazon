@@ -68,7 +68,7 @@ export default async function InboundPage() {
         <ul className="list-disc space-y-1.5 pl-5 text-[13px] text-muted">
           <li>Lô CLOSED: so thực nhận vs kế hoạch — thiếu &gt; 0 sinh task SOP-09 (claim bồi hoàn) kèm giá trị.</li>
           <li>Đang di chuyển (IN_TRANSIT/RECEIVING): theo dõi ETA, trễ &gt; 3 ngày so lịch sử tuyến → cảnh báo.</li>
-          <li>WORKING chờ placement: đẩy hoàn tất các步骤 confirm (Đợt 2 — thao tác ghi).</li>
+          <li>WORKING chờ placement: đẩy hoàn tất các bước confirm (Đợt 2 — thao tác ghi).</li>
         </ul>
       </Panel>
     </>

@@ -10,7 +10,8 @@ import {
 } from "@/components/ui";
 import { LiveFulfillmentOverview } from "@/components/inventory/LiveInventory";
 import { requireSession } from "@/lib/auth/session";
-import { fulfillKpis, inboundShipments, skuStock } from "@/lib/data/mock";
+import { fulfillKpis, inboundShipments, inventoryRows, skuStock } from "@/lib/data/mock";
+import { formatInventoryValueTotal, summarizeInventoryValue } from "@/lib/data/inventory-model";
 import type { PersonaKey } from "@/lib/roles";
 
 const ALLOWED: PersonaKey[] = ["ceo", "lead_fulfill"];
@@ -48,9 +49,25 @@ export default async function FulfillmentPage() {
         ))}
       </div>
       <KpiGrid>
-        {fulfillKpis.map((k) => (
-          <KpiCard key={k.label} {...k} />
-        ))}
+        {/* 0017: thẻ "Tồn khả dụng" thành "Giá trị tồn kho" — tính từ chính mock
+            inventoryRows để bản demo và bản live kể cùng một câu chuyện */}
+        {fulfillKpis
+          .map((k) => {
+            if (k.label !== "Tồn khả dụng") return k;
+            const valueSum = summarizeInventoryValue(inventoryRows);
+            return {
+              label: "Giá trị tồn kho",
+              value: formatInventoryValueTotal(valueSum),
+              sub:
+                valueSum.missingCost > 0
+                  ? `Σ tồn × giá vốn · ${valueSum.missingCost} SKU chưa định giá`
+                  : `Σ tồn × giá vốn · đủ ${valueSum.valued} SKU`,
+              tone: (valueSum.missingCost > 0 ? "warn" : "flat") as "warn" | "flat",
+            };
+          })
+          .map((k) => (
+            <KpiCard key={k.label} {...k} />
+          ))}
       </KpiGrid>
       <Grid2>
         <Panel title="SKU sắp hết — xếp theo doanh thu" hint="đề xuất số lượng nhập">

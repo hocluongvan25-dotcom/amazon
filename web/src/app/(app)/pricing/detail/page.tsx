@@ -10,7 +10,7 @@ import {
 } from "@/components/ui";
 import { requireSession } from "@/lib/auth/session";
 import { readPricing } from "@/lib/data/pricing";
-import { mapPricingRow, type PricingRaw } from "@/lib/data/pricing-model";
+import { COST_BASIS_HINT, COST_BASIS_VI, mapPricingRow, type PricingRaw } from "@/lib/data/pricing-model";
 import { pricingDetails, pricingRows } from "@/lib/data/mock";
 import type { PersonaKey } from "@/lib/roles";
 
@@ -72,7 +72,13 @@ async function LivePricingDetail({ sku }: { sku: string }) {
         {[
           { label: "Giá mình", value: `$${r.ourPrice.toFixed(2)}`, sub: `cập nhật ${r.lastPriceChange}` },
           { label: "FOEP", value: r.foep ? `$${r.foep.toFixed(2)}` : "—", sub: "chưa có trong DB" },
-          { label: "Giá sàn", value: `$${r.floorPrice.toFixed(2)}`, sub: `biên ${r.currentMargin.toFixed(1)}%` },
+          {
+            label: "Giá sàn",
+            value: usd(r.floorPrice),
+            sub: r.floorPrice === null
+              ? COST_BASIS_VI[r.costBasis]
+              : `biên ${r.currentMargin === null ? "—" : `${r.currentMargin.toFixed(1)}%`}`,
+          },
           { label: "Buy Box", value: boxLabel, sub: `${r.competitorCount} đối thủ` },
         ].map((k) => (
           <div key={k.label} className="rounded-[13px] border border-line bg-card px-4 py-3">
@@ -88,27 +94,76 @@ async function LivePricingDetail({ sku }: { sku: string }) {
             Lịch sử giá 30 ngày chưa có trong DB — cần worker sync Pricing API.
           </p>
         </Panel>
-        <Panel title="Breakdown giá sàn" hint="từ getMyFeesEstimateForSKU">
+        <Panel
+          title="Breakdown giá sàn"
+          hint={`catalog.effective_cost() + fees estimate · ${COST_BASIS_VI[r.costBasis]}`}
+        >
           <table className={tableCls.table}>
             <tbody>
               <tr>
-                <td className={tableCls.td}>Referral fee</td>
-                <td className={tableCls.tdNum}>{raw.referral_fee !== null ? `$${raw.referral_fee.toFixed(2)}` : "—"}</td>
+                <td className={tableCls.td}>
+                  Giá vốn hiệu lực
+                  <div className="text-[11px] text-soft">
+                    {r.costEffectiveFrom ? `áp dụng từ ${r.costEffectiveFrom}` : "chưa nhập"}
+                    {r.costCurrency ? ` · ${r.costCurrency}` : ""}
+                    {r.costSource ? ` · nguồn ${r.costSource}` : ""}
+                  </div>
+                </td>
+                <td className={tableCls.tdNum}>{usd(r.unitCost)}</td>
               </tr>
               <tr>
                 <td className={tableCls.td}>FBA fulfillment fee</td>
-                <td className={tableCls.tdNum}>{raw.fba_fee !== null ? `$${raw.fba_fee.toFixed(2)}` : "—"}</td>
+                <td className={tableCls.tdNum}>{usd(raw.fba_fee)}</td>
               </tr>
               <tr>
-                <td className={tableCls.td}>Giá vốn (COGS)</td>
-                <td className={tableCls.tdNum}>—</td>
+                <td className={tableCls.td}>Phí khác / đơn vị</td>
+                <td className={tableCls.tdNum}>{usd(r.otherFeePerUnit)}</td>
+              </tr>
+              <tr>
+                <td className={tableCls.td}>
+                  Referral fee
+                  <div className="text-[11px] text-soft">
+                    {raw.referral_fee !== null
+                      ? "số thật từ fees estimate"
+                      : `chưa có fees estimate → dùng tỷ lệ cấu hình ${pct(r.referralRateUsed, 0)}`}
+                  </div>
+                </td>
+                <td className={tableCls.tdNum}>
+                  {usd(raw.referral_fee)}
+                  <div className="text-[11px] text-soft">{pct(r.referralRateUsed)}</div>
+                </td>
+              </tr>
+              <tr>
+                <td className={tableCls.td}>Biên tối thiểu (cấu hình)</td>
+                <td className={tableCls.tdNum}>{pct(r.minMarginRate, 0)}</td>
               </tr>
               <tr className="border-t-2 border-line">
-                <td className={`${tableCls.td} font-extrabold`}>Tổng phí ước tính</td>
-                <td className={`${tableCls.tdNum} font-extrabold text-accent-ink`}>{raw.total_fees !== null ? `$${raw.total_fees.toFixed(2)}` : "—"}</td>
+                <td className={`${tableCls.td} font-extrabold`}>
+                  Giá sàn = (vốn + FBA + khác) / (1 − referral − biên)
+                </td>
+                <td className={`${tableCls.tdNum} font-extrabold text-accent-ink`}>{usd(r.floorPrice)}</td>
+              </tr>
+              <tr>
+                <td className={tableCls.td}>Lãi gộp tại giá {usd(r.ourPrice)}</td>
+                <td className={`${tableCls.tdNum} font-bold ${r.grossProfit !== null && r.grossProfit < 0 ? "text-red" : "text-green"}`}>
+                  {usd(r.grossProfit)}
+                  <div className="text-[11px] text-soft">
+                    biên {r.currentMargin === null ? "—" : `${r.currentMargin.toFixed(1)}%`}
+                  </div>
+                </td>
               </tr>
             </tbody>
           </table>
+          {r.floorPrice === null ? (
+            <p className="mt-2 rounded-lg border border-amber bg-amber-soft px-3 py-2 text-[12px] font-semibold text-[#8a5602]">
+              {COST_BASIS_HINT[r.costBasis]} →{" "}
+              <a href="/finance/costs" className="underline underline-offset-2">nhập giá vốn tại đây</a>.
+            </p>
+          ) : (
+            <p className="mt-2 text-[11.5px] text-soft">
+              Giá áp thấp hơn giá sàn sẽ bị chặn ở bước duyệt (P3), trừ khi trưởng phòng override có lý do.
+            </p>
+          )}
         </Panel>
       </Grid2>
       <Panel title="Offers đối thủ" hint="cần getItemOffers + getListingOffersBatch">
@@ -120,8 +175,12 @@ async function LivePricingDetail({ sku }: { sku: string }) {
   );
 }
 
-function usd(v: number) {
-  return `$${v.toFixed(2)}`;
+function usd(v: number | null) {
+  return v === null ? "—" : `$${v.toFixed(2)}`;
+}
+
+function pct(v: number | null, digits = 1) {
+  return v === null ? "—" : `${(v * 100).toFixed(digits)}%`;
 }
 
 export default async function PricingDetailPage({
@@ -198,8 +257,14 @@ export default async function PricingDetailPage({
           <div className="rounded-[13px] border border-line bg-card px-4 py-3">
             <div className="text-[11.5px] font-bold uppercase text-soft">Giá sàn</div>
             <div className="text-[22px] font-extrabold">{usd(r.floorPrice)}</div>
-            <div className={`text-[12px] font-semibold ${r.marginTone === "red" ? "text-red" : "text-green"}`}>
-              biên {r.currentMargin.toFixed(1)}%
+            <div
+              className={`text-[12px] font-semibold ${
+                r.marginTone === "red" ? "text-red" : r.marginTone === "gray" ? "text-amber" : "text-green"
+              }`}
+            >
+              {r.currentMargin === null
+                ? `${COST_BASIS_VI[r.costBasis]} — nhập giá vốn để có sàn`
+                : `biên ${r.currentMargin.toFixed(1)}%`}
             </div>
           </div>
           <div className="rounded-[13px] border border-line bg-card px-4 py-3">

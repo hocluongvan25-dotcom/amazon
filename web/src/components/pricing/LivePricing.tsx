@@ -13,8 +13,15 @@ import {
 } from "@/components/ui";
 import { readPricing } from "@/lib/data/pricing";
 import {
-  mapPricingRow,
+  COST_BASIS_HINT,
+  COST_BASIS_VI,
   computePricingKpis,
+  formatRevenue30d,
+  formatSales30d,
+  formatVelocity30d,
+  isCostBlocked,
+  mapPricingRow,
+  velocitySortValue,
   type PricingRaw,
 } from "@/lib/data/pricing-model";
 import type { BoxStatus, PricingRow } from "@/lib/types";
@@ -37,12 +44,43 @@ function usd(v: number | null) {
   return `$${v.toFixed(2)}`;
 }
 
-function marginCls(m: number, tone: "red" | "amber" | "green") {
+/**
+ * Ô GIÁ SÀN: thiếu giá vốn thì hiện "—" KÈM lý do + chỗ nhập.
+ * (Bản 0013 hiện tổng phí làm "giá sàn" → người dùng tưởng lãi, nên phải chặn hiển thị sai.)
+ */
+function FloorCell({ r }: { r: PricingRow }) {
+  if (r.floorPrice === null) {
+    return (
+      <span className="text-soft" title={COST_BASIS_HINT[r.costBasis]}>
+        —<span className="block text-[10.5px] font-bold text-amber">{COST_BASIS_VI[r.costBasis]}</span>
+      </span>
+    );
+  }
+  return (
+    <>
+      {usd(r.floorPrice)}
+      {r.belowFloor === true ? (
+        <div className="text-[11px] font-bold text-red">dưới sàn!</div>
+      ) : r.costBasis === "cost_only" ? (
+        <div className="text-[10.5px] text-soft" title={COST_BASIS_HINT.cost_only}>phí cấu hình</div>
+      ) : null}
+    </>
+  );
+}
+
+function MarginCell({ r }: { r: PricingRow }) {
+  if (r.currentMargin === null) return <span className="text-soft">—</span>;
+  return <span className={marginCls(r.currentMargin, r.marginTone)}>{r.currentMargin.toFixed(1)}%</span>;
+}
+
+function marginCls(m: number, tone: "red" | "amber" | "green" | "gray") {
   return tone === "red"
     ? "font-extrabold text-red"
     : tone === "amber"
       ? "font-bold text-amber"
-      : "text-green font-semibold";
+      : tone === "gray"
+        ? "text-soft"
+        : "text-green font-semibold";
 }
 
 function chipHref(base: Record<string, string | undefined>, key: string, value: string) {
@@ -84,8 +122,9 @@ export async function LivePricingPage({
   let rows = allRows.filter((r) => {
     if (filters.f !== "all" && r.boxStatus !== filters.f) return false;
     if (filters.shop !== "all" && r.shop !== filters.shop) return false;
-    if (filters.margin === "below_floor" && r.marginTone !== "red") return false;
-    if (filters.margin === "thin" && !(r.currentMargin < 15 && r.marginTone !== "red")) return false;
+    if (filters.margin === "below_floor" && r.belowFloor !== true) return false;
+    if (filters.margin === "thin" && !(r.currentMargin !== null && r.currentMargin < 15 && r.marginTone !== "red")) return false;
+    if (filters.margin === "no_cost" && !isCostBlocked(r)) return false;
     if (filters.q) {
       const hay = `${r.sku} ${r.asin} ${r.title}`.toLowerCase();
       if (!hay.includes(filters.q)) return false;
@@ -95,17 +134,20 @@ export async function LivePricingPage({
 
   rows = [...rows].sort((a, b) => {
     switch (filters.sort) {
-      case "margin": return a.currentMargin - b.currentMargin;
+      // SKU chưa tính được biên xếp CUỐI (không được chen lên đầu như thể biên thấp nhất)
+      case "margin": return (a.currentMargin ?? Number.POSITIVE_INFINITY) - (b.currentMargin ?? Number.POSITIVE_INFINITY);
       case "sku": return a.sku.localeCompare(b.sku);
-      case "velocity": return b.velocity30d - a.velocity30d;
+      // SKU CHƯA CÓ ĐƠN (velocity NULL) xếp cuối — không chen lên đầu như thể bán kém nhất
+      case "velocity": return velocitySortValue(b) - velocitySortValue(a);
       case "risk":
       default: {
         const score = (r: PricingRow) => {
           let s = 0;
           if (r.boxStatus === "lost") s += 100;
           if (r.boxStatus === "at_risk") s += 50;
-          if (r.marginTone === "red") s += 80;
-          s += r.velocity30d / 10;
+          if (r.belowFloor === true) s += 80;
+          if (isCostBlocked(r)) s += 30; // thiếu giá vốn = không quyết định được giá → cần soi
+          s += (r.velocity30d ?? 0) / 10; // chưa có đơn = không cộng điểm urgency
           return s;
         };
         return score(b) - score(a);
@@ -114,6 +156,7 @@ export async function LivePricingPage({
   });
 
   const shops = [...new Set(allRows.map((r) => r.shop))];
+  const noCostCount = allRows.filter(isCostBlocked).length;
   const chip = (active: boolean) =>
     `rounded-full border px-3.5 py-1.5 text-[12.5px] font-bold transition ${
       active
@@ -175,6 +218,18 @@ export async function LivePricingPage({
           <Grid2>
             <Panel title="Cảnh báo giá" hint="từ ANY_OFFER_CHANGED + PRICE_HEALTH">
               <AlertList items={[
+                ...(noCostCount > 0
+                  ? [{
+                      tone: "amber" as const,
+                      text: `${noCostCount} SKU chưa có giá vốn dùng được → không tính được giá sàn/biên. Nhập tại /finance/costs (F3/F4/P1 cùng dùng nguồn này).`,
+                    }]
+                  : []),
+                ...(allRows.some((r) => r.costBasis === "currency_mismatch")
+                  ? [{
+                      tone: "red" as const,
+                      text: `${allRows.filter((r) => r.costBasis === "currency_mismatch").length} SKU có giá vốn LỆCH TIỀN TỆ với giá bán — không cộng được, cần nhập lại đúng tiền tệ.`,
+                    }]
+                  : []),
                 { tone: "amber" as const, text: "Dữ liệu FOEP/velocity chưa có trong DB — hiển thị khi worker sync Pricing API" },
                 { tone: "green" as const, text: `${allRows.filter(r => r.boxStatus === "holding").length} SKU đang giữ Buy Box` },
               ]} />
@@ -249,6 +304,7 @@ export async function LivePricingPage({
               ["all", "Mọi biên"],
               ["below_floor", "Dưới giá sàn"],
               ["thin", "Biên mỏng (<15%)"],
+              ["no_cost", `Chưa có giá vốn${noCostCount ? ` · ${noCostCount}` : ""}`],
             ] as [string, string][]).map(([key, label]) => (
               <a key={key} href={chipHref(sp, "margin", key)} className={chip(filters.margin === key)}>
                 {label}
@@ -285,6 +341,7 @@ export async function LivePricingPage({
                   <th className={`${tableCls.th} text-right`}>Thấp nhất</th>
                   <th className={`${tableCls.th} text-right`}>Giá sàn</th>
                   <th className={`${tableCls.th} text-right`}>Biên</th>
+                  <th className={`${tableCls.th} text-right`}>Bán 30 ngày</th>
                   <th className={`${tableCls.th} text-right`}>Đối thủ</th>
                   <th className={tableCls.th}>Phụ trách</th>
                 </tr>
@@ -321,24 +378,39 @@ export async function LivePricingPage({
                       {r.referencePrice === null ? <span className="text-soft">—</span> : usd(r.referencePrice)}
                     </td>
                     <td className={tableCls.tdNum}>
-                      {usd(r.floorPrice)}
-                      {r.marginTone === "red" ? (
-                        <div className="text-[11px] font-bold text-red">dưới sàn!</div>
-                      ) : null}
-                    </td>
-                    <td className={`${tableCls.tdNum} ${marginCls(r.currentMargin, r.marginTone)}`}>
-                      {r.currentMargin.toFixed(1)}%
+                      <FloorCell r={r} />
                     </td>
                     <td className={tableCls.tdNum}>
-                      {r.competitorCount}
-                      {r.velocity30d ? <div className="text-[11px] text-soft">~{r.velocity30d}đ/ngày</div> : null}
+                      <MarginCell r={r} />
                     </td>
-                    <td className={tableCls.td}>{r.owner}</td>
+                    <td className={tableCls.tdNum}>
+                      {/* 0017: đơn vị/đơn/doanh thu 30 ngày từ Orders — NULL thì hiện "—", không hiện 0 */}
+                      <div className="font-bold">{formatSales30d(r)}</div>
+                      <div className="text-[11px] text-soft">
+                        {formatVelocity30d(r.velocity30d)}
+                      </div>
+                      <div
+                        className="text-[11px] font-semibold text-muted"
+                        title="Σ item_price × quantity của đơn không huỷ trong 30 ngày"
+                      >
+                        {formatRevenue30d(r.revenue30d, r.revenueCurrency)}
+                      </div>
+                    </td>
+                    <td className={tableCls.tdNum}>{r.competitorCount}</td>
+                    <td className={tableCls.td}>
+                      {r.owner === "—" ? (
+                        <span className="text-soft" title="Chưa gán ai phụ trách shop này ở module pricing (iam.assignments)">
+                          — chưa gán
+                        </span>
+                      ) : (
+                        <span className="font-semibold">{r.owner}</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
                 {rows.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className={`${tableCls.td} text-center text-soft`}>
+                    <td colSpan={11} className={`${tableCls.td} text-center text-soft`}>
                       Không có SKU nào khớp bộ lọc.
                     </td>
                   </tr>
@@ -346,10 +418,22 @@ export async function LivePricingPage({
               </tbody>
             </table>
           </Panel>
-          <Panel title="Phạm vi bản đọc">
+          <Panel title="Phạm vi bản đọc" hint={`giá vốn: ${allRows.length - noCostCount}/${allRows.length} SKU`}>
             <p className="text-[13px] text-muted">
-              Chưa có: FOEP (getFeaturedOfferExpectedPriceBatch), velocity30d (Orders join), đối thủ count,
-              giá sàn chính xác (cần COGS + fees estimate đầy đủ). Hiển thị khi worker sync Pricing API.
+              <span className="font-bold text-[#0b7a55]">Đã có (migration 0016):</span> giá vốn hiệu lực theo
+              ngày từ <code>catalog.cost_inputs</code> → giá sàn = (vốn + FBA + phí khác) / (1 − referral − biên
+              tối thiểu), lãi gộp, % biên, cờ dưới sàn. SKU chưa nhập giá vốn hiện <b>—</b> kèm nhãn lý do
+              (nhập tại <a href="/finance/costs" className="font-bold text-blue underline underline-offset-2">Giá vốn</a>).
+            </p>
+            <p className="mt-1.5 text-[13px] text-muted">
+              <span className="font-bold text-[#0b7a55]">Đã có (migration 0017):</span> đơn vị · số đơn · doanh thu
+              30 ngày theo SKU (<code>vexim_sku_sales_30d</code>, loại đơn huỷ) → velocity = đơn vị/ngày để ước
+              thiệt hại khi mất box; và người phụ trách module pricing (<code>iam.assignments</code>). SKU chưa có
+              đơn nào hiện <b>—</b> chứ không hiện 0.
+            </p>
+            <p className="mt-1.5 text-[13px] text-muted">
+              <span className="font-bold text-amber">Chưa có:</span> FOEP
+              (getFeaturedOfferExpectedPriceBatch), số đối thủ — hiển thị khi worker sync Pricing API.
             </p>
           </Panel>
         </>
@@ -375,7 +459,7 @@ export async function LivePriceApprovals() {
   // Lọc SKU có vấn đề (mất box, biên âm, at_risk)
   const allRows = rawRows.map(mapPricingRow);
   const pending = allRows.filter(
-    (r) => r.boxStatus === "lost" || r.boxStatus === "at_risk" || r.marginTone === "red",
+    (r) => r.boxStatus === "lost" || r.boxStatus === "at_risk" || r.belowFloor === true || isCostBlocked(r),
   );
 
   return (
@@ -424,12 +508,16 @@ export async function LivePriceApprovals() {
                     <Chip tone={boxTone[r.boxStatus]}>{boxLabel[r.boxStatus]}</Chip>
                   </td>
                   <td className={tableCls.tdNum}>{usd(r.ourPrice)}</td>
-                  <td className={`${tableCls.tdNum} ${marginCls(r.currentMargin, r.marginTone)}`}>
-                    {r.currentMargin.toFixed(1)}%
+                  <td className={tableCls.tdNum}>
+                    <MarginCell r={r} />
                   </td>
                   <td className={tableCls.td}>
-                    {r.marginTone === "red" ? (
+                    {r.belowFloor === true ? (
                       <span className="font-bold text-red">Biên âm — dưới giá sàn</span>
+                    ) : isCostBlocked(r) ? (
+                      <span className="font-bold text-amber" title={COST_BASIS_HINT[r.costBasis]}>
+                        {COST_BASIS_VI[r.costBasis]} — nhập ở /finance/costs
+                      </span>
                     ) : r.boxStatus === "lost" ? (
                       <span className="font-bold text-red">Mất box</span>
                     ) : (

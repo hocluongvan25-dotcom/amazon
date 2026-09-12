@@ -18,6 +18,10 @@
  *      rule cảnh báo, view public) + chốt PII + tính idempotent
  *  10. Kiểm chứng 0014 — L3 Listing Editor: staging + lịch sử + máy trạng thái
  *      + RPC cho web/worker + cache JSON Schema product type (form động)
+ *  11. Kiểm chứng 0015..0017 — F3/F4 bồi hoàn + lợi nhuận · Đợt A gỡ chặn dữ liệu
+ *      lõi · Đợt B doanh số 30 ngày / người phụ trách / giá trị tồn
+ *  12. Kiểm chứng 0018 — Module 3 nâng cao: phân bổ tồn theo FC + lịch sử nhận
+ *      hàng từ report, RPC worker idempotent, đối soát nhận với số gửi của I4
  *
  * Không cần Docker, không cần Supabase project, không cần credentials.
  */
@@ -1251,6 +1255,1509 @@ ok(
 );
 
 await ex("reset role; rollback;");
+
+// ============================================================================
+console.log("\n=== BƯỚC 17: 0016 — ĐỢT A gỡ chặn dữ liệu lõi (giá vốn · listing · pricing) ===");
+// ============================================================================
+ok(
+  await ex(rd("migrations/0016_core_data_unblock.sql"), "0016_core_data_unblock.sql"),
+  "0016 chạy sạch (DO-block tự kiểm tra cột/view/RPC/quyền/PII)",
+);
+await cmp(
+  "0016: catalog.listings đủ 11 cột để GHI dữ liệu thật (L1/L2/L4)",
+  `select count(*) n from information_schema.columns
+    where table_schema='catalog' and table_name='listings'
+      and column_name in ('issues','buyable','discoverable','product_type','quantity',
+                          'stranded_reason','issue_errors','issue_warnings',
+                          'enforcement_actions','last_source','last_synced_at')`,
+  11,
+);
+// Web đọc hai view này bằng chuỗi select cố định (LISTINGS_SELECT / LISTING_QUEUE_SELECT
+// trong web/src/lib/data/listing-model.ts) → thiếu 1 cột là PostgREST trả PGRST204 và
+// SẬP CẢ TRANG, nên chốt ở đây thay vì để production phát hiện.
+await cmp(
+  "0016: vexim_listings phơi đủ 8 cột mới cho L1/L2 (web select bằng tên)",
+  `select count(*) n from information_schema.columns
+    where table_schema='public' and table_name='vexim_listings'
+      and column_name in ('product_type','buyable','discoverable','quantity',
+                          'stranded_reason','enforcement_actions','last_source','last_synced_at')`,
+  8,
+);
+await cmp(
+  "0016: vexim_listing_queue phơi đủ 10 cột mới cho L4 (kể cả buyable/discoverable)",
+  `select count(*) n from information_schema.columns
+    where table_schema='public' and table_name='vexim_listing_queue'
+      and column_name in ('product_type','buyable','discoverable','quantity','stranded_reason',
+                          'enforcement_actions','last_source','last_synced_at','issues','error_count')`,
+  10,
+);
+await cmp(
+  "0016: queue KHÔNG có cột offer (web dùng select riêng — tránh PGRST204)",
+  `select count(*) n from information_schema.columns
+    where table_schema='public' and table_name='vexim_listing_queue'
+      and column_name in ('buy_box_won','buy_box_price','competitor_price','offer_captured_at')`,
+  0,
+);
+await cmp(
+  "0016: catalog.cost_inputs có cột vết (updated_at/updated_by/source_ref)",
+  `select count(*) n from information_schema.columns
+    where table_schema='catalog' and table_name='cost_inputs'
+      and column_name in ('updated_at','updated_by','source_ref')`,
+  3,
+);
+await cmp(
+  "0016: 6 view public (2 listing + pricing + 2 giá vốn + shops)",
+  `select count(*) n from information_schema.views where table_schema='public'
+     and table_name in ('vexim_listings','vexim_listing_queue','vexim_pricing',
+                        'vexim_cost_inputs','vexim_cost_coverage','vexim_shops')`,
+  6,
+);
+await cmp(
+  "0016: vexim_pricing có giá vốn + giá sàn + biên + nhãn nguồn",
+  `select count(*) n from information_schema.columns
+    where table_schema='public' and table_name='vexim_pricing'
+      and column_name in ('unit_cost','cost_currency','cost_effective_from','floor_price',
+                          'gross_profit','margin_pct','below_floor','cost_basis',
+                          'referral_rate_used','min_margin_rate')`,
+  10,
+);
+await cmp(
+  "0016: cả 6 view đều security_invoker (RLS bảng gốc vẫn áp)",
+  `select count(*) n from pg_class c join pg_namespace n on n.oid=c.relnamespace
+    where n.nspname='public'
+      and c.relname in ('vexim_listings','vexim_listing_queue','vexim_pricing',
+                        'vexim_cost_inputs','vexim_cost_coverage','vexim_shops')
+      and 'security_invoker=true'=any(c.reloptions)`,
+  6,
+);
+await cmp(
+  "0016: RPC worker bị revoke khỏi authenticated (chỉ service_role)",
+  `select count(*) n from pg_proc p join pg_namespace ns on ns.oid=p.pronamespace
+    where ns.nspname='public'
+      and p.proname = 'vexim_worker_upsert_listings'
+      and has_function_privilege('authenticated', p.oid, 'EXECUTE')`,
+  0,
+);
+await cmp(
+  "0016: view mới KHÔNG phơi PII/email nội bộ/merchant token",
+  `select count(*) n from information_schema.columns where table_schema='public'
+     and table_name in ('vexim_listings','vexim_listing_queue','vexim_pricing',
+                        'vexim_cost_inputs','vexim_cost_coverage','vexim_shops')
+     and column_name in ('buyer_name','buyer_email','buyer_phone_number','ship_address_1',
+                         'recipient_name','actor_email','email','imported_by_email','seller_id')`,
+  0,
+);
+ok(
+  await ex(rd("migrations/0016_core_data_unblock.sql"), "0016 lần 2"),
+  "0016 idempotent",
+);
+await cmp(
+  "0016 lần 2: policy không nhân đôi",
+  "select count(*) n from pg_policies where schemaname='catalog' and tablename='cost_inputs'",
+  2,
+);
+await cmp(
+  "0016 lần 2: pricing_defaults vẫn đúng 1 dòng cấu hình",
+  "select count(*) n from catalog.pricing_defaults",
+  1,
+);
+
+// PGlite trả cột `date` dưới dạng Date → chuẩn về chuỗi để so sánh
+const dstr = (v) => (v && typeof v.toISOString === "function" ? v.toISOString() : String(v ?? ""));
+/** gọi hàm returns jsonb và bóc kết quả (select f(...) → 1 cột tên hàm) */
+const rpc = async (sql) => (await one(`select ${sql} as res`)).res;
+
+await ex("begin");
+const aShop = (await one("select id from connections.seller_accounts order by seller_id limit 1")).id;
+const aOtherShop = (await one(`select id from connections.seller_accounts where id <> '${aShop}' limit 1`)).id;
+const aFin      = "a1000000-0000-4000-8000-000000000001";  // operator module finance
+const aListing  = "a1000000-0000-4000-8000-000000000002";  // operator module listings
+const aStranger = "a1000000-0000-4000-8000-000000000003";  // không được gán shop
+await ex("reset role;");
+ok(
+  await ex(`insert into auth.users(id,email) values
+     ('${aFin}','local-a-fin@example.test'),
+     ('${aListing}','local-a-listing@example.test'),
+     ('${aStranger}','local-a-stranger@example.test');
+   insert into iam.user_profiles(id,display_name,email) values
+     ('${aFin}','A finance','local-a-fin@example.test'),
+     ('${aListing}','A listing','local-a-listing@example.test'),
+     ('${aStranger}','A stranger','local-a-stranger@example.test');
+   insert into iam.assignments(user_id,seller_account_id,module,can_write) values
+     ('${aFin}','${aShop}','finance',true),
+     ('${aListing}','${aShop}','listings',true);
+   insert into iam.role_assignments(user_id,role) values
+     ('${aFin}','operator'),('${aListing}','operator');`),
+  "0016 fixture: 3 user (finance / listings / ngoài shop)",
+);
+const asA = async (u) => {
+  await ex("reset role;");
+  await ex(`select set_config('request.jwt.claim.sub','${u ?? ""}',false);`);
+  await ex("set role authenticated;");
+};
+
+// --- 1. Nhập giá vốn TAY: thang hiệu lực, không nhân đôi ---------------------
+await asA(aFin);
+let res = await rpc(`public.vexim_upsert_cost_input('${aShop}','sku-a',10,'USD','2026-08-01',null,'lô 1')`);
+ok(res?.inserted === 1, `0016 giá vốn: nhập bậc đầu (inserted=${res?.inserted})`);
+res = await rpc(`public.vexim_upsert_cost_input('${aShop}','sku-a',12,'USD','2026-09-01',null,'lô 2')`);
+ok(res?.inserted === 1 && res?.closed_previous === 1,
+   `0016 giá vốn: bậc mới TỰ cắt ngọn bậc cũ tại mốc hiệu lực (closed=${res?.closed_previous})`);
+const ladder = await db.query(
+  `select unit_cost, effective_from, effective_to from catalog.cost_inputs
+    where seller_account_id='${aShop}' and sku='SKU-A' order by effective_from`);
+ok(
+  ladder.rows.length === 2 &&
+  dstr(ladder.rows[0].effective_to).startsWith("2026-09-01") &&
+  ladder.rows[1].effective_to === null,
+  `0016 giá vốn: thang 2 bậc [08-01→09-01) = 10, [09-01→∞) = 12 — ${JSON.stringify(ladder.rows.map(r => [r.unit_cost, dstr(r.effective_to)]))}`,
+);
+res = await rpc(`public.vexim_upsert_cost_input('${aShop}','sku-a',13,'USD','2026-09-01',null,'sửa lô 2')`);
+ok(res?.updated === 1 && res?.superseded === 1,
+   `0016 giá vốn: nhập lại cùng mốc = CẬP NHẬT, không nhân đôi bậc (updated=${res?.updated})`);
+await cmp(
+  "0016 giá vốn: vẫn đúng 2 bậc sau khi sửa",
+  `select count(*) n from catalog.cost_inputs where seller_account_id='${aShop}' and sku='SKU-A'`,
+  2,
+);
+ok(
+  Number((await one(`select catalog.effective_cost('${aShop}','SKU-A','2026-09-05') as v`)).v) === 13,
+  "0016 giá vốn: effective_cost() ngày hiện hành = 13",
+);
+ok(
+  Number((await one(`select catalog.effective_cost('${aShop}','SKU-A','2026-08-15') as v`)).v) === 10,
+  "0016 giá vốn: effective_cost() ngày cũ = 10 (F4 tính đúng theo thời điểm)",
+);
+ok(
+  await mustBlock(`select public.vexim_upsert_cost_input('${aShop}','sku-b',5,'USD','2026-09-01','2026-08-01',null)`),
+  "0016 giá vốn CHẶN: effective_to trước effective_from",
+);
+ok(
+  await mustBlock(`select public.vexim_upsert_cost_input('${aShop}','SKU-A',-1,'USD','2026-10-01',null,null)`),
+  "0016 giá vốn CHẶN: giá vốn âm",
+);
+ok(
+  await mustBlock(`select public.vexim_upsert_cost_input('${aShop}','AAAAAAAAAA-BBBBBBBBBB-CCCCCCCCCC-DDDDDDDDDDD',1,'USD','2026-10-01',null,null)`),
+  "0016 giá vốn CHẶN: SKU dài hơn 40 ký tự (giới hạn seller-sku Amazon)",
+);
+
+// --- 2. Quyền nhập giá vốn --------------------------------------------------
+await asA(aListing);
+ok(
+  await mustBlock(`select public.vexim_upsert_cost_input('${aShop}','sku-c',7,'USD','2026-09-01',null,null)`),
+  "0016 giá vốn CHẶN: user có can_write nhưng KHÔNG thuộc module finance",
+);
+await asA(aStranger);
+ok(
+  await mustBlock(`select public.vexim_upsert_cost_input('${aOtherShop}','sku-c',7,'USD','2026-09-01',null,null)`),
+  "0016 giá vốn CHẶN: user ngoài shop (RLS + can_write_seller_account)",
+);
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role service_role;");
+ok(
+  await mustBlock(`select public.vexim_upsert_cost_input('${aShop}','sku-c',7,'USD','2026-09-01',null,null)`),
+  "0016 giá vốn CHẶN: worker (không phiên đăng nhập) không dùng RPC nhập tay",
+);
+
+// --- 3. Import CSV: parse số/ngày kiểu local + ATOMIC -----------------------
+await asA(aFin);
+res = await rpc(`public.vexim_import_cost_inputs('${aShop}', '[
+  {"sku":"CSV-1","unit_cost":"9,5","currency":"usd","effective_from":"2026-07-01","effective_to":"","note":"lô 7"},
+  {"sku":"CSV-2","unit_cost":"1.234,56","currency":"USD","effective_from":"01/07/2026"},
+  {"sku":"CSV-3","unit_cost":4.2,"currency":"USD","effective_from":"2026-07-01"}
+]'::jsonb, 'gia-von-2026-07.csv')`);
+ok(res?.ok === true && res?.rows === 3 && res?.inserted === 3,
+   `0016 CSV: import 3 dòng thành công (${JSON.stringify(res)})`);
+const csv2 = await one(`select unit_cost, effective_from, currency from catalog.cost_inputs
+   where seller_account_id='${aShop}' and sku='CSV-2'`);
+ok(Number(csv2?.unit_cost) === 1234.56 && dstr(csv2?.effective_from).startsWith("2026-07-01"),
+   `0016 CSV: parse số "1.234,56" → 1234.56 và ngày "01/07/2026" → 2026-07-01 (nhận ${csv2?.unit_cost} · ${dstr(csv2?.effective_from)})`);
+const csv1 = await one(`select unit_cost, currency, source, source_ref from catalog.cost_inputs
+   where seller_account_id='${aShop}' and sku='CSV-1'`);
+ok(Number(csv1?.unit_cost) === 9.5 && csv1?.currency === "USD" && csv1?.source === "csv"
+     && csv1?.source_ref === "gia-von-2026-07.csv",
+   `0016 CSV: parse "9,5", chuẩn hoá currency thường → USD, ghi source + tên file (nhận ${JSON.stringify(csv1)})`);
+
+const nBefore = (await one("select count(*)::int n from catalog.cost_inputs")).n;
+res = await rpc(`public.vexim_import_cost_inputs('${aShop}', '[
+  {"sku":"CSV-OK","unit_cost":"3","currency":"USD","effective_from":"2026-07-01"},
+  {"sku":"CSV-BAD","unit_cost":"abc","currency":"USD","effective_from":"2026-07-01"},
+  {"sku":"","unit_cost":"3","currency":"USD","effective_from":"2026-07-01"}
+]'::jsonb, 'loi.csv')`);
+const nAfter = (await one("select count(*)::int n from catalog.cost_inputs")).n;
+ok(res?.ok === false && Array.isArray(res?.errors) && res.errors.length === 2
+     && res.errors[0].line === 2 && res.errors[1].line === 3,
+   `0016 CSV: lô có lỗi → ok=false + báo đúng SỐ DÒNG (${JSON.stringify(res?.errors)})`);
+ok(nBefore === nAfter, `0016 CSV ATOMIC: có 1 dòng lỗi thì KHÔNG ghi dòng nào (${nBefore} → ${nAfter})`);
+res = await rpc(`public.vexim_import_cost_inputs('${aShop}', '[
+  {"sku":"CSV-MMDD","unit_cost":"3","currency":"USD","effective_from":"07/20/2026"}]'::jsonb, null)`);
+ok(res?.ok === false && /tháng > 12/.test(res?.errors?.[0]?.message ?? ""),
+   `0016 CSV: từ chối MM/DD/YYYY mơ hồ thay vì đoán (${res?.errors?.[0]?.message})`);
+
+// --- 4. Kết thúc hiệu lực / xoá + audit ------------------------------------
+const closeId = (await one(`select id from catalog.cost_inputs
+   where seller_account_id='${aShop}' and sku='CSV-1'`)).id;
+res = await rpc(`public.vexim_close_cost_input('${closeId}','2026-08-15','hết lô')`);
+const closedRow = await one(`select effective_to, note from catalog.cost_inputs where id='${closeId}'`);
+ok(res?.ok === true && dstr(closedRow?.effective_to).startsWith("2026-08-15") && closedRow?.note === "hết lô",
+   `0016 giá vốn: kết thúc hiệu lực một bậc (không xoá lịch sử) — ${dstr(closedRow?.effective_to)}`);
+ok(
+  await mustBlock(`select public.vexim_close_cost_input('${closeId}','2026-07-01',null)`),
+  "0016 giá vốn CHẶN: ngày kết thúc trước ngày hiệu lực",
+);
+ok(
+  await mustBlock(`select public.vexim_delete_cost_input('${closeId}')`),
+  "0016 giá vốn CHẶN: operator không được XOÁ bậc giá vốn (chỉ admin/trưởng phòng Tài chính)",
+);
+// 3 lần nhập tay + 3 lần import (1 thành công, 2 lô lỗi cũng PHẢI log) + 1 lần kết thúc
+await cmp(
+  "0016 giá vốn: mọi thao tác (kể cả lô import BỊ TỪ CHỐI) đều để lại audit log",
+  `select count(*) n from iam.audit_logs
+    where action in ('cost.upsert','cost.import','cost.close') and seller_account_id='${aShop}'`,
+  7,
+);
+await cmp(
+  "0016 giá vốn: lô import lỗi cũng bị ghi log với kết quả error",
+  `select count(*) n from iam.audit_logs
+    where action='cost.import' and result like 'error:%' and seller_account_id='${aShop}'`,
+  2,
+);
+
+// --- 5. Worker GHI listing (thay stub rỗng) --------------------------------
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role service_role;");
+res = await one(`select * from public.vexim_worker_upsert_listings('${aShop}', '[
+  {"sku":"L-1","asin":"B0001","title":"Vali 20","status":"active","price":"129.99","currency":"usd",
+   "quantity":"142","product_type":"LUGGAGE",
+   "issues":[{"code":"8541","message":"thiếu thuộc tính","severity":"ERROR","attributeNames":["item_name"]},
+             {"code":"90220","message":"thiếu mô tả","severity":"WARNING"}],
+   "stranded_reason":null,"source":"report","synced_at":"2026-09-12T02:00:00Z"}]'::jsonb)`);
+ok(res?.upserted === 1 && res?.active_count === 1,
+   `0016 listing: worker ghi được listing (upserted=${res?.upserted})`);
+const l1 = await one(`select status, price, currency, quantity, product_type, issue_errors, issue_warnings,
+   stranded_reason, last_source from catalog.listings where seller_account_id='${aShop}' and sku='L-1'`);
+ok(l1?.status === "ACTIVE" && Number(l1?.price) === 129.99 && l1?.currency === "USD"
+     && l1?.quantity === 142 && l1?.issue_errors === 1 && l1?.issue_warnings === 1
+     && l1?.last_source === "report",
+   `0016 listing: chuẩn hoá status/price/currency + ĐẾM issue từ mảng jsonb — ${JSON.stringify(l1)}`);
+
+await one(`select * from public.vexim_worker_upsert_listings('${aShop}', '[
+  {"sku":"L-1","status":null,"price":null,"title":null,"source":"report"}]'::jsonb)`);
+const l2 = await one(`select status, price, title, issue_errors from catalog.listings
+   where seller_account_id='${aShop}' and sku='L-1'`);
+ok(l2?.status === "ACTIVE" && Number(l2?.price) === 129.99 && l2?.title === "Vali 20" && l2?.issue_errors === 1,
+   `0016 listing: NULL = "chưa biết" → KHÔNG đè dữ liệu cũ — ${JSON.stringify(l2)}`);
+
+await one(`select * from public.vexim_worker_upsert_listings('${aShop}', '[{"sku":"L-1","issues":[]}]'::jsonb)`);
+const l3 = await one(`select issues, issue_errors, issue_warnings from catalog.listings
+   where seller_account_id='${aShop}' and sku='L-1'`);
+ok(JSON.stringify(l3?.issues) === "[]" && l3?.issue_errors === 0 && l3?.issue_warnings === 0,
+   `0016 listing: issues=[] nghĩa là "đã xác nhận hết lỗi" → xoá bộ đếm cũ (${JSON.stringify(l3)})`);
+
+await one(`select * from public.vexim_worker_upsert_listings('${aShop}', '[
+  {"sku":"L-1","issues":null,"issue_errors":2,"issue_warnings":1,
+   "enforcement_actions":["SEARCH_SUPPRESSED"]}]'::jsonb)`);
+const l4 = await one(`select issues, issue_errors from catalog.listings
+   where seller_account_id='${aShop}' and sku='L-1'`);
+const v4 = await one(`select error_count, warning_count from public.vexim_listings
+   where seller_account_id='${aShop}' and sku='L-1'`);
+ok(l4?.issues === null && Number(v4?.error_count) === 2 && Number(v4?.warning_count) === 1,
+   `0016 listing: notification chỉ cho SỐ → xoá mảng chi tiết lỗi thời, view đếm = 2/1 (${JSON.stringify(v4)})`);
+
+await one(`select * from public.vexim_worker_upsert_listings('${aShop}', '[
+  {"sku":"L-1","status":"STRANDED","stranded_reason":"Listing error (product type invalid)"}]'::jsonb)`);
+ok((await one(`select stranded_reason from catalog.listings
+   where seller_account_id='${aShop}' and sku='L-1'`)).stranded_reason?.startsWith("Listing error"),
+   "0016 listing: ghi lý do stranded cho L4/SOP-03");
+await one(`select * from public.vexim_worker_upsert_listings('${aShop}', '[
+  {"sku":"L-1","status":"ACTIVE","stranded_reason":null}]'::jsonb)`);
+ok((await one(`select stranded_reason from catalog.listings
+   where seller_account_id='${aShop}' and sku='L-1'`)).stranded_reason === null,
+   "0016 listing: hết stranded → XOÁ lý do (key có mặt + null), không giữ oan trong queue");
+await one(`select * from public.vexim_worker_upsert_listings('${aShop}', '[
+  {"sku":"L-2","status":"INACTIVE","stranded_reason":"No listing exists for inventory"}]'::jsonb)`);
+await one(`select * from public.vexim_worker_upsert_listings('${aShop}', '[{"sku":"L-2","status":"INACTIVE"}]'::jsonb)`);
+ok((await one(`select stranded_reason from catalog.listings
+   where seller_account_id='${aShop}' and sku='L-2'`)).stranded_reason === "No listing exists for inventory",
+   "0016 listing: key VẮNG → giữ nguyên lý do stranded cũ");
+await one(`select * from public.vexim_worker_upsert_listings('${aShop}', '[{"sku":"L-4"}]'::jsonb)`);
+ok((await one(`select status from catalog.listings
+   where seller_account_id='${aShop}' and sku='L-4'`)).status === "UNKNOWN",
+   "0016 listing: dòng mới chưa rõ trạng thái → 'UNKNOWN', KHÔNG bịa 'active'");
+ok(
+  await mustBlock(`select public.vexim_worker_upsert_listings('${aShop}', '[{"sku":"L-5","status":"Banana"}]'::jsonb)`),
+  "0016 listing CHẶN: trạng thái ngoài tập hợp lệ",
+);
+const queueSkus = (await db.query(
+  `select sku from public.vexim_listing_queue where seller_account_id='${aShop}' order by sku`)).rows.map(r => r.sku);
+ok(queueSkus.join(",") === "L-1,L-2",
+   `0016 L4: queue chỉ chứa dòng có vấn đề (L-1 còn 2 lỗi, L-2 inactive; L-4 UNKNOWN thì không) — ${queueSkus.join(",")}`);
+await asA(aFin);
+ok(
+  await mustBlock(`select public.vexim_worker_upsert_listings('${aShop}', '[]'::jsonb)`),
+  "0016 listing CHẶN: authenticated không gọi RPC ghi của worker",
+);
+
+// --- 6. vexim_pricing dùng GIÁ VỐN HIỆU LỰC (thay floor ≈ phí của 0013) -----
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role service_role;");
+await ex(`insert into catalog.listings(seller_account_id,sku,asin,title,status,price,currency) values
+  ('${aShop}','P-COST','B0P1','có vốn + có phí','ACTIVE',100,'USD'),
+  ('${aShop}','P-NOCOST','B0P2','không vốn','ACTIVE',100,'USD'),
+  ('${aShop}','P-COSTONLY','B0P3','có vốn, chưa có phí','ACTIVE',100,'USD'),
+  ('${aShop}','P-FX','B0P4','vốn EUR, giá bán USD','ACTIVE',100,'USD');
+ insert into catalog.fees_estimates(seller_account_id,sku,referral_fee,fba_fee,total_fee,currency,estimated_at) values
+  ('${aShop}','P-COST',15,5.5,20.5,'USD',now()),
+  ('${aShop}','P-NOCOST',15,5.5,20.5,'USD',now());`);
+await asA(aFin);
+await rpc(`public.vexim_upsert_cost_input('${aShop}','P-COST',40,'USD','2026-09-01',null,null)`);
+await rpc(`public.vexim_upsert_cost_input('${aShop}','P-COSTONLY',40,'USD','2026-09-01',null,null)`);
+await rpc(`public.vexim_upsert_cost_input('${aShop}','P-FX',40,'EUR','2026-09-01',null,null)`);
+const pricing = {};
+for (const row of (await db.query(
+  `select sku, unit_cost, cost_basis, floor_price, gross_profit, margin_pct, below_floor, referral_rate_used
+     from public.vexim_pricing where seller_account_id='${aShop}' and sku like 'P-%' order by sku`)).rows) {
+  pricing[row.sku] = row;
+}
+ok(Number(pricing["P-COST"]?.unit_cost) === 40 && pricing["P-COST"]?.cost_basis === "cost+fees",
+   `0016 P1: view đọc giá vốn hiệu lực (40) + nhãn nguồn cost+fees — ${JSON.stringify(pricing["P-COST"])}`);
+ok(Number(pricing["P-COST"]?.floor_price) === 60.67,
+   `0016 P1: giá sàn = (40 vốn + 5.5 FBA) / (1 − 0.15 referral − 0.10 biên) = 60.67 (nhận ${pricing["P-COST"]?.floor_price})`);
+ok(Number(pricing["P-COST"]?.gross_profit) === 39.5 && Number(pricing["P-COST"]?.margin_pct) === 39.5
+     && pricing["P-COST"]?.below_floor === false,
+   `0016 P1: lãi gộp 39.50 / biên 39.5% (nhận ${pricing["P-COST"]?.gross_profit} · ${pricing["P-COST"]?.margin_pct})`);
+ok(pricing["P-NOCOST"]?.unit_cost === null && pricing["P-NOCOST"]?.floor_price === null
+     && pricing["P-NOCOST"]?.margin_pct === null && pricing["P-NOCOST"]?.cost_basis === "fees_only",
+   `0016 P1: THIẾU giá vốn → sàn/biên NULL + basis fees_only (không lấy phí làm sàn như 0013) — ${JSON.stringify(pricing["P-NOCOST"])}`);
+ok(pricing["P-COSTONLY"]?.cost_basis === "cost_only" && Number(pricing["P-COSTONLY"]?.floor_price) === 53.33
+     && Number(pricing["P-COSTONLY"]?.gross_profit) === 45,
+   `0016 P1: chưa có fees estimate → dùng tỷ lệ cấu hình 15% (sàn 53.33, lãi 45) — ${JSON.stringify(pricing["P-COSTONLY"])}`);
+ok(pricing["P-FX"]?.cost_basis === "currency_mismatch" && pricing["P-FX"]?.floor_price === null,
+   `0016 P1: vốn EUR ≠ giá bán USD → KHÔNG cộng, báo currency_mismatch (${JSON.stringify(pricing["P-FX"])})`);
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role service_role;");
+await ex(`update catalog.listings set price = 50 where seller_account_id='${aShop}' and sku='P-COST'`);
+const belowFloor = await one(`select below_floor, margin_pct from public.vexim_pricing
+   where seller_account_id='${aShop}' and sku='P-COST'`);
+ok(belowFloor?.below_floor === true && Number(belowFloor?.margin_pct) < 0,
+   `0016 P1: hạ giá 50 < sàn 60.67 → below_floor=true, biên âm (${belowFloor?.margin_pct}%)`);
+await cmp(
+  "0016 P1: vexim_pricing.unit_cost KHỚP catalog.effective_cost() ở MỌI dòng",
+  `select count(*) n from public.vexim_pricing p
+    where p.unit_cost is distinct from catalog.effective_cost(p.seller_account_id, p.sku, current_date)`,
+  0,
+);
+
+// --- 7. RLS view giá vốn + độ phủ ------------------------------------------
+await ex("reset role;");
+await ex(`select set_config('request.jwt.claim.sub','${aStranger}',false);`);
+await ex("set role authenticated;");
+await cmp(
+  "0016 RLS: user ngoài shop KHÔNG thấy giá vốn",
+  `select count(*) n from public.vexim_cost_inputs where seller_account_id='${aShop}'`,
+  0,
+);
+await cmp(
+  "0016 RLS: user ngoài shop KHÔNG thấy độ phủ giá vốn",
+  `select count(*) n from public.vexim_cost_coverage where seller_account_id='${aShop}'`,
+  0,
+);
+await ex(`select set_config('request.jwt.claim.sub','${aFin}',false);`);
+const coverage = await one(`select count(*)::int total,
+   count(*) filter (where missing_cost)::int missing
+   from public.vexim_cost_coverage where seller_account_id='${aShop}'`);
+ok(coverage?.total >= 4 && coverage?.missing >= 1,
+   `0016 độ phủ: liệt kê SKU còn THIẾU giá vốn để gỡ chặn F3/F4/P1 (${coverage?.missing}/${coverage?.total} SKU)`);
+await cmp(
+  "0016 độ phủ: SKU đã nhập giá vốn thì missing_cost = false",
+  `select count(*) n from public.vexim_cost_coverage
+    where seller_account_id='${aShop}' and sku='P-COST' and missing_cost = false`,
+  1,
+);
+
+// --- 8. vexim_shops: bộ chọn shop trên /finance/costs -----------------------
+// Người dùng PHẢI thấy shop mình được gán kể cả khi shop chưa có listing/giá vốn nào
+// (nếu không thì trang giá vốn không chọn được shop để nhập lần đầu).
+await cmp(
+  "0016 vexim_shops: người được gán finance thấy shop của mình",
+  `select count(*) n from public.vexim_shops where seller_account_id='${aShop}'`,
+  1,
+);
+await cmp(
+  "0016 vexim_shops: user ngoài KHÔNG thấy shop lạ (RLS seller_accounts vẫn áp)",
+  `select count(*) n from public.vexim_shops where seller_account_id='${aShop}'
+     and not iam.can_read_seller_account(seller_account_id)`,
+  0,
+);
+await cmp(
+  "0016 vexim_shops: không phơi merchant token (seller_id)",
+  `select count(*) n from information_schema.columns
+    where table_schema='public' and table_name='vexim_shops' and column_name='seller_id'`,
+  0,
+);
+await ex(`select set_config('request.jwt.claim.sub','${aStranger}',false);`);
+await cmp(
+  "0016 RLS vexim_shops: user lạ không thấy shop nào của org",
+  `select count(*) n from public.vexim_shops where seller_account_id='${aShop}'`,
+  0,
+);
+
+await ex("reset role; rollback;");
+
+// ============================================================================
+console.log("\n=== BƯỚC 18: 0017 — ĐỢT B hái quả ngay (doanh số 30 ngày · phụ trách · giá trị tồn) ===");
+// ============================================================================
+ok(
+  await ex(rd("migrations/0017_sales30d_owner_inventory_value.sql"), "0017_sales30d_owner_inventory_value.sql"),
+  "0017 chạy sạch (DO-block tự soát: cột nối CUỐI view · quyền · PII · công thức)",
+);
+
+// Web đọc các view này bằng chuỗi select cố định (PRICING_SELECT / LISTINGS_SELECT /
+// LISTING_QUEUE_SELECT / INVENTORY_SELECT) → cột mới PHẢI nằm cuối, đúng thứ tự;
+// thiếu/sai 1 cột là PostgREST trả PGRST204 và SẬP CẢ TRANG.
+const tailCols = async (view, n) =>
+  (await one(`select string_agg(column_name, ',' order by ordinal_position) c
+     from information_schema.columns
+    where table_schema='public' and table_name='${view}'
+      and ordinal_position > (select max(ordinal_position) - ${n}
+                                from information_schema.columns
+                               where table_schema='public' and table_name='${view}')`)).c;
+
+const SALES_TAIL =
+  "units_30d,orders_30d,revenue_30d,revenue_currency,velocity_30d,last_order_at,owner";
+for (const v of ["vexim_pricing", "vexim_listings", "vexim_listing_queue"]) {
+  ok((await tailCols(v, 7)) === SALES_TAIL, `0017: ${v} nối 7 cột mới Ở CUỐI (không đảo cột 0016)`);
+}
+ok(
+  (await tailCols("vexim_inventory_latest", 8)) ===
+    "unit_cost,cost_currency,cost_effective_from,cost_source,stock_value,total_stock_value,value_currency,value_basis",
+  "0017: vexim_inventory_latest nối 8 cột giá trị tồn Ở CUỐI",
+);
+await cmp(
+  "0017: vexim_sku_sales_30d là security_invoker (RLS bảng gốc vẫn áp)",
+  `select count(*) n from pg_class c join pg_namespace ns on ns.oid=c.relnamespace
+    where ns.nspname='public' and c.relname='vexim_sku_sales_30d'
+      and 'security_invoker=true' = any (c.reloptions)`,
+  1,
+);
+
+// ---- fixture: người phụ trách · listing · đơn hàng · tồn kho · giá vốn -------
+await ex("begin");
+await ex("reset role;");
+const bShop = (await one("select id from connections.seller_accounts order by seller_id limit 1")).id;
+const bPricingRw = "b1000000-0000-4000-8000-000000000001"; // pricing, can_write — gán SAU
+const bPricingRo = "b1000000-0000-4000-8000-000000000002"; // pricing, chỉ đọc — gán TRƯỚC
+const bListing   = "b1000000-0000-4000-8000-000000000003"; // listings
+const bCustomer  = "b1000000-0000-4000-8000-000000000004"; // user của KHÁCH HÀNG
+const bStranger  = "b1000000-0000-4000-8000-000000000005"; // không được gán shop
+ok(
+  await ex(`insert into auth.users(id,email) values
+     ('${bPricingRw}','local-b-prw@example.test'),
+     ('${bPricingRo}','local-b-pro@example.test'),
+     ('${bListing}','local-b-listing@example.test'),
+     ('${bCustomer}','local-b-customer@example.test'),
+     ('${bStranger}','local-b-stranger@example.test');
+   insert into iam.user_profiles(id,display_name,email,vexim_employee) values
+     ('${bPricingRw}','Minh giá','local-b-prw@example.test',true),
+     ('${bPricingRo}','An chỉ đọc','local-b-pro@example.test',true),
+     ('${bListing}','Lan listing','local-b-listing@example.test',true),
+     ('${bCustomer}','Khách của VEXIM','local-b-customer@example.test',false),
+     ('${bStranger}','Người lạ','local-b-stranger@example.test',true);
+   insert into iam.assignments(user_id,seller_account_id,module,can_write,created_at) values
+     ('${bPricingRo}','${bShop}','pricing',false, now() - interval '10 days'),
+     ('${bPricingRw}','${bShop}','pricing',true,  now() - interval '1 day'),
+     ('${bListing}',  '${bShop}','listings',true, now() - interval '3 days'),
+     ('${bCustomer}', '${bShop}','inventory',true, now() - interval '3 days');
+   insert into iam.role_assignments(user_id,role) values
+     ('${bPricingRw}','operator'),('${bPricingRo}','operator'),('${bListing}','operator');`),
+  "0017 fixture: 5 user (pricing rw/ro · listings · khách hàng · người lạ)",
+);
+
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role service_role;");
+ok(
+  await ex(`insert into catalog.listings(seller_account_id,sku,asin,title,status,price,currency,quantity) values
+     ('${bShop}','QW-SELL','B0QW1','bán chạy','ACTIVE',50,'USD',100),
+     ('${bShop}','QW-DEAD','B0QW2','không có đơn nào','INACTIVE',30,'USD',50),
+     ('${bShop}','QW-CANCEL','B0QW3','chỉ có đơn huỷ','ACTIVE',25,'USD',10),
+     ('${bShop}','qw-lowcase','B0QW4','SKU viết thường','ACTIVE',20,'USD',7);
+   insert into sales.orders(id,seller_account_id,amazon_order_id,status,channel,purchase_date,order_total,currency,items_count) values
+     ('b2000000-0000-4000-8000-000000000001','${bShop}','B-OK-1','Shipped','AFN',   now() - interval '5 days',  150,'USD',3),
+     ('b2000000-0000-4000-8000-000000000002','${bShop}','B-OK-2','Pending','AFN',   now() - interval '10 days', 100,'USD',2),
+     ('b2000000-0000-4000-8000-000000000003','${bShop}','B-CANCEL','Cancelled','AFN',now() - interval '2 days', 450,'USD',9),
+     ('b2000000-0000-4000-8000-000000000004','${bShop}','B-OLD','Shipped','AFN',    now() - interval '40 days', 350,'USD',7),
+     ('b2000000-0000-4000-8000-000000000005','${bShop}','B-CASE','Shipped','AFN',   now() - interval '1 day',   50,'USD',1),
+     ('b2000000-0000-4000-8000-000000000006','${bShop}','B-CANCEL2','Canceled','MFN',now() - interval '3 days', 25,'USD',1);
+   insert into sales.order_items(order_id,asin,sku,quantity,item_price) values
+     ('b2000000-0000-4000-8000-000000000001','B0QW1','QW-SELL',3,50),
+     ('b2000000-0000-4000-8000-000000000002','B0QW1','QW-SELL',2,50),
+     ('b2000000-0000-4000-8000-000000000003','B0QW1','QW-SELL',9,50),
+     ('b2000000-0000-4000-8000-000000000004','B0QW1','QW-SELL',7,50),
+     ('b2000000-0000-4000-8000-000000000005','B0QW1','qw-sell',1,50),
+     ('b2000000-0000-4000-8000-000000000006','B0QW3','QW-CANCEL',1,25);
+   insert into inventory.inventory_snapshots(seller_account_id,sku,asin,fulfillable,reserved,inbound,captured_at) values
+     ('${bShop}','QW-SELL','B0QW1',100,20,30, now()),
+     ('${bShop}','QW-DEAD','B0QW2',50,0,0, now()),
+     ('${bShop}','qw-lowcase','B0QW4',7,0,0, now());
+   insert into catalog.cost_inputs(seller_account_id,sku,unit_cost,currency,effective_from,source) values
+     ('${bShop}','QW-SELL',10,'USD',    current_date - 30,'csv'),
+     ('${bShop}','QW-LOWCASE',4,'USD',  current_date - 30,'manual');`),
+  "0017 fixture: 4 listing · 6 đơn (2 huỷ · 1 quá 30 ngày · 1 SKU viết thường) · 3 tồn kho · 2 giá vốn",
+);
+
+// --- 1. iam.module_owner: đúng người · đúng module · ưu tiên can_write --------
+const ownerOf = async (u, moduleCode) => {
+  await ex("reset role;");
+  await ex(`select set_config('request.jwt.claim.sub','${u ?? ""}',false);`);
+  await ex("set role authenticated;");
+  return (await one(`select iam.module_owner('${bShop}','${moduleCode}') as v`)).v;
+};
+ok((await ownerOf(bPricingRw, "pricing")) === "Minh giá",
+   "0017 owner: ưu tiên người can_write dù gán SAU (không lấy bừa người gán đầu tiên)");
+ok((await ownerOf(bListing, "listings")) === "Lan listing",
+   "0017 owner: đúng phạm vi module — hỏi 'listings' ra người phụ trách listing");
+ok((await ownerOf(bPricingRw, "ads")) === null,
+   "0017 owner: module chưa gán ai → NULL (không đoán bừa người phụ trách)");
+ok((await ownerOf(bPricingRw, "inventory")) === null,
+   "0017 owner: user của KHÁCH HÀNG (vexim_employee=false) không bị nêu tên phụ trách");
+ok((await ownerOf(bStranger, "pricing")) === null,
+   "0017 owner: người không đọc được shop KHÔNG dò được tên người phụ trách");
+
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role anon;");
+ok(
+  await mustBlock(`select iam.module_owner('${bShop}','pricing')`),
+  "0017 owner CHẶN: anon không gọi được iam.module_owner",
+);
+
+// --- 2. vexim_sku_sales_30d: cửa sổ 30 ngày · loại đơn huỷ · bất chấp hoa/thường
+await ex("reset role;");
+await ex(`select set_config('request.jwt.claim.sub','${bListing}',false);`);
+await ex("set role authenticated;");
+const sales = {};
+for (const r of (await db.query(
+  `select sku, units_30d, orders_30d, revenue_30d, currency, currency_mixed, last_order_at
+     from public.vexim_sku_sales_30d
+    where seller_account_id='${bShop}' and sku like 'QW%' order by sku`)).rows) {
+  sales[r.sku] = r;
+}
+ok(sales["QW-SELL"]?.units_30d === 6 && sales["QW-SELL"]?.orders_30d === 3
+     && Number(sales["QW-SELL"]?.revenue_30d) === 300,
+   `0017 doanh số: Shipped 3 + Pending 2 + SKU viết thường 1 = 6 đơn vị · 3 đơn · 300.00 (đơn huỷ 9 + đơn 40 ngày 7 bị loại) — ${JSON.stringify(sales["QW-SELL"])}`);
+ok(sales["QW-CANCEL"] === undefined,
+   "0017 doanh số: SKU chỉ có đơn huỷ ('Cancelled' + 'Canceled') → KHÔNG có dòng");
+ok(sales["QW-DEAD"] === undefined,
+   "0017 doanh số: SKU không có đơn → KHÔNG có dòng (để NULL, không suy ra 0 giả)");
+await cmp(
+  "0017 doanh số: last_order_at = đơn KHÔNG huỷ gần nhất (1 ngày trước)",
+  `select count(*) n from public.vexim_sku_sales_30d
+    where seller_account_id='${bShop}' and sku='QW-SELL'
+      and last_order_at between now() - interval '25 hours' and now() - interval '23 hours'`,
+  1,
+);
+
+// --- 3. P1 (vexim_pricing): velocity30d + owner thay cho 0 / "—" ------------
+const p17 = {};
+for (const r of (await db.query(
+  `select sku, units_30d, orders_30d, revenue_30d, revenue_currency, velocity_30d, owner, unit_cost, cost_basis
+     from public.vexim_pricing
+    where seller_account_id='${bShop}'
+      and sku in ('QW-SELL','QW-DEAD','QW-CANCEL','qw-lowcase') order by sku`)).rows) {
+  p17[r.sku] = r;
+}
+ok(Number(p17["QW-SELL"]?.velocity_30d) === 0.2 && p17["QW-SELL"]?.units_30d === 6,
+   `0017 P1: velocity30d = 6 đơn vị / 30 ngày = 0.20 đơn/ngày (thay cho số 0 hard-code) — ${JSON.stringify(p17["QW-SELL"])}`);
+ok(p17["QW-SELL"]?.owner === "Minh giá",
+   `0017 P1: user THƯỜNG thấy tên đồng nghiệp phụ trách nhờ hàm security definer (owner=${p17["QW-SELL"]?.owner})`);
+ok(Number(p17["QW-SELL"]?.revenue_30d) === 300 && p17["QW-SELL"]?.revenue_currency === "USD",
+   "0017 P1: doanh thu 30 ngày 300.00 kèm tiền tệ (không cộng gộp khác tiền)");
+ok(p17["QW-DEAD"]?.units_30d === null && p17["QW-DEAD"]?.velocity_30d === null
+     && p17["QW-DEAD"]?.revenue_30d === null && p17["QW-DEAD"]?.revenue_currency === null,
+   `0017 P1: SKU chưa có đơn → velocity/revenue NULL chứ không phải 0 — ${JSON.stringify(p17["QW-DEAD"])}`);
+ok(Number(p17["qw-lowcase"]?.unit_cost) === 4,
+   `0017 P1: listing SKU viết thường vẫn thấy giá vốn nhập VIẾT HOA (sửa lỗ hổng 0016) — ${JSON.stringify(p17["qw-lowcase"])}`);
+
+// --- 4. L1 (vexim_listings) + L4 (vexim_listing_queue) ----------------------
+const listings = {};
+for (const r of (await db.query(
+  `select sku, units_30d, revenue_30d, owner from public.vexim_listings
+    where seller_account_id='${bShop}'
+      and sku in ('QW-SELL','QW-DEAD') order by sku`)).rows) {
+  listings[r.sku] = r;
+}
+ok(Number(listings["QW-SELL"]?.revenue_30d) === 300 && listings["QW-SELL"]?.owner === "Lan listing",
+   `0017 L1: revenue30d 300.00 + owner module listings (nút sort "Doanh thu 30 ngày" hết sort trên số 0) — ${JSON.stringify(listings["QW-SELL"])}`);
+const queue = await one(`select sku, owner, revenue_30d, units_30d from public.vexim_listing_queue
+   where seller_account_id='${bShop}' and sku='QW-DEAD'`);
+ok(queue?.owner === "Lan listing" && queue?.revenue_30d === null,
+   `0017 L4: queue có người phụ trách + doanh thu NULL cho listing INACTIVE — ${JSON.stringify(queue)}`);
+
+// --- 5. Module 3: GIÁ TRỊ TỒN KHO = Σ tồn × giá vốn hiệu lực ----------------
+const inv = {};
+for (const r of (await db.query(
+  `select sku, fulfillable, reserved, inbound, unit_cost, cost_currency, stock_value,
+          total_stock_value, value_currency, value_basis
+     from public.vexim_inventory_latest
+    where seller_account_id='${bShop}' and sku in ('QW-SELL','QW-DEAD','qw-lowcase') order by sku`)).rows) {
+  inv[r.sku] = r;
+}
+ok(Number(inv["QW-SELL"]?.stock_value) === 1000 && Number(inv["QW-SELL"]?.total_stock_value) === 1500
+     && inv["QW-SELL"]?.value_basis === "cost" && inv["QW-SELL"]?.value_currency === "USD",
+   `0017 Module 3: 100 × 10 = 1.000 · (100+20+30) × 10 = 1.500 USD — ${JSON.stringify(inv["QW-SELL"])}`);
+ok(inv["QW-DEAD"]?.unit_cost === null && inv["QW-DEAD"]?.stock_value === null
+     && inv["QW-DEAD"]?.total_stock_value === null && inv["QW-DEAD"]?.value_basis === "missing",
+   `0017 Module 3: THIẾU giá vốn → giá trị NULL + nhãn 'missing' (I3 không hiện 0 giả) — ${JSON.stringify(inv["QW-DEAD"])}`);
+ok(Number(inv["qw-lowcase"]?.unit_cost) === 4 && Number(inv["qw-lowcase"]?.stock_value) === 28,
+   `0017 Module 3: tồn kho SKU viết thường vẫn định giá được (7 × 4 = 28) — ${JSON.stringify(inv["qw-lowcase"])}`);
+
+// --- 6. RLS: người lạ không thấy gì qua các view mới ------------------------
+await ex(`select set_config('request.jwt.claim.sub','${bStranger}',false);`);
+await cmp(
+  "0017 RLS: người lạ không thấy doanh số 30 ngày của shop",
+  `select count(*) n from public.vexim_sku_sales_30d where seller_account_id='${bShop}'`,
+  0,
+);
+await cmp(
+  "0017 RLS: người lạ không thấy giá trị tồn kho của shop",
+  `select count(*) n from public.vexim_inventory_latest where seller_account_id='${bShop}'`,
+  0,
+);
+await cmp(
+  "0017 RLS: người lạ không thấy dòng P1 của shop",
+  `select count(*) n from public.vexim_pricing where seller_account_id='${bShop}'`,
+  0,
+);
+
+await ex("reset role; rollback;");
+
+// --- 7. idempotent ----------------------------------------------------------
+ok(
+  await ex(rd("migrations/0017_sales30d_owner_inventory_value.sql"), "0017 lần 2"),
+  "0017 idempotent",
+);
+ok((await tailCols("vexim_pricing", 7)) === SALES_TAIL, "0017 lần 2: 7 cột vẫn nối cuối, không nhân đôi");
+await cmp(
+  "0017 lần 2: index order_items không bị tạo trùng",
+  `select count(*) n from pg_indexes where tablename='order_items' and indexname='idx_order_items_order'`,
+  1,
+);
+
+// ============================================================================
+console.log("\n=== BƯỚC 19: 0018 — Module 3 nâng cao (phân bổ tồn theo FC · lịch sử nhận hàng) ===");
+// ============================================================================
+// `db.query` NÉM lỗi (khác `one()` có bắt). Nếu 0018 fail, ta muốn thấy từng
+// mục FAIL để biết thiếu gì — không muốn harness chết giữa chừng.
+// PGlite trả cột `date` về thành JS Date (toISOString kèm giờ). So sánh nguyên
+// chuỗi sẽ là "Fri Sep 11 2026…" ≠ "2026-09-11" → phải chuẩn về 10 ký tự ISO.
+const d10 = (v) => {
+  if (v === null || v === undefined) return null;
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  return String(v).slice(0, 10);
+};
+
+const rows19 = async (sql) => {
+  try {
+    return (await db.query(sql)).rows;
+  } catch (e) {
+    return [{ error: e.message.split("\n")[0] }];
+  }
+};
+ok(
+  await ex(rd("migrations/0018_fc_allocation_receipts.sql"), "0018_fc_allocation_receipts.sql"),
+  "0018 chạy sạch (DO-block tự soát: bảng · RLS · RPC · view · hợp đồng cột)",
+);
+
+// Web đọc 4 view mới bằng chuỗi select cố định → chốt hợp đồng ngay tại đây.
+const colsOf = async (view) =>
+  (await one(`select string_agg(column_name, ',' order by ordinal_position) c
+     from information_schema.columns
+    where table_schema='public' and table_name='${view}'`)).c;
+ok(
+  (await colsOf("vexim_inventory_fc")) ===
+    "seller_account_id,shop,snapshot_date,sku,fnsku,product_name,fc,country,quantity," +
+    "sellable_qty,unsellable_qty,unknown_qty,sku_total_qty,sku_fc_count,fc_share_pct,source,imported_at",
+  "0018: vexim_inventory_fc đúng hợp đồng cột (I2 đọc bằng tên)",
+);
+ok(
+  (await colsOf("vexim_inbound_receipt_shipments")) ===
+    "seller_account_id,shop,shipment_id,fc,first_received_date,last_received_date,received_units," +
+    "sku_count,shipment_status,expected_eta,expected_units,diff_units,receipt_rate_pct," +
+    "reconcile_state,expected_source",
+  "0018: vexim_inbound_receipt_shipments đúng hợp đồng cột (đối soát nhận hàng)",
+);
+await cmp(
+  "0018: 2 bảng mới bật RLS",
+  `select count(*) n from pg_class c join pg_namespace ns on ns.oid=c.relnamespace
+    where ns.nspname='inventory' and c.relname in ('fc_allocation','receipts') and c.relrowsecurity`,
+  2,
+);
+await cmp(
+  "0018: index unique đúng khoá report (nhập lại không nhân đôi)",
+  `select count(*) n from pg_indexes where schemaname='inventory'
+     and indexname in ('uq_fc_allocation_key','uq_receipts_key') and indexdef like '%UNIQUE%'`,
+  2,
+);
+await cmp(
+  "0018: KHÔNG có policy ghi nào cho web trên 2 bảng mới",
+  `select count(*) n from pg_policies where schemaname='inventory'
+     and tablename in ('fc_allocation','receipts') and cmd <> 'SELECT'`,
+  0,
+);
+await cmp(
+  "0018: 2 RPC worker = security definer và chỉ service_role execute được",
+  `select count(*) n from pg_proc p join pg_namespace ns on ns.oid=p.pronamespace
+    where ns.nspname='public'
+      and p.proname in ('vexim_worker_upsert_fc_allocation','vexim_worker_upsert_receipts')
+      and p.prosecdef
+      and not has_function_privilege('authenticated', p.oid, 'EXECUTE')
+      and has_function_privilege('service_role', p.oid, 'EXECUTE')`,
+  2,
+);
+await cmp(
+  "0018: 4 view công khai đều security_invoker (RLS bảng gốc vẫn áp)",
+  `select count(*) n from pg_class c join pg_namespace ns on ns.oid=c.relnamespace
+    where ns.nspname='public'
+      and c.relname in ('vexim_inventory_fc','vexim_inventory_fc_rows',
+                        'vexim_inventory_receipts','vexim_inbound_receipt_shipments')
+      and 'security_invoker=true'=any(c.reloptions)`,
+  4,
+);
+
+// ---- fixture: user kho (có shop) + người lạ ---------------------------------
+await ex("begin");
+await ex("reset role;");
+const cShop = (await one("select id from connections.seller_accounts order by seller_id limit 1")).id;
+const cWhUser   = "c1000000-0000-4000-8000-000000000001";
+const cStranger = "c1000000-0000-4000-8000-000000000002";
+ok(
+  await ex(`insert into auth.users(id,email) values
+     ('${cWhUser}','local-c-kho@example.test'),
+     ('${cStranger}','local-c-stranger@example.test');
+   insert into iam.user_profiles(id,display_name,email,vexim_employee) values
+     ('${cWhUser}','Kho VEXIM','local-c-kho@example.test',true),
+     ('${cStranger}','Người lạ','local-c-stranger@example.test',true);
+   insert into iam.assignments(user_id,seller_account_id,module,can_write,created_at) values
+     ('${cWhUser}','${cShop}','inventory',true, now() - interval '1 day');
+   insert into iam.role_assignments(user_id,role) values ('${cWhUser}','operator');`),
+  "0018 fixture: 1 user kho được gán shop + 1 người lạ",
+);
+
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role service_role;");
+
+// ---- 1. Import report phân bổ FC --------------------------------------------
+// Lô nhập cố ý có: 2 snapshot (chỉ snapshot MỚI NHẤT được phơi ra UI), 1 SKU nằm
+// 2 FC, disposition hỏng (DAMAGED), disposition RỖNG (không rõ), 2 dòng trùng khoá
+// (phải cộng dồn, không được nổ lỗi "affect row a second time"), 3 dòng RÁC
+// (quantity không phải số / ngày sai định dạng / thiếu SKU), và 1 SKU tổng = 0.
+const fcReport = JSON.stringify([
+  { snapshotDate: "2026-09-10", sku: "FC-SKU", fnsku: "X001FC", productName: "Vali 20 inch", quantity: 60, fulfillmentCenterId: "ont8", detailedDisposition: "Sellable", country: "us" },
+  { snapshotDate: "2026-09-11", sku: "FC-SKU", fnsku: "X001FC", productName: "Vali 20 inch", quantity: 40, fulfillmentCenterId: "ONT8", detailedDisposition: "SELLABLE", country: "US" },
+  { snapshotDate: "2026-09-11", sku: "FC-SKU", quantity: 10, fulfillmentCenterId: "ONT8", detailedDisposition: "DAMAGED", country: "US" },
+  { snapshotDate: "2026-09-11", sku: "FC-SKU", quantity: 25, fulfillmentCenterId: "PHX7", detailedDisposition: "Sellable", country: "US" },
+  { snapshotDate: "2026-09-11", sku: "FC-SKU", quantity: 5,  fulfillmentCenterId: "PHX7", detailedDisposition: "", country: "US" },
+  { snapshotDate: "2026-09-11", sku: "FC-SKU", quantity: 5,  fulfillmentCenterId: "phx7", country: "US" },
+  { snapshotDate: "2026-09-11", sku: "FC-SKU", quantity: "abc", fulfillmentCenterId: "MDW2", detailedDisposition: "SELLABLE" },
+  { snapshotDate: "11/09/2026", sku: "FC-SKU", quantity: 7, fulfillmentCenterId: "MDW2", detailedDisposition: "SELLABLE" },
+  { snapshotDate: "2026-09-11", sku: "", quantity: 7, fulfillmentCenterId: "MDW2", detailedDisposition: "SELLABLE" },
+  { snapshotDate: "2026-09-11", sku: "FC-EMPTY", quantity: 0, fulfillmentCenterId: "ONT8", detailedDisposition: "SELLABLE" },
+]);
+const fcNum = (r) => ({
+  inserted: Number(r?.inserted), updated: Number(r?.updated), skipped: Number(r?.skipped),
+  merged: Number(r?.merged), units: Number(r?.units), snapshots: Number(r?.snapshots),
+});
+const fc1 = fcNum(await one(`select * from public.vexim_worker_upsert_fc_allocation('${cShop}', '${fcReport}'::jsonb)`));
+ok(
+  fc1.inserted === 6 && fc1.updated === 0 && fc1.skipped === 3 && fc1.merged === 1
+    && fc1.units === 145 && fc1.snapshots === 2,
+  `0018 RPC FC: ghi 6 dòng · bỏ 3 dòng rác · gộp 1 cặp trùng khoá · 145 đơn vị · 2 snapshot — ${JSON.stringify(fc1)}`,
+);
+const fc2 = fcNum(await one(`select * from public.vexim_worker_upsert_fc_allocation('${cShop}', '${fcReport}'::jsonb)`));
+ok(
+  fc2.inserted === 0 && fc2.updated === 6,
+  `0018 RPC FC: nhập LẠI cùng file → 6 update / 0 insert (idempotent) — ${JSON.stringify(fc2)}`,
+);
+await cmp(
+  "0018: nhập 2 lần vẫn đúng 6 dòng, không phình bảng",
+  `select count(*) n from inventory.fc_allocation where seller_account_id='${cShop}'`,
+  6,
+);
+await cmp(
+  "0018: 2 dòng trùng khoá được CỘNG dồn (5+5=10), không ghi 2 dòng",
+  `select coalesce(sum(quantity),-1) n from inventory.fc_allocation
+    where seller_account_id='${cShop}' and sku='FC-SKU' and fulfillment_center_id='PHX7'
+      and detailed_disposition='' and snapshot_date=date '2026-09-11'`,
+  10,
+);
+
+// ---- 2. View phân bổ FC: chỉ snapshot mới nhất + tỉ trọng --------------------
+const fcView = (await rows19(
+  `select sku, fc, quantity, sellable_qty, unsellable_qty, unknown_qty, sku_total_qty,
+          sku_fc_count, fc_share_pct, snapshot_date
+     from public.vexim_inventory_fc where seller_account_id='${cShop}' order by sku, fc`));
+const fcOf = (sku, fc) => fcView.find((r) => r.sku === sku && r.fc === fc);
+ok(fcView.length === 3, `0018 view FC: 3 dòng (2 FC của FC-SKU + 1 SKU rỗng) — nhận ${fcView.length}`);
+ok(
+  fcView.every((r) => d10(r.snapshot_date) === "2026-09-11"),
+  "0018 view FC: chỉ phơi snapshot MỚI NHẤT (snapshot 2026-09-10 không lọt ra UI)",
+);
+const ont = fcOf("FC-SKU", "ONT8");
+ok(
+  Number(ont?.quantity) === 50 && Number(ont?.sellable_qty) === 40 && Number(ont?.unsellable_qty) === 10
+    && Number(ont?.unknown_qty) === 0 && Number(ont?.sku_total_qty) === 85
+    && Number(ont?.sku_fc_count) === 2 && Number(ont?.fc_share_pct) === 58.8,
+  `0018 view FC: ONT8 = 40 bán được + 10 hỏng = 50/85 (58,8%) — ${JSON.stringify(ont)}`,
+);
+const phx = fcOf("FC-SKU", "PHX7");
+ok(
+  Number(phx?.quantity) === 35 && Number(phx?.sellable_qty) === 25 && Number(phx?.unknown_qty) === 10
+    && Number(phx?.fc_share_pct) === 41.2,
+  `0018 view FC: PHX7 = 25 bán được + 10 KHÔNG RÕ disposition = 35/85 (41,2%) — ${JSON.stringify(phx)}`,
+);
+ok(
+  Number(ont?.fc_share_pct) + Number(phx?.fc_share_pct) === 100,
+  "0018 view FC: tỉ trọng 2 FC cộng đủ 100% (không lệch do làm tròn)",
+);
+const empty = fcOf("FC-EMPTY", "ONT8");
+ok(
+  Number(empty?.quantity) === 0 && empty?.fc_share_pct === null,
+  `0018 view FC: SKU tổng = 0 → fc_share_pct NULL, KHÔNG bịa 0% — ${JSON.stringify(empty)}`,
+);
+
+const fcDetail = (await rows19(
+  `select fc, disposition, disposition_group, quantity
+     from public.vexim_inventory_fc_rows
+    where seller_account_id='${cShop}' and sku='FC-SKU' order by fc, disposition_group`));
+ok(
+  fcDetail.length === 4
+    && fcDetail.some((r) => r.fc === "ONT8" && r.disposition_group === "unsellable" && Number(r.quantity) === 10)
+    && fcDetail.some((r) => r.fc === "PHX7" && r.disposition === null && r.disposition_group === "unknown"),
+  `0018 view FC chi tiết: drill-down ra đúng 4 dòng disposition (hỏng 10 · không rõ → NULL) — ${JSON.stringify(fcDetail)}`,
+);
+
+// ---- 3. Import report lịch sử nhận hàng + đối soát với số gửi (I4) -----------
+ok(
+  await ex(`insert into inventory.inbound_shipments(seller_account_id,shipment_id,status,quantity,eta_date) values
+     ('${cShop}','FBA15ABC','CLOSED',50,     current_date - 8),
+     ('${cShop}','FBA15SHORT','RECEIVING',25, current_date - 5),
+     ('${cShop}','FBA15OVER','CLOSED',20,     current_date - 4),
+     ('${cShop}','FBA15NULLQTY','WORKING',null, current_date - 2);`),
+  "0018 fixture: 4 lô inbound (FBA15NOPLAN cố ý KHÔNG có để thử nhánh thiếu số gửi)",
+);
+
+const rxReport = JSON.stringify([
+  { receivedDate: "2026-09-05", sku: "FC-SKU", fnsku: "X001FC", productName: "Vali 20 inch", quantity: 40, fbaShipmentId: "fba15abc", fulfillmentCenterId: "ont8" },
+  { receivedDate: "2026-09-06", sku: "FC-SKU", quantity: 10, fbaShipmentId: "FBA15ABC", fulfillmentCenterId: "ONT8" },
+  { receivedDate: "2026-09-08", sku: "RX-SHORT", quantity: 18, fbaShipmentId: "FBA15SHORT", fulfillmentCenterId: "PHX7" },
+  { receivedDate: "2026-09-09", sku: "RX-NOPLAN", quantity: 12, fbaShipmentId: "FBA15NOPLAN", fulfillmentCenterId: "MDW2" },
+  { receivedDate: "2026-09-09", sku: "RX-OVER", quantity: 30, fbaShipmentId: "FBA15OVER", fulfillmentCenterId: "ONT8" },
+  { receivedDate: "2026-09-09", sku: "RX-NULLQTY", quantity: 6, fbaShipmentId: "FBA15NULLQTY", fulfillmentCenterId: "ONT8" },
+  { receivedDate: "2026-09-09", sku: "RX-NOSHIP", quantity: 4, fulfillmentCenterId: "ONT8" },
+  { receivedDate: "09/09/2026", sku: "RX-BAD", quantity: 4, fbaShipmentId: "FBA15BAD" },
+  { receivedDate: "2026-09-09", sku: "RX-BADQTY", quantity: "n/a", fbaShipmentId: "FBA15BAD2" },
+]);
+const rxNum = (r) => ({
+  inserted: Number(r?.inserted), updated: Number(r?.updated), skipped: Number(r?.skipped),
+  merged: Number(r?.merged), units: Number(r?.units), shipments: Number(r?.shipments),
+});
+const rx1 = rxNum(await one(`select * from public.vexim_worker_upsert_receipts('${cShop}', '${rxReport}'::jsonb)`));
+ok(
+  rx1.inserted === 7 && rx1.updated === 0 && rx1.skipped === 2 && rx1.merged === 0
+    && rx1.units === 120 && rx1.shipments === 5,
+  `0018 RPC receipts: ghi 7 dòng · bỏ 2 dòng rác · 120 đơn vị · 5 lô — ${JSON.stringify(rx1)}`,
+);
+const rx2 = rxNum(await one(`select * from public.vexim_worker_upsert_receipts('${cShop}', '${rxReport}'::jsonb)`));
+ok(
+  rx2.inserted === 0 && rx2.updated === 7,
+  `0018 RPC receipts: nhập LẠI → 7 update / 0 insert (idempotent) — ${JSON.stringify(rx2)}`,
+);
+await cmp(
+  "0018: receipts nhập 2 lần vẫn 7 dòng",
+  `select count(*) n from inventory.receipts where seller_account_id='${cShop}'`,
+  7,
+);
+
+const recon = (await rows19(
+  `select shipment_id, fc, first_received_date, last_received_date, received_units, sku_count,
+          shipment_status, expected_units, diff_units, receipt_rate_pct, reconcile_state, expected_source
+     from public.vexim_inbound_receipt_shipments
+    where seller_account_id='${cShop}' order by shipment_id`));
+const recOf = (id) => recon.find((r) => r.shipment_id === id);
+ok(recon.length === 5, `0018 đối soát: 5 lô (dòng không có mã lô không vào bảng đối soát) — nhận ${recon.length}`);
+const abc = recOf("FBA15ABC");
+ok(
+  Number(abc?.received_units) === 50 && Number(abc?.expected_units) === 50 && Number(abc?.diff_units) === 0
+    && Number(abc?.receipt_rate_pct) === 100 && abc?.reconcile_state === "matched"
+    && abc?.expected_source === "inbound_shipments" && Number(abc?.sku_count) === 1
+    && d10(abc?.first_received_date) === "2026-09-05"
+    && d10(abc?.last_received_date) === "2026-09-06"
+    && abc?.fc === "ONT8",
+  `0018 đối soát: lô nhận 2 đợt 40+10 = 50/50 → matched, FC viết thường được chuẩn hoá — ${JSON.stringify(abc)}`,
+);
+const short = recOf("FBA15SHORT");
+ok(
+  Number(short?.received_units) === 18 && Number(short?.diff_units) === -7
+    && Number(short?.receipt_rate_pct) === 72 && short?.reconcile_state === "short",
+  `0018 đối soát: gửi 25 nhận 18 → THIẾU 7 (72%) — chỗ đau thật của FBA — ${JSON.stringify(short)}`,
+);
+const over = recOf("FBA15OVER");
+ok(
+  Number(over?.diff_units) === 10 && over?.reconcile_state === "over" && Number(over?.receipt_rate_pct) === 150,
+  `0018 đối soát: gửi 20 nhận 30 → THỪA 10 (150%), không âm thầm coi là đủ — ${JSON.stringify(over)}`,
+);
+const noplan = recOf("FBA15NOPLAN");
+ok(
+  noplan?.expected_units === null && noplan?.diff_units === null && noplan?.receipt_rate_pct === null
+    && noplan?.reconcile_state === "unknown_expected" && noplan?.expected_source === "none",
+  `0018 đối soát: không có dòng lô trong I4 → expected NULL + nhãn 'none' (không suy "gửi = nhận") — ${JSON.stringify(noplan)}`,
+);
+const nullqty = recOf("FBA15NULLQTY");
+ok(
+  nullqty?.expected_units === null && nullqty?.reconcile_state === "unknown_expected"
+    && nullqty?.expected_source === "inbound_shipments",
+  `0018 đối soát: có lô nhưng quantity NULL → vẫn 'chưa rõ số gửi', nguồn = inbound_shipments — ${JSON.stringify(nullqty)}`,
+);
+
+const rxView = (await rows19(
+  `select sku, quantity, shipment_id, fc, received_date, days_ago
+     from public.vexim_inventory_receipts where seller_account_id='${cShop}' order by received_date, sku`));
+const dbToday = d10((await one("select current_date as d")).d);
+const wantDays = Math.round((Date.parse(dbToday) - Date.parse("2026-09-05")) / 86400000);
+ok(
+  rxView.length === 7
+    && rxView.some((r) => r.sku === "RX-NOSHIP" && r.shipment_id === null)
+    && Number(rxView[0]?.days_ago) === wantDays,
+  `0018 view receipts: 7 dòng · lô trống → shipment_id NULL · days_ago=${rxView[0]?.days_ago} (JS tính ${wantDays})`,
+);
+
+// ---- 4. RLS: user kho đọc được, người lạ không, web không ghi được ----------
+await ex("reset role;");
+await ex(`select set_config('request.jwt.claim.sub','${cWhUser}',false);`);
+await ex("set role authenticated;");
+await cmp(
+  "0018 RLS: user kho đọc được phân bổ FC của shop mình",
+  `select count(*) n from public.vexim_inventory_fc where seller_account_id='${cShop}'`,
+  3,
+);
+await cmp(
+  "0018 RLS: user kho đọc được đối soát nhận hàng",
+  `select count(*) n from public.vexim_inbound_receipt_shipments where seller_account_id='${cShop}'`,
+  5,
+);
+ok(
+  await mustBlock(`insert into inventory.receipts(seller_account_id,received_date,sku,quantity)
+     values ('${cShop}', date '2026-09-11','HACK',1)`),
+  "0018 CHẶN: authenticated không ghi thẳng lịch sử nhận hàng (chỉ worker qua RPC)",
+);
+ok(
+  await mustBlock(`update inventory.fc_allocation set quantity=999 where seller_account_id='${cShop}'`),
+  "0018 CHẶN: authenticated không sửa được tồn theo FC",
+);
+ok(
+  await mustBlock(`select * from public.vexim_worker_upsert_receipts('${cShop}', '[]'::jsonb)`),
+  "0018 CHẶN: RPC nhập receipts chỉ dành cho service_role",
+);
+ok(
+  await mustBlock(`select * from public.vexim_worker_upsert_fc_allocation('${cShop}', '[]'::jsonb)`),
+  "0018 CHẶN: RPC nhập phân bổ FC chỉ dành cho service_role",
+);
+
+await ex(`select set_config('request.jwt.claim.sub','${cStranger}',false);`);
+await cmp(
+  "0018 RLS: người lạ không thấy phân bổ FC của shop",
+  `select count(*) n from public.vexim_inventory_fc where seller_account_id='${cShop}'`,
+  0,
+);
+await cmp(
+  "0018 RLS: người lạ không thấy lịch sử nhận hàng của shop",
+  `select count(*) n from public.vexim_inventory_receipts where seller_account_id='${cShop}'`,
+  0,
+);
+await cmp(
+  "0018 RLS: người lạ không thấy đối soát lô của shop",
+  `select count(*) n from public.vexim_inbound_receipt_shipments where seller_account_id='${cShop}'`,
+  0,
+);
+
+await ex("reset role; rollback;");
+
+// ---- 5. idempotent ----------------------------------------------------------
+ok(
+  await ex(rd("migrations/0018_fc_allocation_receipts.sql"), "0018 lần 2"),
+  "0018 idempotent (chạy lại không lỗi, không đổi hợp đồng)",
+);
+ok(
+  (await colsOf("vexim_inventory_fc")).endsWith("fc_share_pct,source,imported_at"),
+  "0018 lần 2: hợp đồng cột view FC giữ nguyên",
+);
+await cmp(
+  "0018 lần 2: index unique không bị tạo trùng",
+  `select count(*) n from pg_indexes where schemaname='inventory'
+     and indexname in ('uq_fc_allocation_key','uq_receipts_key')`,
+  2,
+);
+
+
+// ============================================================================
+console.log("\n=== BƯỚC 20: 0019 — phí lưu kho theo FC · phí inbound · trạng thái report ===");
+// ============================================================================
+ok(
+  await ex(rd("migrations/0019_fc_fees_report_requests.sql"), "0019_fc_fees_report_requests.sql"),
+  "0019 chạy sạch (DO-block tự soát: bảng · RLS · RPC · view · helper đọc số · hợp đồng cột)",
+);
+
+// Web đọc 5 view mới bằng chuỗi select cố định → chốt hợp đồng ngay tại đây.
+ok(
+  (await colsOf("vexim_storage_fees")) ===
+    "seller_account_id,shop,month_of_charge,fnsku,asin,sku,sku_source,product_name,fc," +
+    "country_code,product_size_tier,average_quantity_on_hand,average_quantity_pending_removal," +
+    "average_quantity_customer_orders,estimated_total_item_volume,volume_units,storage_rate," +
+    "currency,estimated_monthly_storage_fee,dangerous_goods_storage_type," +
+    "eligible_for_inventory_discount,qualifies_for_inventory_discount,total_incentive_fee_amount," +
+    "source,imported_at",
+  "0019: vexim_storage_fees đúng hợp đồng cột (kèm sku + sku_source)",
+);
+ok(
+  (await colsOf("vexim_storage_fee_by_fc")) ===
+    "seller_account_id,shop,month_of_charge,fc,currency,storage_fee,total_volume," +
+    "avg_units_on_hand,product_lines,fnsku_count,volume_units,month_fee_total," +
+    "month_fc_count,fee_share_pct,imported_at",
+  "0019: vexim_storage_fee_by_fc đúng hợp đồng cột (phân bổ phí theo FC)",
+);
+ok(
+  (await colsOf("vexim_inbound_issues")) ===
+    "seller_account_id,shop,issue_reported_date,days_ago,shipment_creation_date,shipment_id," +
+    "carton_id,fc,sku,fnsku,asin,product_name,problem_type,problem_quantity,expected_quantity," +
+    "received_quantity,performance_measurement_unit,coaching_level,fee_type,currency,fee_total," +
+    "problem_level,alert_status,source,imported_at",
+  "0019: vexim_inbound_issues đúng hợp đồng cột",
+);
+ok(
+  (await colsOf("vexim_inbound_issue_shipments")) ===
+    "seller_account_id,shop,shipment_id,fc,shipment_creation_date,currency,issue_count," +
+    "fee_total,problem_units,sku_count,first_issue_date,last_issue_date,problem_types," +
+    "coaching_levels,alert_statuses,shipment_status,imported_at",
+  "0019: vexim_inbound_issue_shipments đúng hợp đồng cột",
+);
+ok(
+  (await colsOf("vexim_report_requests")) ===
+    "id,seller_account_id,shop,report_type,marketplace_id,data_start,data_end,report_id," +
+    "report_document_id,status," +
+    "rows_imported,attempts,last_error,requested_at,completed_at,imported_at,age_minutes,is_stale",
+  "0019: vexim_report_requests đúng hợp đồng cột (màn Sync health đọc)",
+);
+
+await cmp(
+  "0019: 3 bảng mới bật RLS",
+  `select count(*) n from pg_class c join pg_namespace ns on ns.oid=c.relnamespace
+    where (ns.nspname,c.relname) in (('finance','storage_fees'),
+          ('inventory','inbound_noncompliance'),('connections','report_requests'))
+      and c.relrowsecurity`,
+  3,
+);
+await cmp(
+  "0019: index unique đúng khoá report (nhập lại không nhân đôi)",
+  `select count(*) n from pg_indexes where indexname in
+     ('uq_storage_fees_key','uq_inbound_noncompliance_key','uq_report_requests_key')
+     and indexdef like '%UNIQUE%'`,
+  3,
+);
+await cmp(
+  "0019: KHÔNG có policy ghi nào cho web trên 3 bảng mới",
+  `select count(*) n from pg_policies
+    where (schemaname,tablename) in (('finance','storage_fees'),
+          ('inventory','inbound_noncompliance'),('connections','report_requests'))
+      and cmd <> 'SELECT'`,
+  0,
+);
+await cmp(
+  "0019: 3 RPC worker = security definer và chỉ service_role execute được",
+  `select count(*) n from pg_proc p join pg_namespace ns on ns.oid=p.pronamespace
+    where ns.nspname='public'
+      and p.proname in ('vexim_worker_upsert_storage_fees','vexim_worker_upsert_noncompliance',
+                        'vexim_worker_set_report_request')
+      and p.prosecdef
+      and not has_function_privilege('authenticated', p.oid, 'EXECUTE')
+      and has_function_privilege('service_role', p.oid, 'EXECUTE')`,
+  3,
+);
+await cmp(
+  "0019: 5 view công khai đều security_invoker (RLS bảng gốc vẫn áp)",
+  `select count(*) n from pg_class c join pg_namespace ns on ns.oid=c.relnamespace
+    where ns.nspname='public'
+      and c.relname in ('vexim_storage_fees','vexim_storage_fee_by_fc','vexim_inbound_issues',
+                        'vexim_inbound_issue_shipments','vexim_report_requests')
+      and 'security_invoker=true'=any(c.reloptions)`,
+  5,
+);
+
+// ---- fixture: user kho + người lạ + ánh xạ FNSKU (từ 0018) ------------------
+await ex("begin");
+await ex("reset role;");
+const fUser     = "d1000000-0000-4000-8000-000000000001";
+const fStranger = "d1000000-0000-4000-8000-000000000002";
+ok(
+  await ex(`insert into auth.users(id,email) values
+     ('${fUser}','local-d-kho@example.test'),
+     ('${fStranger}','local-d-stranger@example.test');
+   insert into iam.user_profiles(id,display_name,email,vexim_employee) values
+     ('${fUser}','Kho VEXIM','local-d-kho@example.test',true),
+     ('${fStranger}','Người lạ','local-d-stranger@example.test',true);
+   insert into iam.assignments(user_id,seller_account_id,module,can_write,created_at) values
+     ('${fUser}','${cShop}','inventory',true, now() - interval '1 day');
+   insert into iam.role_assignments(user_id,role) values ('${fUser}','operator');`),
+  "0019 fixture: 1 user kho được gán shop + 1 người lạ",
+);
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role service_role;");
+
+// Ánh xạ FNSKU → SKU lấy từ report 0018 (view phí lưu kho suy SKU qua đường này)
+ok(
+  await ex(`select * from public.vexim_worker_upsert_fc_allocation('${cShop}', '[
+     {"snapshotDate":"2026-09-11","sku":"FEE-SKU","fnsku":"X00FEE1","quantity":120,
+      "fulfillmentCenterId":"ONT8","detailedDisposition":"SELLABLE"}]'::jsonb)`) === true,
+  "0019 fixture: 1 dòng phân bổ FC để ánh xạ FNSKU → SKU",
+);
+// ASIN trong catalog — nhánh suy SKU thứ 2 (report phí không có SKU).
+// Shop fixture của harness chưa chắc có listing, nên TỰ cấy 1 dòng cho chắc ăn.
+const fAsin = "B0TESTASIN19";
+await ex("reset role;");
+ok(
+  await ex(`insert into catalog.listings(seller_account_id,sku,asin,title,status,currency)
+     values ('${cShop}','ASIN-SKU-19','${fAsin}','Demo ASIN 0019','active','USD')
+     on conflict (seller_account_id,sku) do update set asin=excluded.asin`),
+  `0019 fixture: cấy listing SKU ASIN-SKU-19 ↔ ASIN ${fAsin} (để test suy SKU qua ASIN)`,
+);
+await ex("set role service_role;");
+
+// ---- 1. Import report phí lưu kho --------------------------------------------
+// Cố ý có: 2 tiền tệ cùng FC (USD + CAD — KHÔNG được cộng), 1 tháng khác (trend),
+// 1 dòng chỉ có ASIN (suy SKU qua catalog), tháng sai định dạng ("September 2026"),
+// 1 dòng không có cả FNSKU lẫn ASIN (không biết phí của ai → bỏ), 1 dòng số lạ.
+const feeReport = JSON.stringify([
+  { monthOfCharge: "2026-08", asin: "B0DEMOA1", fnsku: "X00FEE1", fulfillmentCenter: "ONT8", countryCode: "US", productName: "Mat ong 500ml", productSizeTier: "STANDARD", averageQuantityOnHand: "120.5", averageQuantityPendingRemoval: "0", averageQuantityCustomerOrders: "30", estimatedTotalItemVolume: "12.4", volumeUnits: "cubic feet", itemVolume: "0.103", storageRate: "0.87", currency: "USD", estimatedMonthlyStorageFee: "10.79", eligibleForInventoryDiscount: "true", qualifiesForInventoryDiscount: "false", totalIncentiveFeeAmount: "1.20", source: "report" },
+  { monthOfCharge: "2026-08", asin: "B0DEMOA2", fnsku: "X00FEE2", fulfillmentCenter: "ONT8", averageQuantityOnHand: "40", estimatedTotalItemVolume: "3.0", volumeUnits: "cubic feet", storageRate: "1.20", currency: "CAD", estimatedMonthlyStorageFee: "3.60", source: "report" },
+  { monthOfCharge: "2026-08", asin: fAsin, fnsku: "X00NEW", fulfillmentCenter: "PHX7", averageQuantityOnHand: "15", estimatedTotalItemVolume: "1.5", volumeUnits: "cubic feet", storageRate: "0.87", currency: "USD", estimatedMonthlyStorageFee: "1.31", source: "report" },
+  { monthOfCharge: "2026-09", asin: "B0DEMOA1", fnsku: "X00FEE1", fulfillmentCenter: "ONT8", averageQuantityOnHand: "90", estimatedTotalItemVolume: "9.3", volumeUnits: "cubic feet", storageRate: "2.40", currency: "USD", estimatedMonthlyStorageFee: "22.32", dangerousGoodsStorageType: "NON_DG", source: "report" },
+  { monthOfCharge: "September 2026", asin: "B0DEMOA1", fnsku: "X00FEE1", fulfillmentCenter: "ONT8", estimatedMonthlyStorageFee: "5.00", currency: "USD", source: "report" },
+  { monthOfCharge: "2026-08", asin: "", fnsku: "", fulfillmentCenter: "ONT8", estimatedMonthlyStorageFee: "9.99", currency: "USD", source: "report" },
+  { monthOfCharge: "2026-08", asin: "B0DEMOA3", fnsku: "X00FEE3", fulfillmentCenter: "MDW2", averageQuantityOnHand: "N/A", storageRate: "1,234.56", currency: "USD", estimatedMonthlyStorageFee: "abc", source: "report" },
+]);
+const feeNum = (r) => ({
+  inserted: Number(r?.inserted), updated: Number(r?.updated), skipped: Number(r?.skipped),
+  merged: Number(r?.merged), months: Number(r?.months), currencies: r?.currencies,
+});
+const fee1 = feeNum(await one(`select * from public.vexim_worker_upsert_storage_fees('${cShop}', '${feeReport}'::jsonb)`));
+ok(
+  fee1.inserted === 5 && fee1.updated === 0 && fee1.skipped === 2 && fee1.merged === 0
+    && fee1.months === 2 && fee1.currencies === "CAD,USD",
+  `0019 RPC phí lưu kho: 5 dòng · bỏ 2 (tháng sai định dạng + không có ASIN/FNSKU) · 2 tháng · tiền CAD,USD (xếp theo thứ tự chữ cái) — ${JSON.stringify(fee1)}`,
+);
+const feeAgain = JSON.stringify([JSON.parse(feeReport)[0]]);
+const fee2 = feeNum(await one(`select * from public.vexim_worker_upsert_storage_fees('${cShop}', '${feeAgain}'::jsonb)`));
+ok(fee2.inserted === 0 && fee2.updated === 1, `0019 RPC phí lưu kho: nhập LẠI → 1 update / 0 insert — ${JSON.stringify(fee2)}`);
+await cmp(
+  "0019: nhập 2 lần vẫn 5 dòng, không phình bảng",
+  `select count(*) n from finance.storage_fees where seller_account_id='${cShop}'`,
+  5,
+);
+
+// ---- 2. View phí lưu kho: SKU SUY RA phải nói rõ nguồn ------------------------
+const feeView = await rows19(
+  `select month_of_charge, fnsku, asin, sku, sku_source, fc, currency, storage_rate,
+          estimated_monthly_storage_fee as fee, average_quantity_on_hand,
+          eligible_for_inventory_discount, total_incentive_fee_amount
+     from public.vexim_storage_fees where seller_account_id='${cShop}'
+    order by month_of_charge, fc, fnsku`);
+ok(feeView.length === 5, `0019 view phí: 5 dòng (nhận ${feeView.length})`);
+const feeOf = (month, fnsku) => feeView.find((r) => r.month_of_charge === month && r.fnsku === fnsku);
+const f1 = feeOf("2026-08", "X00FEE1");
+ok(
+  f1?.sku === "FEE-SKU" && f1?.sku_source === "fnsku"
+    && Number(f1?.storage_rate) === 0.87 && Number(f1?.fee) === 10.79
+    && Number(f1?.average_quantity_on_hand) === 120.5
+    && f1?.eligible_for_inventory_discount === true && Number(f1?.total_incentive_fee_amount) === 1.2,
+  `0019 view phí: suy SKU qua FNSKU (report phí KHÔNG có cột SKU) — ${JSON.stringify(f1)}`,
+);
+const f2 = feeOf("2026-08", "X00NEW");
+ok(
+  f2?.sku_source === "asin" && typeof f2?.sku === "string" && f2.sku.length > 0,
+  `0019 view phí: FNSKU chưa ánh xạ → suy qua ASIN của catalog (${f2?.sku}) — ${JSON.stringify(f2)}`,
+);
+const f3 = feeOf("2026-08", "X00FEE3");
+ok(
+  f3?.sku_source === "none" && f3?.sku === null
+    && f3?.average_quantity_on_hand === null && Number(f3?.storage_rate) === 1234.56 && f3?.fee === null,
+  `0019 view phí: số lạ → NULL ("chưa biết"), "1,234.56" vẫn đọc được, không nổ lô nhập — ${JSON.stringify(f3)}`,
+);
+
+const byFc = await rows19(
+  `select fc, currency, storage_fee, total_volume, product_lines, month_fee_total,
+          month_fc_count, fee_share_pct
+     from public.vexim_storage_fee_by_fc
+    where seller_account_id='${cShop}' and month_of_charge='2026-08'
+    order by currency desc, fc`);
+const fcOf2 = (fc, cur) => byFc.find((r) => r.fc === fc && r.currency === cur);
+ok(byFc.length === 4, `0019 phân bổ phí 2026-08: 4 dòng (ONT8-USD, ONT8-CAD, PHX7-USD, MDW2-USD) — nhận ${byFc.length}`);
+ok(
+  Number(fcOf2("ONT8", "USD")?.storage_fee) === 10.79 && Number(fcOf2("ONT8", "CAD")?.storage_fee) === 3.6,
+  "0019 phân bổ phí: KHÔNG cộng tiền khác tiền tệ (USD và CAD là 2 dòng riêng)",
+);
+ok(
+  Number(fcOf2("ONT8", "USD")?.fee_share_pct) === 89.2
+    && Number(fcOf2("ONT8", "USD")?.month_fee_total) === 12.1
+    && Number(fcOf2("ONT8", "USD")?.month_fc_count) === 3
+    && Number(fcOf2("PHX7", "USD")?.fee_share_pct) === 10.8,
+  `0019 phân bổ phí: ONT8 = 10.79/12.10 USD = 89,2% · PHX7 = 10,8% — ${JSON.stringify(fcOf2("ONT8", "USD"))}`,
+);
+ok(
+  Number(fcOf2("ONT8", "USD")?.fee_share_pct) + Number(fcOf2("PHX7", "USD")?.fee_share_pct) === 100,
+  "0019 phân bổ phí: 2 FC cùng tiền tệ cộng đủ 100%",
+);
+ok(
+  fcOf2("MDW2", "USD")?.fee_share_pct === null && fcOf2("MDW2", "USD")?.storage_fee === null
+    && fcOf2("MDW2", "USD")?.total_volume === null && Number(fcOf2("MDW2", "USD")?.product_lines) === 1,
+  `0019 phân bổ phí: FC không đọc được phí → fee/share NULL ("chưa biết"), không bịa 0 — ${JSON.stringify(fcOf2("MDW2", "USD"))}`,
+);
+const feeSep = await one(
+  `select storage_fee, storage_rate from (select sum(storage_fee) storage_fee, max(1) storage_rate
+     from public.vexim_storage_fee_by_fc
+    where seller_account_id='${cShop}' and month_of_charge='2026-09' and currency='USD') x`);
+ok(Number(feeSep?.storage_fee) === 22.32, `0019 trend phí: 2026-09 = 22.32 USD (Q4 rate 2.40 cao hơn 0.87) — ${JSON.stringify(feeSep)}`);
+
+// ---- 3. Import report phí inbound không tuân thủ ------------------------------
+const ncReport = JSON.stringify([
+  { issueReportedDate: "2026-09-08", shipmentCreationDate: "2026-09-01", fbaShipmentId: "fba15dg9wjkr", fbaCartonId: "FBA15DG9WJKR000001", fulfillmentCenterId: "ont8", sku: "FEE-SKU", fnsku: "X00FEE1", asin: "B0DEMOA1", productName: "Mat ong 500ml", problemType: "oversized_carton", problemQuantity: "2", expectedQuantity: "100", receivedQuantity: "93", performanceMeasurementUnit: "UNIT", coachingLevel: "level_2", feeType: "manual_processing", currency: "usd", feeTotal: "0.30", problemLevel: "CARTON", alertStatus: "alert", source: "report" },
+  { issueReportedDate: "2026-09-08", shipmentCreationDate: "2026-09-01", fbaShipmentId: "FBA15DG9WJKR", fbaCartonId: "FBA15DG9WJKR000002", fulfillmentCenterId: "ONT8", sku: "FEE-SKU", problemType: "MISSING_LABEL", problemQuantity: "5", expectedQuantity: "80", receivedQuantity: "80", coachingLevel: "LEVEL_1", feeType: "MANUAL_PROCESSING", currency: "USD", feeTotal: "0.55", problemLevel: "ITEM", alertStatus: "ALERT", source: "report" },
+  { issueReportedDate: "2026-09-09", fbaShipmentId: "FBA17XYZ", fulfillmentCenterId: "PHX7", sku: "RX-NOSHIP", problemType: "DAMAGED_ITEM", problemQuantity: "1", currency: "USD", feeTotal: "2.00", coachingLevel: "LEVEL_3", alertStatus: "CRITICAL", source: "report" },
+  { issueReportedDate: "", fbaShipmentId: "FBA17XYZ", sku: "RX-NOSHIP", problemType: "DAMAGED_ITEM", feeTotal: "1.00", currency: "USD", source: "report" },
+  { issueReportedDate: "2026-09-08", fbaShipmentId: "FBA15DG9WJKR", fbaCartonId: "FBA15DG9WJKR000001", sku: "FEE-SKU", problemType: "OVERSIZED_CARTON", problemQuantity: "3", currency: "USD", feeTotal: "0.45", source: "report" },
+]);
+const ncNum = (r) => ({
+  inserted: Number(r?.inserted), updated: Number(r?.updated), skipped: Number(r?.skipped),
+  merged: Number(r?.merged), shipments: Number(r?.shipments), currencies: r?.currencies,
+});
+const nc1 = ncNum(await one(`select * from public.vexim_worker_upsert_noncompliance('${cShop}', '${ncReport}'::jsonb)`));
+ok(
+  nc1.inserted === 3 && nc1.updated === 0 && nc1.skipped === 1 && nc1.merged === 1
+    && nc1.shipments === 2 && nc1.currencies === "USD",
+  `0019 RPC phí inbound: 3 dòng · bỏ 1 (thiếu ngày báo) · gộp 1 cặp trùng khoá · 2 lô — ${JSON.stringify(nc1)}`,
+);
+const issues = await rows19(
+  `select shipment_id, carton_id, sku, problem_type, problem_quantity, expected_quantity,
+          received_quantity, coaching_level, fee_total, alert_status, fc, problem_level, days_ago
+     from public.vexim_inbound_issues where seller_account_id='${cShop}'
+    order by issue_reported_date, shipment_id, carton_id`);
+ok(issues.length === 3, `0019 view vấn đề nhập: 3 dòng (nhận ${issues.length})`);
+const is1 = issues.find((r) => r.carton_id === "FBA15DG9WJKR000001");
+ok(
+  is1?.shipment_id === "FBA15DG9WJKR" && is1?.fc === "ONT8" && is1?.problem_type === "OVERSIZED_CARTON",
+  `0019 view vấn đề nhập: mã lô/FC/loại vấn đề được CHUẨN HOÁ (input viết thường) — ${JSON.stringify(is1)}`,
+);
+ok(
+  Number(is1?.expected_quantity) === 100 && Number(is1?.received_quantity) === 93
+    && Number(is1?.problem_quantity) === 3 && Number(is1?.fee_total) === 0.45,
+  `0019 view vấn đề nhập: expected/received giữ nguyên để đối chiếu; dòng trùng khoá lấy số mới — ${JSON.stringify(is1)}`,
+);
+ok(
+  is1?.coaching_level === "LEVEL_2" && is1?.alert_status === "ALERT" && is1?.problem_level === "CARTON"
+    && Number(is1?.days_ago) >= 0,
+  "0019 view vấn đề nhập: kèm coaching level + alert status + problem level + days_ago",
+);
+
+// Nhập LẠI file cũ sau khi đã đọc view: chứng minh (a) không nhân đôi,
+// (b) file cũ GHI ĐÈ số mới (last-write-wins) — nên cron luôn tải report mới nhất.
+const nc2 = ncNum(await one(`select * from public.vexim_worker_upsert_noncompliance('${cShop}', '${JSON.stringify([JSON.parse(ncReport)[0]])}'::jsonb)`));
+ok(nc2.inserted === 0 && nc2.updated === 1, `0019 RPC phí inbound: nhập LẠI → 1 update / 0 insert — ${JSON.stringify(nc2)}`);
+await cmp(
+  "0019: nhập 2 lần vẫn 3 dòng vấn đề, không phình bảng",
+  `select count(*) n from inventory.inbound_noncompliance where seller_account_id='${cShop}'`,
+  3,
+);
+
+const ncShip = await rows19(
+  `select shipment_id, issue_count, fee_total, problem_units, sku_count, problem_types,
+          coaching_levels, alert_statuses, shipment_status, currency, first_issue_date, last_issue_date
+     from public.vexim_inbound_issue_shipments where seller_account_id='${cShop}' order by shipment_id`);
+ok(ncShip.length === 2, `0019 gộp vấn đề theo lô: 2 lô (nhận ${ncShip.length})`);
+const ns1 = ncShip.find((r) => r.shipment_id === "FBA15DG9WJKR");
+ok(
+  Number(ns1?.issue_count) === 2 && Number(ns1?.fee_total) === 0.85 && Number(ns1?.problem_units) === 7
+    && ns1?.currency === "USD" && Number(ns1?.sku_count) === 1,
+  `0019 gộp theo lô: 2 vấn đề · phí 0.30+0.55 = 0.85 USD · 7 đơn vị có vấn đề (file cũ ghi đè 0.45/3) — ${JSON.stringify(ns1)}`,
+);
+ok(
+  ns1?.problem_types === "MISSING_LABEL, OVERSIZED_CARTON" && ns1?.coaching_levels === "LEVEL_1, LEVEL_2"
+    && ns1?.alert_statuses === "ALERT",
+  `0019 gộp theo lô: liệt kê loại vấn đề + coaching + alert để biết cần sửa gì — ${JSON.stringify(ns1?.problem_types)}`,
+);
+ok(
+  d10(ns1?.first_issue_date) === "2026-09-08" && ns1?.shipment_status === null,
+  "0019 gộp theo lô: lô chưa có trong I4 → shipment_status NULL (không bịa trạng thái)",
+);
+
+// ---- 4. Trạng thái yêu cầu report (để Vercel Cron nối tiếp được) --------------
+const rr1 = await one(`select * from public.vexim_worker_set_report_request('${cShop}',
+   '{"reportType":"GET_FBA_STORAGE_FEE_CHARGES_DATA","marketplaceId":"atvpdkikx0der",
+     "dataStart":"2026-08-01","dataEnd":"2026-08-31","reportId":"ID3-REP-1",
+     "status":"REQUESTED","requestedAt":"${new Date().toISOString()}"}'::jsonb)`);
+ok(
+  rr1?.status === "requested" && rr1?.report_id === "ID3-REP-1",
+  `0019 trạng thái report: ghi lần đầu, status chuẩn hoá chữ thường — ${JSON.stringify(rr1)}`,
+);
+const rr2 = await one(`select * from public.vexim_worker_set_report_request('${cShop}',
+   '{"reportType":"GET_FBA_STORAGE_FEE_CHARGES_DATA","dataStart":"2026-08-01","dataEnd":"2026-08-31",
+     "reportId":"ID3-REP-1","status":"IN_PROGRESS"}'::jsonb)`);
+ok(
+  rr2?.id === rr1?.id && rr2?.status === "in_progress",
+  "0019 trạng thái report: cùng khoảng ngày → CẬP NHẬT đúng 1 dòng (cron không xin report mới, trần 1 lần/4 giờ)",
+);
+await one(`select * from public.vexim_worker_set_report_request('${cShop}',
+   '{"reportType":"GET_FBA_STORAGE_FEE_CHARGES_DATA","dataStart":"2026-08-01","dataEnd":"2026-08-31",
+     "reportId":"ID3-REP-1","reportDocumentId":"amzn1.spdoc.1.4.demo","status":"IMPORTED",
+     "rowsImported":"5","completedAt":"${new Date().toISOString()}","importedAt":"${new Date().toISOString()}"}'::jsonb)`);
+const rrView = await one(
+  `select status, rows_imported, attempts, report_document_id, marketplace_id, age_minutes, is_stale, data_start
+     from public.vexim_report_requests
+    where seller_account_id='${cShop}' and report_type='GET_FBA_STORAGE_FEE_CHARGES_DATA'`);
+ok(
+  rrView?.status === "imported" && Number(rrView?.rows_imported) === 5 && Number(rrView?.attempts) === 3
+    && rrView?.report_document_id === "amzn1.spdoc.1.4.demo" && rrView?.marketplace_id === "ATVPDKIKX0DER"
+    && rrView?.is_stale === false && d10(rrView?.data_start) === "2026-08-01",
+  `0019 trạng thái report: imported · 5 dòng · 3 lần chạm · marketplace chuẩn hoá · is_stale=false — ${JSON.stringify(rrView)}`,
+);
+const rrBad = await one(`select * from public.vexim_worker_set_report_request('${cShop}',
+   '{"reportType":"GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA","dataStart":"2026-09-01",
+     "dataEnd":"2026-09-12","status":"KHONG_RO","lastError":"429 QuotaExceeded: rate limit"}'::jsonb)`);
+ok(rrBad?.status === "failed", `0019 trạng thái report: status lạ → 'failed' (view lọc được) — ${JSON.stringify(rrBad)}`);
+const rrBadView = await one(
+  `select last_error, status from public.vexim_report_requests
+    where seller_account_id='${cShop}' and report_type='GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA'`);
+ok(
+  String(rrBadView?.last_error).includes("429") && rrBadView?.status === "failed",
+  "0019 trạng thái report: lỗi 429 được ghi lại để biết bị trần tốc độ",
+);
+// Report chờ quá 6 giờ = bất thường (report daily thường xong trong vài phút)
+const staleAt = new Date(Date.now() - 8 * 3600 * 1000).toISOString();
+await one(`select * from public.vexim_worker_set_report_request('${cShop}',
+   '{"reportType":"GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA","dataStart":"2026-09-11",
+     "dataEnd":"2026-09-11","reportId":"ID3-STALE","status":"IN_PROGRESS",
+     "requestedAt":"${staleAt}"}'::jsonb)`);
+await cmp(
+  "0019: cờ is_stale bật đúng 1 report đang chờ quá 6 giờ",
+  `select count(*) n from public.vexim_report_requests
+    where seller_account_id='${cShop}' and is_stale`,
+  1,
+);
+const staleRow = await one(
+  `select status, age_minutes, is_stale from public.vexim_report_requests
+    where seller_account_id='${cShop}' and report_id='ID3-STALE'`);
+ok(
+  staleRow?.status === "in_progress" && Number(staleRow?.age_minutes) >= 470 && staleRow?.is_stale === true,
+  `0019: report chờ 8 giờ → is_stale=true, age_minutes=${staleRow?.age_minutes} (màn Sync health báo đỏ)`,
+);
+await cmp(
+  "0019: 3 lần yêu cầu report = 3 dòng (mỗi khoảng ngày 1 dòng)",
+  `select count(*) n from public.vexim_report_requests where seller_account_id='${cShop}'`,
+  3,
+);
+
+// ---- 5. RLS: user kho đọc được, người lạ không, web không ghi được ------------
+// KHÔNG được `rollback` ở đây: user kho + listing fixture đang sống trong
+// transaction này — rollback là mất fixture và mọi test RLS sẽ đọc ra 0 dòng
+// (kết quả GIẢ: trông như "chặn đúng" nhưng thật ra là không có dữ liệu).
+// Nếu một câu phía trên ném lỗi thì txn ABORTED và phần này sẽ fail lộ liễu —
+// đó là điều ta muốn, còn hơn là pass giả.
+await ex("reset role;");
+await ex(`select set_config('request.jwt.claim.sub','${fUser}',false);`);
+await ex("set role authenticated;");
+await cmp(
+  "0019 RLS: user kho đọc được phân bổ phí FC của shop mình",
+  `select count(*) n from public.vexim_storage_fee_by_fc where seller_account_id='${cShop}'`,
+  5,
+);
+await cmp(
+  "0019 RLS: user kho đọc được vấn đề nhập kho",
+  `select count(*) n from public.vexim_inbound_issues where seller_account_id='${cShop}'`,
+  3,
+);
+ok(
+  await mustBlock(`insert into finance.storage_fees(seller_account_id,month_of_charge,asin,fnsku,fulfillment_center)
+     values ('${cShop}','2026-08','HACK','HACK','HACK')`),
+  "0019 CHẶN: authenticated không ghi thẳng phí lưu kho (chỉ worker qua RPC)",
+);
+ok(
+  await mustBlock(`insert into inventory.inbound_noncompliance(seller_account_id,issue_reported_date,problem_type)
+     values ('${cShop}', date '2026-09-12','HACK')`),
+  "0019 CHẶN: authenticated không ghi thẳng phí inbound",
+);
+ok(
+  await mustBlock(`update finance.storage_fees set estimated_monthly_storage_fee=0 where seller_account_id='${cShop}'`),
+  "0019 CHẶN: authenticated không sửa được phí lưu kho",
+);
+ok(
+  await mustBlock(`insert into connections.report_requests(seller_account_id,report_type,status)
+     values ('${cShop}','GET_FBA_STORAGE_FEE_CHARGES_DATA','imported')`),
+  "0019 CHẶN: authenticated không ghi được trạng thái report",
+);
+ok(
+  await mustBlock(`select * from public.vexim_worker_upsert_storage_fees('${cShop}','[]'::jsonb)`),
+  "0019 CHẶN: RPC nhập phí lưu kho chỉ dành cho service_role",
+);
+ok(
+  await mustBlock(`select * from public.vexim_worker_upsert_noncompliance('${cShop}','[]'::jsonb)`),
+  "0019 CHẶN: RPC nhập phí inbound chỉ dành cho service_role",
+);
+ok(
+  await mustBlock(`select * from public.vexim_worker_set_report_request('${cShop}','{}'::jsonb)`),
+  "0019 CHẶN: RPC ghi trạng thái report chỉ dành cho service_role",
+);
+
+await ex("reset role;");
+await ex(`select set_config('request.jwt.claim.sub','${fStranger}',false);`);
+await ex("set role authenticated;");
+await cmp(
+  "0019 RLS: người lạ không thấy phí theo FC của shop",
+  `select count(*) n from public.vexim_storage_fee_by_fc where seller_account_id='${cShop}'`,
+  0,
+);
+await cmp(
+  "0019 RLS: người lạ không thấy vấn đề nhập kho của shop",
+  `select count(*) n from public.vexim_inbound_issues where seller_account_id='${cShop}'`,
+  0,
+);
+await cmp(
+  "0019 RLS: người lạ không thấy trạng thái report của shop",
+  `select count(*) n from public.vexim_report_requests where seller_account_id='${cShop}'`,
+  0,
+);
+
+await ex("rollback;");
+await ex("reset role;");
+
+// ---- 6. idempotent ------------------------------------------------------------
+ok(
+  await ex(rd("migrations/0019_fc_fees_report_requests.sql"), "0019 lần 2"),
+  "0019 idempotent (chạy lại không lỗi, không đổi hợp đồng)",
+);
+ok(
+  (await colsOf("vexim_storage_fee_by_fc")).endsWith("fee_share_pct,imported_at"),
+  "0019 lần 2: hợp đồng cột view phân bổ phí giữ nguyên",
+);
+await cmp(
+  "0019 lần 2: index unique không bị tạo trùng",
+  `select count(*) n from pg_indexes where indexname in
+     ('uq_storage_fees_key','uq_inbound_noncompliance_key','uq_report_requests_key')`,
+  3,
+);
 
 console.log(`\n${"=".repeat(70)}`);
 console.log(fails === 0 ? "TẤT CẢ PASS" : `${fails} MỤC FAIL`);

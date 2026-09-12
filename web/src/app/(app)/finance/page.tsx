@@ -43,6 +43,12 @@ export default async function FinancePage() {
           </a>
         ))}
         <a
+          href="/finance/costs"
+          className="rounded-full border border-line bg-card px-4 py-1.5 text-[12.5px] font-bold text-muted transition hover:border-accent hover:bg-accent-soft hover:text-accent-ink"
+        >
+          🏷️ Giá vốn (F3/F4/P1)
+        </a>
+        <a
           href="/finance/claims"
           className="rounded-full border border-line bg-card px-4 py-1.5 text-[12.5px] font-bold text-muted transition hover:border-accent hover:bg-accent-soft hover:text-accent-ink"
         >

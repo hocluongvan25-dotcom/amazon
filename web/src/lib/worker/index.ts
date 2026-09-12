@@ -13,3 +13,9 @@
  */
 export { runInventorySyncAll } from "./run-inventory-sync";
 export type { InventorySyncRunResult } from "./run-inventory-sync";
+
+/* ---- Reports API (0019): Vercel Cron tự kéo 4 report FBA ---- */
+export { runReportPullAll } from "./run-report-pull";
+export type { ReportPullRunResult } from "./run-report-pull";
+export { REPORT_SPECS, ALL_REPORT_KINDS, isReportKind } from "./reports/registry";
+export type { ReportKind } from "./reports/registry";

@@ -2,6 +2,348 @@
 
 > Cập nhật: 12/09/2026 · Thứ tự build đã chốt: **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** (21 màn Đợt 1)
 
+## Cập nhật 12/09 — MODULE 3 NÂNG CAO (phần 2): PHÍ theo FC + phí inbound noncompliance + cron tự kéo Reports API (migration 0019)
+
+Phần 1 (0018) trả lời "hàng nằm ở đâu, nhận đủ chưa" nhưng vẫn phải **tải file TSV bằng tay** và
+vẫn **chưa thấy TIỀN**. Phần 2 đóng cả hai khoảng trống:
+
+1. **Phí lưu kho theo FC** — `GET_FBA_STORAGE_FEE_CHARGES_DATA`: Amazon thu bao nhiêu cho hàng nằm ở
+   từng FC, theo từng tháng (`storage_rate`, `estimated_monthly_storage_fee`, tồn bình quân, thể tích,
+   size tier, phí khuyến khích, hàng nguy hiểm).
+2. **Phí/vấn đề inbound noncompliance** — `GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA`: lô nào bị
+   Amazon bắt lỗi (thiếu nhãn, sai thùng, gửi dư/thiếu…), lỗi gì, bao nhiêu đơn vị, **phạt bao nhiêu
+   tiền**, mức coaching, trạng thái cảnh báo.
+3. **Tự động hoá Reports API** — không ai phải vào Seller Central tải file nữa: `createReport` →
+   `getReport` (poll) → `getReportDocument` (tải, tự giải nén GZIP) cho **cả 4 report** (2 report của
+   0018 + 2 report phí của 0019), chạy bằng **Vercel Cron** mỗi ngày 03:00 UTC.
+
+- **Migration `0019_fc_fees_report_requests.sql`** (idempotent + DO-block tự soát **8 mục**: RLS 3 bảng ·
+  index unique · KHÔNG có policy ghi · 3 RPC `security definer` chỉ service_role · 5 view
+  `security_invoker` · hợp đồng cột từng view · helper đọc số · regression 0018):
+  - Bảng **`finance.storage_fees`** ← report phí lưu kho. Khoá unique (shop × `month_of_charge` × ASIN ×
+    FNSKU × FC × `dangerous_goods_storage_type`). `month_of_charge` được parser chuẩn hoá về `YYYY-MM`
+    (report có thể ghi `September 2026`).
+  - Bảng **`inventory.inbound_noncompliance`** ← report lỗi nhập kho. Khoá unique (shop ×
+    `issue_reported_date` × lô × carton × SKU × `problem_type`).
+  - Bảng **`connections.report_requests`** — **sổ tay trạng thái từng lần yêu cầu report**: reportId,
+    documentId, `status` (requested/in_queue/in_progress/done/imported/no_data/failed/fatal/cancelled),
+    `rows_imported`, `attempts`, `last_error`, kỳ dữ liệu. Nhờ bảng này cron **nối tiếp được**: lần sau
+    poll đúng reportId đang chờ thay vì xin report mới (Amazon chỉ cho xin report daily **1 lần/4 giờ**
+    cho mỗi loại).
+  - 3 RPC **`vexim_worker_upsert_storage_fees`** / **`vexim_worker_upsert_noncompliance`** /
+    **`vexim_worker_set_report_request`** (`security definer`, revoke khỏi `authenticated`, nhận JSON
+    **camelCase** như quy ước 0015): set-based, trả `inserted · updated · skipped` (+ `groups` và danh
+    sách `currencies` với RPC phí). Nhập lại cùng file → `updated`, **không phình bảng**.
+  - 5 view `security_invoker`: **`vexim_storage_fees`** (phí theo SKU/FNSKU/ASIN × FC × tháng, kèm
+    **`sku` SUY RA + nhãn `sku_source`** = `fnsku` / `asin` / `none` — report phí **không có SKU người
+    bán**, hệ thống nối qua `inventory.fc_allocation` (0018) rồi `catalog.listings`, không âm thầm đoán),
+    **`vexim_storage_fee_by_fc`** (shop × tháng × FC × **currency**: `storage_fee`, `fee_share_pct`,
+    `avg_units_on_hand`, `total_volume`, `month_fee_total`), **`vexim_inbound_issues`** (từng dòng lỗi +
+    `days_ago`), **`vexim_inbound_issue_shipments`** (gộp theo lô: `issue_count`, `fee_total`,
+    `problem_units`, `problem_types`, `coaching_levels`, `alert_statuses`), **`vexim_report_requests`**
+    (+ `age_minutes`, `is_stale` — màn Sync health đọc).
+  - Helper **`finance.num_or_null`** / **`finance.bool_or_null`**: giá trị report lạ (`N/A`, `1,234.56`,
+    `abc`, rỗng) → **NULL** chứ không làm nổ cả lô nhập.
+  - RLS: 3 bảng mới **chỉ có policy SELECT** theo `iam.can_read_seller_account` (self-check đếm và
+    **fail nếu có bất kỳ policy ghi nào**); mọi đường ghi đi qua RPC service_role.
+- **Engine (đặt trong `web/src/lib/worker/` vì Vercel Cron phải tự chứa trong `web/`; `worker/src/*`
+  là shim re-export)**:
+  - `amazon/reports.ts` — **ReportsClient**: `createReport` → poll `getReport` → `getReportDocument`
+    (tải nội dung, tự giải nén **GZIP** qua `node:zlib`), nhận diện throttle (`SpApiRequestError
+    .isThrottled`) để cron không đốt quota.
+  - `reports/registry.ts` — khai báo 4 report: `fc` (2 ngày) · `receipts` (30 ngày) · `storage-fees`
+    (**95 ngày** — Amazon giữ ~3 kỳ phí) · `noncompliance` (60 ngày); **mọi loại `cooldownHours = 4`**
+    đúng trần của Amazon.
+  - `reports/fba-fees.parser.ts` — đọc cột **THEO TÊN** (Amazon đổi thứ tự cột vẫn chạy), gom
+    `byMonthFcCurrency` (khoá `tháng|FC|tiền tệ`) và `feeByType` (khoá `loại phí|tiền tệ`), tiền làm tròn
+    2 số để `0.30 + 0.55` không thành `0.8500000000000001`; dòng rác đếm `skipped` kèm số dòng, trần 20
+    cảnh báo.
+  - `jobs/report-pull.job.ts` + `run-report-pull.ts` — luật: tôn trọng cooldown **theo từng loại
+    report**; trạng thái còn làm được (requested/in_queue/in_progress/done) thì **POLL tiếp, không tạo
+    report mới**; report DONE nhưng rỗng → `no_data` (không phải lỗi); kỳ dữ liệu tính theo **UTC**;
+    `--dry-run` **không ghi gì**; `rowsImported = inserted + updated`.
+  - CLI **`npm run worker:reports-pull -- [--type=all|fc|receipts|storage-fees|noncompliance] [--days=N]
+    [--seller=<uuid>] [--poll=N] [--dry-run]`** — có credential Amazon thì gọi API thật; hoặc nạp file đã
+    tải tay: `--fc=<tsv> --receipts=<tsv> --storage-fees=<tsv> --noncompliance=<tsv>` (bỏ qua Amazon).
+- **Cron**: route **`/api/cron/report-pull`** (GET/POST, `?kinds=` · `?days=` · `?dryRun=`), bảo vệ bằng
+  `Authorization: Bearer <CRON_SECRET>` — **dùng lại biến đã có** của `/api/cron/inventory-sync`, nên
+  **vẫn không cần thêm biến môi trường nào** (chỉ `AMAZON_LWA_*` + Supabase). Thiếu `CRON_SECRET` trên
+  production → trả **500 kèm hướng dẫn** thay vì 401 mơ hồ. `maxDuration = 60` và **chỉ poll 2 lần cách
+  nhau 5 giây**: report chưa xong thì ghi trạng thái vào `report_requests` để lần sau poll tiếp — cron
+  KHÔNG ngồi chờ. `web/vercel.json` nay có 2 cron (02:00 inventory-sync · **03:00 report-pull** UTC).
+- **Web UI (4 chỗ mới, đều đọc TÁCH BIỆT để trang không sập khi DB chưa chạy 0019):**
+  - **Tổng quan kho vận**: panel **"Phí lưu kho theo FC"** — kỳ mới nhất, mỗi **tiền tệ một khối riêng**
+    (tổng kỳ · % từng FC · số dòng sản phẩm · tồn bình quân · thể tích), không cộng chéo tiền tệ.
+  - **I2 Chi tiết tồn SKU**: panel **"Phí lưu kho theo FC"** của riêng SKU đó — bảng kỳ mới nhất theo FC
+    + bảng **chênh lệch kỳ phí** (so kỳ trước, chỉ so khi cùng tiền tệ), khớp phí theo **SKU HOẶC FNSKU
+    HOẶC ASIN** vì report phí không có SKU người bán; cảnh báo khi có dòng phí chưa ánh xạ được SKU.
+  - **I4 Inbound shipments**: cột mới **"Phí / vấn đề inbound"** trên bảng lô (`N vấn đề · $X`, `—` khi
+    chưa biết) + header đếm tổng vấn đề/tổng phí + 3 panel: **lô nặng nhất** (sắp theo mức độ/phí),
+    **từng vấn đề** (loại lỗi · đơn vị · coaching · phí, ghi rõ `expected/received` là **theo DÒNG** chứ
+    không phải cả lô), **lô mồ côi** (report có lỗi nhưng lô không còn trong danh sách Inbound API).
+  - **Module 0 → Sức khỏe đồng bộ**: panel **"Report đã kéo qua Reports API"** — từng loại report × shop ×
+    kỳ dữ liệu × trạng thái × số dòng đã nhập × số lần chạm × tuổi (nhãn **CHỜ QUÁ LÂU** khi > 6 giờ) ×
+    lỗi gần nhất, kèm giải thích trần 4 giờ và vì sao "Lần chạm" tăng là bình thường. Ba trạng thái
+    hiển thị riêng: **chưa nối Supabase** (chế độ demo) / **chưa đọc được view** (thiếu 0019 hoặc quyền) /
+    **chưa có lần yêu cầu nào**.
+- **Số trung thực (không bịa):** phí **NULL ≠ 0** — dòng không đọc được tiền thì để "chưa biết", không
+  đếm vào tổng; **không cộng tiền khác tiền tệ** ở bất kỳ tầng nào (parser · RPC · view · UI);
+  `fee_share_pct` chỉ tính trong cùng một tiền tệ của cùng kỳ; `expected/received` của report lỗi là
+  **theo dòng vấn đề**, KHÔNG được cộng ra "cả lô" (đối soát lô vẫn dùng 0018); lô có vấn đề nhưng
+  không đọc được phí → hiện `—`, không hiện `$0`.
+- **Kiểm chứng local (chạy thật):** `supabase npm test` **TẤT CẢ PASS (428 mục)** — BƯỚC 20 chạy trên
+  Postgres thật (PGlite): nhập phí lưu kho 2 lần vẫn 5 dòng (không phình), dòng `month_of_charge =
+  "September 2026"` được chuẩn hoá, dòng thiếu ASIN+FNSKU và dòng `fee = "abc"` bị `skipped`,
+  USD/CAD **không bị cộng chung**, `authenticated` bị chặn ghi thẳng và bị chặn gọi cả 3 RPC, người lạ
+  không thấy gì, 0019 chạy 2 lần không lỗi · `worker npm test` **391/391** (+70 test parser/registry/
+  job/runner: cooldown, poll-không-tạo-mới, DONE rỗng → no_data, dry-run không ghi, GZIP, throttle) ·
+  `web npm test` **152/152** (+24 test `fees-model`: hợp đồng SELECT 5 view, ép số dạng chuỗi, không cộng
+  chéo tiền tệ, khớp SKU/FNSKU/ASIN, gộp vấn đề vào lô, nhãn trạng thái report + `is_stale`) ·
+  `npx tsc --noEmit` sạch · `npm run build` sạch.
+
+### Chờ VEXIM (Module 3 nâng cao phần 2)
+
+- ☐ Chạy `supabase/migrations/0019_fc_fees_report_requests.sql` trong SQL Editor (sau `0018`).
+- ☐ Kiểm tra role **Amazon Fulfillment** đã được Amazon cấp (đã nộp trong Developer Profile) — thiếu
+  role thì `createReport` cho 2 report phí sẽ bị chặn.
+- ☐ Chạy tay lần đầu để xem số mà **không ghi DB**: `npm run worker:reports-pull -- --type=all
+  --dry-run`. Ưng ý thì bỏ `--dry-run` (worker chỉ ghi DB thật khi shop có `data_source = 'production'`).
+- ☐ Trên Vercel: redeploy để `vercel.json` nhận cron thứ hai (`/api/cron/report-pull`, 03:00 UTC) —
+  `CRON_SECRET` dùng lại cái đã có; gói Hobby giới hạn **2 cron/ngày chạy theo lịch**, đủ cho 2 job này.
+- ☐ Sau 1–2 ngày, vào **Module 0 → Sức khỏe đồng bộ** xem panel "Report đã kéo qua Reports API": trạng
+  thái `imported` là xong; `in_queue`/`in_progress` là Amazon đang tạo (cron poll tiếp); **CHỜ QUÁ LÂU**
+  (> 6 giờ) thì chạy `npm run worker:reports-pull -- --type=storage-fees` để poll tay.
+
+## Cập nhật 12/09 — MODULE 3 NÂNG CAO: phân bổ tồn theo FC + lịch sử nhận hàng (migration 0018)
+
+I2 có hai khối treo nhãn "chưa có dữ liệu" từ Đợt 1, và lý do không phải "chưa làm" mà là **API không
+có số này**: `listInventorySummaries`/`getFulfillmentInventory` chỉ trả TỔNG theo SKU (không tách
+theo FC), còn Inbound API chỉ mô tả lô ĐANG mở (lô CLOSED thì không còn số nhận chi tiết). Nguồn thật
+là 2 report FBA — nay đã nối xong report → DB → màn hình:
+
+- **Migration `0018_fc_allocation_receipts.sql`** (idempotent + self-check 11 mục: bảng · RLS · quyền
+  RPC · `security_invoker` · hợp đồng cột view · regression 0017):
+  - Bảng **`inventory.fc_allocation`** ← report `GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA`
+    (cột: `snapshot-date · fnsku · sku · product-name · quantity · fulfillment-center-id ·
+    detailed-disposition · country`). Khoá unique (shop × ngày snapshot × SKU × FC × disposition).
+  - Bảng **`inventory.receipts`** ← report `GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA`
+    (cột: `received-date · fnsku · sku · product-name · quantity · fba-shipment-id ·
+    fulfillment-center-id`). Khoá unique (shop × ngày nhận × SKU × lô × FC).
+  - 2 RPC **`vexim_worker_upsert_fc_allocation`** / **`vexim_worker_upsert_receipts`** (`security
+    definer`, revoke khỏi `authenticated`): set-based (1 câu INSERT…SELECT cho cả lô), trả
+    `inserted · updated · skipped · merged · units · snapshots|shipments`. Dòng trùng khoá trong cùng
+    file → **CỘNG dồn** (nếu ghi 2 lần Postgres báo "cannot affect row a second time"); dòng thiếu
+    khoá/số không đọc được → `skipped`; nhập lại cùng file → `updated`, **không phình bảng**.
+  - 4 view `security_invoker`: **`vexim_inventory_fc`** (SKU × FC của snapshot MỚI NHẤT +
+    `sellable_qty`/`unsellable_qty`/`unknown_qty` + `sku_total_qty` + `sku_fc_count` +
+    `fc_share_pct`), **`vexim_inventory_fc_rows`** (drill-down theo disposition),
+    **`vexim_inventory_receipts`** (từng lần nhận + `days_ago`),
+    **`vexim_inbound_receipt_shipments`** (đối soát theo lô: thực nhận vs số gửi + `diff_units` +
+    `receipt_rate_pct` + `reconcile_state` + `expected_source`).
+  - RLS: 2 bảng mới **chỉ có policy SELECT** theo `iam.can_read_seller_account` — không có policy ghi,
+    web không ghi được; mọi đường ghi đi qua RPC service_role (như `catalog.listings` của 0016).
+- **Worker**: parser `worker/src/reports/fba-inventory.parser.ts` (đọc cột **THEO TÊN** nên Amazon đổi
+  thứ tự cột vẫn chạy; ngày về `YYYY-MM-DD`; dòng rác bỏ kèm số dòng; trần 20 cảnh báo để file lỗi
+  không làm ngập log), job `inventory-fc-sync.job.ts`, runner `run-inventory-fc-sync.ts`, lệnh mới
+  **`worker inventory:fc --fc=<file> [--receipts=<file>] [--seller=<uuid>] [--top-fc=10] [--dry-run]`**
+  (script `npm run worker:inventory-fc`). **Không cần thêm biến env nào**; chỉ ghi DB thật khi
+  `mode = production` và không `--dry-run`.
+- **Web**: I2 (live) thay 2 panel "chưa có dữ liệu" bằng bảng **Phân bổ theo FC** (FC · Tổng · % của
+  SKU · bán được · không bán được · không rõ) và **Lịch sử nhận hàng** (ngày · lô · FC · thực nhận);
+  mỗi panel đọc tách biệt nên nếu DB chưa chạy 0018 thì panel tự giải thích, **không sập cả trang**.
+  I4 (live) hết placeholder ở cột **FC đích** và **Đối soát nhận**: ghép
+  `vexim_inbound_receipt_shipments` theo mã lô → "Nhận đủ 50/50" · "Thiếu 7 (nhận 18/25) → SOP-09" ·
+  "Thừa 10 (nhận 30/20)" · "Chưa rõ số gửi (đã nhận 12)", kèm panel "lô có số nhận nhưng không còn
+  trong danh sách" (lô CLOSED trước khi worker kịp sync).
+- **Số trung thực**: `fc_share_pct` **NULL** khi tổng tồn của SKU = 0 (không hiện 0%); disposition rỗng
+  đếm riêng `unknown_qty`, KHÔNG gộp vào "bán được"; report receipts **không có cột số gửi** →
+  `expected_units` NULL + `expected_source = 'none'` chứ không suy "gửi = nhận"; ngày kiểu
+  `09/11/2026` hiểu theo MM/DD/YYYY nhưng **có cảnh báo** trong log.
+- **Kiểm chứng local (chạy thật):** `supabase npm test` **TẤT CẢ PASS** — BƯỚC 19 chạy trên Postgres
+  thật (PGlite): nhập 10 dòng FC → ghi 6 · bỏ 3 dòng rác · gộp 1 cặp trùng khoá · 145 đơn vị ·
+  2 snapshot; nhập lại → 6 update/0 insert; view chỉ phơi snapshot mới nhất; ONT8 50/85 = 58,8% +
+  PHX7 41,2% = tròn 100%; SKU tổng 0 → % NULL; đối soát 5 lô (matched · short −7 · over +10 ·
+  unknown_expected vì không có dòng lô · unknown_expected vì `quantity` NULL); `authenticated` bị chặn
+  ghi thẳng + bị chặn gọi cả 2 RPC; người lạ không thấy gì; 0018 chạy 2 lần không lỗi ·
+  `worker npm test` **321/321** (+28 test parser/job/runner) · `web npm test` **128/128** (+15 test
+  model) · `npx tsc --noEmit` sạch.
+
+### Chờ VEXIM (Module 3 nâng cao)
+
+- ☐ Chạy `supabase/migrations/0018_fc_allocation_receipts.sql` trong SQL Editor (sau `0017`).
+- ☐ Tải 2 report rồi nhập: Seller Central → **Reports → Fulfillment → Inventory** →
+  *FBA Daily Inventory History* (phân bổ FC) và *FBA Received Inventory* (lịch sử nhận), định dạng TSV →
+  `npm run worker:inventory-fc -- --fc=<daily-inventory.tsv> --receipts=<received-inventory.tsv>`
+  (thêm `--seller=<uuid>` nếu có >1 shop; chạy `--dry-run` trước để xem số mà không ghi DB).
+- ☑ ~~Đợt 2 sẽ tự đặt lịch qua Reports API~~ → **đã làm ngay trong phần 2 (0019, xem mục trên)**: cron
+  `/api/cron/report-pull` tự `createReport` → poll `getReport` → `getReportDocument`, tôn trọng trần
+  **mỗi 4 giờ cho mỗi loại report**; vẫn **không cần thêm biến env** (dùng lại `AMAZON_LWA_*` +
+  `CRON_SECRET` + role **Amazon Fulfillment** đã nộp trong Developer Profile). Nhập tay bằng file TSV
+  vẫn chạy được như cũ (`--fc=` / `--receipts=` / `--storage-fees=` / `--noncompliance=`).
+
+## Cập nhật 12/09 — ĐỢT B: "hái quả ngay" (migration 0017 · doanh số 30 ngày · người phụ trách · giá trị tồn kho)
+
+Đợt A mở khoá giá vốn + ghi listing thật. Đợt B lấy nốt **ba thứ dữ liệu ĐÃ CÓ SẴN trong DB nhưng
+UI vẫn để số 0 / dấu "—"**, không phải chờ thêm API nào của Amazon:
+
+- **Migration `0017_sales30d_owner_inventory_value.sql`** (idempotent + self-check 11 mục: cột nối
+  CUỐI view / quyền / PII / công thức / khớp bảng gốc / idempotent):
+  - **`public.vexim_sku_sales_30d`** (mới, `security_invoker`): MỘT định nghĩa doanh số 30 ngày theo
+    (shop × SKU) từ `sales.orders ⋈ sales.order_items` — `units_30d`, `orders_30d`, `revenue_30d`
+    (Σ `item_price × quantity`), `currency` + cờ `currency_mixed`, `last_order_at`. **Loại đơn huỷ**
+    (cả hai cách viết `Cancelled`/`Canceled` của report lẫn API) và `Unfulfillable`; đơn `Pending`
+    VẪN TÍNH vì P1 cần "cầu thật" để ước thiệt hại khi mất Buy Box. SKU không có đơn → **không có
+    dòng** (view để NULL, không suy ra 0). *Khác `inventory.units_sold_per_day()` (0005): hàm đó chỉ
+    đếm Shipped/Delivered 14 ngày để tính velocity NHẬP HÀNG — hai con số cho hai quyết định khác nhau.*
+  - **`iam.module_owner(p_seller, p_module)`**: tên nhân viên VEXIM phụ trách shop ở module đó
+    (ưu tiên `can_write`, rồi người gán sớm nhất). Bắt buộc là **`security definer`** vì RLS của
+    `iam.assignments`/`iam.user_profiles` chỉ cho đọc CHÍNH MÌNH — join thẳng trong view
+    `security_invoker` sẽ ra NULL với mọi user thường và cột "Phụ trách" chết. Chỉ trả **tên hiển thị**
+    (không email, không uuid → không phải PII), bỏ qua user của khách hàng (`vexim_employee = false`),
+    trả NULL nếu người gọi không đọc được shop, và **revoke khỏi `public`/`anon`**.
+  - **`vexim_pricing` (P1) · `vexim_listings` (L1/L2) · `vexim_listing_queue` (L4)** nối THÊM 7 cột ở
+    CUỐI: `units_30d, orders_30d, revenue_30d, revenue_currency, velocity_30d, last_order_at, owner`
+    (P1 lấy owner module `pricing`, L1/L4 lấy module `listings`; `velocity_30d = units_30d / 30`).
+    Nối cuối để web đang select theo tên không vỡ (bài học PGRST204).
+  - **`vexim_inventory_latest` (Module 3)** nối THÊM 8 cột ở CUỐI: `unit_cost, cost_currency,
+    cost_effective_from, cost_source, stock_value, total_stock_value, value_currency, value_basis`.
+    `stock_value = fulfillable × giá vốn`, `total_stock_value = (fulfillable + reserved + inbound) ×
+    giá vốn` — tra giá vốn NGOÀI khối `distinct on` để mỗi (shop × SKU) chỉ tra một lần. Tính theo
+    **TIỀN CỦA GIÁ VỐN** (VEXIM nhập VND, bán USD → không tự quy đổi); thiếu giá vốn →
+    `value_basis = 'missing'` + các cột giá trị NULL.
+  - **Sửa lỗ hổng còn lại của 0016:** `catalog.effective_cost_row()` nay so SKU
+    **không phân biệt hoa/thường** (`cost_inputs.sku` luôn VIẾT HOA vì `apply_cost_input` chuẩn hoá,
+    còn `listings.sku`/`inventory_snapshots.sku` giữ nguyên xi như report) — hết cảnh "đã nhập giá vốn
+    mà P1/Module 3 vẫn báo thiếu" chỉ vì một chữ thường. Sửa ở MỘT chỗ nên `effective_cost()`,
+    `vexim_pricing`, `vexim_cost_coverage` và view tồn kho cùng hưởng.
+  - Index `idx_order_items_order` (aggregate 30 ngày đi qua join `order_id`, trước đó bảng chỉ có PK).
+- **Web — số thật thay cho 0/"—" (demo và live dùng chung một model):**
+  - **P1**: cột mới **"Bán 30 ngày"** (đơn vị · số đơn · velocity/ngày · doanh thu 30 ngày), owner hiện
+    "— chưa gán" khi DB chưa gán ai; sort "Velocity cao" và điểm rủi ro **null-safe** (SKU chưa có đơn
+    xếp CUỐI, không chen lên đầu như thể bán kém nhất). `velocity30d` đổi sang `number | null`.
+  - **L1**: cột mới **"Doanh thu 30 ngày"** + **"Phụ trách"** → nút sort "Doanh thu 30 ngày" hết xếp
+    theo toàn số 0; `revenue30d` thành `number | null`.
+  - **L4**: thêm cột **"Tiền đang mất"** (doanh thu/ngày + tổng 30 ngày) và **xếp hàng đợi theo tiền**:
+    cùng mức ưu tiên thì listing đang mất nhiều tiền hơn lên trước (`sortQueueByRisk` dùng chung cho
+    cả overview); owner + SLA hết là "—".
+  - **Module 3**: I1 thêm KPI **"Giá trị tồn kho"** · **"SKU chưa có giá vốn"** và 2 cột
+    *Giá vốn* / *Giá trị tồn* (kèm phần chỉ tính khả dụng); I2 thêm panel **"Giá trị tồn kho"** diễn giải
+    từng bước (giá vốn hiệu lực · khả dụng × vốn · cộng reserved + đang về); I3 hết cảnh
+    `unitCost: "—", value: "—"` — giá trị lô = đề xuất nhập × giá vốn, thiếu giá vốn thì ghi thẳng
+    "— chưa có giá vốn" + nhãn "Nháp — thiếu giá vốn" (vàng) và KPI đếm số lô chưa định giá được.
+    Cộng tiền **theo từng tiền tệ** (`summarizeInventoryValue`) — không bao giờ cộng VND với USD.
+- **Kiểm chứng local (chạy thật, không suy luận):** `supabase npm test` **TẤT CẢ PASS** (BƯỚC 1..18;
+  BƯỚC 18 dựng 5 user + 4 listing + 6 đơn (2 huỷ · 1 quá 30 ngày · 1 SKU viết thường) + 3 tồn kho +
+  2 giá vốn rồi soát: `velocity_30d = 6/30 = 0.20`, doanh thu 300.00, đơn huỷ/đơn 40 ngày bị loại,
+  SKU không có đơn → NULL chứ không phải 0, owner đúng theo module + ưu tiên `can_write`, user lạ
+  KHÔNG dò được tên, `anon` bị chặn gọi hàm, `100 × 10 = 1.000` và `(100+20+30) × 10 = 1.500`,
+  thiếu giá vốn → NULL + `missing`, SKU viết thường vẫn định giá được, RLS 3 view, 0017 chạy 2 lần) ·
+  `web npm test` **113/113** (+30 test: `inventory-model.test.ts` mới 13 test + mở rộng
+  pricing/listing model) · `worker npm test` **293/293** · `npx tsc --noEmit` sạch · 8 trang
+  (`/pricing`, `/listing/list`, `/listing/queue`, `/fulfillment`, `/fulfillment/inventory`,
+  `/fulfillment/inventory/detail`, `/fulfillment/restock`, `/finance/costs`) trả HTTP 200.
+
+### Chờ VEXIM (Đợt B)
+
+- ☐ Chạy `supabase/migrations/0017_sales30d_owner_inventory_value.sql` trong SQL Editor (sau `0016`).
+- ☐ **Gán người phụ trách** trong `iam.assignments` theo (shop × module `pricing` / `listings` /
+  `inventory`) — chưa gán thì cột "Phụ trách" hiện "— chưa gán" (có chủ đích, không tự bịa tên).
+- ☐ Chạy `orders:sync` để có đơn 30 ngày: chưa có đơn thì P1/L1 hiện "—" chứ không hiện 0.
+- ☐ Nhập giá vốn cho SKU còn tồn (`/finance/costs`): SKU thiếu giá vốn sẽ hiện "— chưa định giá"
+  ở I1/I2 và "— chưa có giá vốn" ở I3, đồng thời bị đếm trong KPI "SKU chưa có giá vốn".
+
+## Cập nhật 12/09 — ĐỢT A: gỡ chặn dữ liệu lõi (migration 0016 · giá vốn · ghi listing · P1 dùng giá vốn)
+
+Ba việc chặn nhau suốt Đợt 1 đã được gỡ theo đúng thứ tự **giá vốn → ghi listing → pricing**:
+
+- **Migration `0016_core_data_unblock.sql`** (idempotent + self-check 11 mục: cột / 6 view / 6 RPC /
+  quyền / PII / `pricing_defaults` / `effective_cost()` khớp `cost_inputs`):
+  - `catalog.listings` thêm **11 cột** để GHI được dữ liệu thật: `issues jsonb` (issue nguyên văn Amazon),
+    `buyable`, `discoverable`, `product_type`, `quantity`, `stranded_reason`, `issue_errors`,
+    `issue_warnings`, `enforcement_actions jsonb`, `last_source`, `last_synced_at` + 2 index.
+  - `catalog.cost_inputs` thêm cột vết (`updated_at`, `updated_by`, `source_ref`) + unique
+    `(shop, sku, effective_from)` để **import lại không nhân đôi** bậc giá vốn.
+  - `catalog.pricing_defaults` (1 dòng cấu hình: referral 15% · biên tối thiểu 10% · phí khác 0) và
+    `catalog.effective_cost_row()` / `catalog.effective_cost()` — **một luật giá vốn hiệu lực duy nhất**.
+  - `public.vexim_worker_upsert_listings(p_seller, p_rows)` — RPC ghi listing cho worker (**chỉ
+    `service_role`**): whitelist trạng thái (`ACTIVE|INACTIVE|SUPPRESSED|STRANDED|REMOVED|CLOSED|DELETED`,
+    dòng mới chưa rõ → `UNKNOWN` chứ không bịa `ACTIVE`), `issues` dạng mảng = **thay** chi tiết,
+    `null` = **giữ** dữ liệu cũ, chỉ có số đếm thì **xoá** mảng issue cũ, `stranded_reason` theo
+    “key có mặt” để hết stranded là xoá được lý do, parse số an toàn (`1.299,99` → 1299.99, rác → NULL).
+  - View: `vexim_listings` / `vexim_listing_queue` (đếm issue **ưu tiên mảng chi tiết**, queue nối thêm
+    `buyable`/`discoverable`), `vexim_cost_inputs` (+`is_current`), `vexim_cost_coverage` (SKU đang bán
+    **thiếu giá vốn / lệch tiền tệ** — chính là danh sách gỡ chặn), `vexim_shops` (bộ chọn shop, RLS lọc
+    sẵn, **không phơi `seller_id`**). Tất cả `security_invoker = true`.
+  - RPC giá vốn cho web: `iam.is_cost_editor()`, `vexim_upsert_cost_input`, `vexim_import_cost_inputs`
+    (**chạy thử → hoàn tác → ghi thật**: 1 dòng lỗi thì KHÔNG ghi dòng nào, trả lỗi theo số dòng),
+    `vexim_close_cost_input`, `vexim_delete_cost_input` (chỉ admin/trưởng phòng Tài chính) — mỗi lần ghi
+    đều có `iam.audit_logs`. Helper parse đặt ở DB (`catalog.parse_amount`, `catalog.parse_day`: nhận
+    `YYYY-MM-DD` và `DD/MM/YYYY`, **từ chối `MM/DD/YYYY` mơ hồ**) để luật parse chỉ có một bản.
+  - **`vexim_pricing` nay dùng giá vốn hiệu lực** thay vì “giá sàn ≈ tổng phí” của 0013: thêm `unit_cost`,
+    `cost_currency`, `cost_effective_from`, `cost_source`, `referral_rate_used`, `min_margin_rate`,
+    `other_fee_per_unit`, `floor_price`, `gross_profit`, `margin_pct`, `below_floor`, `cost_basis`
+    (`cost+fees | cost_only | fees_only | currency_mismatch`). Thiếu giá vốn → **NULL + nhãn lý do**,
+    không lấy phí làm sàn. Công thức khớp `worker/src/domain/pricing.ts`:
+    `floor = (vốn + FBA + khác) / (1 − referral − biên tối thiểu)`.
+- **Worker — `upsertListing()` hết là stub rỗng, có runner `listings:sync`:**
+  - `web/src/lib/worker/db/listing-payload.ts` (mới): dựng payload theo luật
+    *undefined = không gửi (DB giữ nguyên)* / *null = chưa biết* / *`[]` = biết là rỗng*;
+    `parseReportNumber` đọc số kiểu local. `DbAdapter.upsertListings()` (ghi cả lô) +
+    `MockDbAdapter` **nhại đúng ngữ nghĩa RPC** để test không xanh giả.
+  - `db/supabase.ts`: `upsertListing`/`upsertListings` gọi `POST /rest/v1/rpc/vexim_worker_upsert_listings`
+    (nhóm theo shop, **không prefix schema**, không `Content-Profile` — đúng bài học sự cố 12/09).
+  - `jobs/listings-sync.job.ts` viết lại: gộp report ALL + INACTIVE + STRANDED → **một lần ghi lô**,
+    dựng hàng đợi L4 (`buildListingQueueEntry`), hook `fetchDetail` gọi `getListingsItem` cho **SKU có
+    vấn đề** (trần mặc định 50, throttle ~4,5 rps) để lấy `issues`/`productType`/cờ BUYABLE,
+    alert `listing_inactive` (đỏ nếu có stranded) hoặc tự đóng khi sạch, `sync_jobs` kiểu `listings.sync`.
+  - `amazon/listings.ts`: `extractListingState` trả **mảng issue nguyên văn Amazon**
+    (code/message/severity/attributeNames/categories/enforcements.actions) thay vì chỉ số đếm.
+  - Runner mới `runtime/run-listings-sync.ts` + CLI `worker listings:sync --all=<listings.tsv>
+    [--inactive=…] [--stranded=…] [--seller=<uuid>] [--details] [--detail-limit=50] [--dry-run]`
+    (script `npm run worker:listings-sync`); **chỉ ghi DB thật khi production + đủ credentials**,
+    còn lại chạy trong bộ nhớ và in rõ “KHÔNG ghi DB thật”.
+- **Web — `/finance/costs` (mới) để NHẬP giá vốn thật:**
+  - Nhập tay một bậc (SKU · giá vốn · tiền tệ · hiệu lực từ/đến · ghi chú) + **import CSV theo template**
+    (tải ở `/api/finance/cost-template`): xem trước số dòng hợp lệ/lỗi theo số dòng **trước khi ghi**,
+    all-or-nothing; “Kết thúc hiệu lực” (giữ lịch sử cho F4) và “Xoá” (chỉ admin/trưởng phòng Tài chính).
+  - Panel **“SKU đang bán nhưng chưa dùng được giá vốn”** (từ `vexim_cost_coverage`) kèm nút nhập nhanh —
+    đây chính là danh sách đang chặn F3/F4/P1; thang giá vốn theo SKU có nhãn *đang áp dụng / sắp hiệu lực*.
+  - Ghi qua Server Action → RPC 0016 bằng anon client + phiên đăng nhập (quyền do
+    `iam.can_write_seller_account()` + `iam.is_cost_editor()` chốt ở DB, web không dùng `service_role`).
+    Thêm mục nav “Giá vốn (F3/F4/P1)” + chip ở `/finance`.
+  - **P1/P2 dùng số thật:** `pricing-model` đọc 12 cột mới, ô giá sàn/biên hiện “—” kèm nhãn
+    `cost_basis` và link sang `/finance/costs` khi thiếu giá vốn, thêm bộ lọc “Chưa có giá vốn”,
+    KPI “SKU dưới giá sàn” đếm theo `below_floor`, breakdown giá sàn ở trang chi tiết liệt kê
+    vốn hiệu lực + FBA + phí khác + tỷ lệ referral + biên tối thiểu.
+  - **L1/L2/L4 dùng số thật:** tồn theo `quantity` (hết cảnh 0 giả), product type, cờ BUYABLE/DISCOVERABLE,
+    lý do stranded, enforcement Amazon, nguồn ghi gần nhất; L2 chuẩn hoá `enforcements.actions`
+    (trước đây cột enforcement luôn trống); L4 nêu nguyên nhân theo thứ tự
+    *stranded → enforcement → mã issue → trạng thái* và đề xuất sửa đúng bệnh; trạng thái lạ → `UNKNOWN`
+    (không ép về INACTIVE). Sửa luôn `readListingQueue` dùng select riêng vì view queue **không có**
+    cột `buy_box_*` (select thừa cột là PostgREST trả PGRST204 → sập cả trang L4).
+- **Kiểm chứng local (chạy thật, không suy luận):** `supabase npm test` **TẤT CẢ PASS** (BƯỚC 1..17;
+  BƯỚC 17 chạy 0016 hai lần để kiểm idempotent + thang giá vốn + import CSV lỗi/atomic + quyền
+  close/delete + ngữ nghĩa upsert listing + queue + `vexim_pricing` ra sàn 60.67/biên 39.5% +
+  `unit_cost ≡ effective_cost()` ở mọi dòng + RLS + độ phủ + `vexim_shops`) · `worker npm test`
+  **293/293** · `web npm test` **83/83** · `npx tsc --noEmit` sạch · 6 trang demo trả HTTP 200 ·
+  chạy thử `listings:sync --dry-run` trên report mẫu: 4 listing / 2 stranded / 4 SKU vào hàng đợi L4.
+
+### Chờ VEXIM (Đợt A)
+
+- ☐ Chạy `supabase/migrations/0016_core_data_unblock.sql` trong SQL Editor (sau `0015`).
+  **Không cần** thêm schema `catalog` vào *Exposed schemas*: web chỉ gọi RPC/view trong `public`.
+- ☐ Vào `/finance/costs` → tải template → **nhập giá vốn** cho SKU đang bán (tay hoặc CSV).
+  Chưa nhập thì F3 để trống giá trị claim, F4 để trống lãi gộp và P1 để trống giá sàn/biên (có chủ đích).
+- ☐ Chỉnh `catalog.pricing_defaults` (id=1) nếu tỷ lệ referral / biên tối thiểu của VEXIM khác 15% / 10%.
+- ☐ Tải 3 report trong Seller Central rồi nạp: `npm run worker:listings-sync -- --seller=<uuid>
+  --all=<merchant-listings-all.tsv> --inactive=<inactive.tsv> --stranded=<stranded.tsv>`
+  (thêm `--details` khi đã có `AMAZON_LWA_*` để lấy issue chi tiết cho L2).
+- ☐ Cấp quyền nhập giá vốn: user Tài chính cần `role_assignments` (admin / `dept_lead` phòng `finance`)
+  hoặc `iam.assignments` module `finance` + `can_write = true` trên đúng shop đó.
+- ⚠ Đã biết: `getListingsItem` giới hạn ~5 rps (burst 10) nên `--details` chỉ soi SKU có vấn đề,
+  trần mặc định 50 lần chạy (`--detail-limit` để đổi); report Merchant Listings chỉ cho **số đếm** issue,
+  muốn có mã lỗi/nội dung thật thì phải gọi API.
+
 ## Cập nhật 12/09 — Module 6 Đợt 2: F3 bồi hoàn FBA + F4 lợi nhuận SKU (migration 0015)
 
 - **Migration `0015_finance_claims_profit.sql`** (idempotent + self-check 3 bảng / 4 view / 2 trigger / 6 RPC):
@@ -44,10 +386,10 @@
 ### Chờ VEXIM (Module 6 Đợt 2)
 
 - ☐ Chạy `supabase/migrations/0015_finance_claims_profit.sql` trong SQL Editor (sau `0014`).
-- ☐ Thêm schema `catalog` vào Supabase → Settings → API → *Exposed schemas* nếu muốn trang nhập giá vốn
-  đọc trực tiếp (worker/service_role không phụ thuộc bước này).
-- ☐ **Nhập giá vốn** cho các SKU đang bán (`catalog.cost_inputs`) — chưa có giá vốn thì F3 để trống
-  “giá trị ước tính” và F4 để trống lãi gộp (hệ thống cố ý không đoán).
+- ☐ ~~Thêm schema `catalog` vào *Exposed schemas*~~ — **không cần**: Đợt A (0016) đã có trang
+  `/finance/costs` ghi qua RPC trong schema `public` (xem mục ĐỢT A ở đầu file).
+- ☐ **Nhập giá vốn** cho các SKU đang bán tại **`/finance/costs`** (nhập tay hoặc CSV theo template) —
+  chưa có giá vốn thì F3 để trống “giá trị ước tính” và F4 để trống lãi gộp (hệ thống cố ý không đoán).
 - ☐ Khi có credentials SP-API: chạy `npm run worker:finance-claims -- --seller=<uuid> --ledger=<file>`
   (và `--reimbursements=<file>`) theo nhịp tuần cho SOP-09; F4 chạy lại sau mỗi kỳ settlement.
 - ⚠ Đã biết: `GET_FBA_ESTIMATED_FBA_FEES_TXT_DATA` (Fee Preview) chỉ cho **1 request/ngày/seller** và
@@ -434,11 +776,12 @@ nên không phụ thuộc bước này).
 - ✅ Tạo project Supabase (`pitmyzovjwflkyoqjbkz`) + set 14 biến môi trường trên Vercel — **xong 12/09**
 - ☐ **Chạy `0006` rồi `0007` trong SQL Editor** (dọn fixture test + tạo super_admin/alerts)
 - ☐ Chạy `0008` → `0009` → **`0010`** (wrapper RPC · shop production · hạ tầng Module 4/6/7)
-- ☐ ✅ `0011`/`0012`/`0013` đã chạy · ☐ **`0014`** (trình soạn listing L3) · ☐ **`0015`** (bồi hoàn FBA + lợi nhuận SKU)
+- ☐ ✅ `0011`/`0012`/`0013` đã chạy · ☐ **`0014`** (trình soạn listing L3) · ☐ **`0015`** (bồi hoàn FBA + lợi nhuận SKU) · ☐ **`0016`** (Đợt A: giá vốn + ghi listing + `vexim_pricing` dùng giá vốn) · ☐ **`0017`** (Đợt B: doanh số 30 ngày + người phụ trách + giá trị tồn kho) · ☐ **`0018`** (Module 3 nâng cao: phân bổ tồn theo FC + lịch sử nhận hàng)
 - ☐ **Thêm `CRON_SECRET` trên Vercel** (Production + Preview) → Redeploy
 - ☐ `AMAZON_LWA_CLIENT_ID` / `_CLIENT_SECRET` / `_REFRESH_TOKEN` khi Developer Profile được duyệt — thiếu 3 biến này thì worker chỉ chạy demo trong bộ nhớ (an toàn, không ghi DB thật)
 - ☐ 4 thông tin thật cho landing page (email/phone/địa chỉ/tên pháp lý)
-- ☐ Chốt 2–3 shop pilot + file giá vốn theo template CSV
+- ☐ Chốt 2–3 shop pilot + file giá vốn theo template CSV (tải template ngay trong app:
+  `/finance/costs` → “⬇ Tải template CSV”, hoặc `GET /api/finance/cost-template`)
 - ☐ Hải Anh: báo ngày nộp hồ sơ + tạo Sandbox Application ngay sau khi nộp
 
 ### Biến môi trường Vercel: cái nào code thật sự đọc

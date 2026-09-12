@@ -4,6 +4,8 @@ import { readInventoryLatest } from "@/lib/data/inventory";
 import {
   mapInventoryRow,
   buildRestockRows,
+  formatInventoryValueTotal,
+  summarizeRestockValue,
   type InventoryLatestRaw,
 } from "@/lib/data/inventory-model";
 import { restockPlan } from "@/lib/data/mock";
@@ -26,6 +28,8 @@ async function LiveRestockPlan() {
   const plan = buildRestockRows(allRows);
 
   const totalSuggest = plan.reduce((s, r) => s + r.suggest, 0);
+  // 0017: giá trị các lô đề xuất = Σ (đề xuất nhập × giá vốn hiệu lực), theo từng tiền tệ
+  const restockValue = summarizeRestockValue(allRows);
 
   return (
     <>
@@ -34,7 +38,7 @@ async function LiveRestockPlan() {
       </div>
       <PageHeader
         title="Kế hoạch nhập hàng"
-        sub={`SOP-01 · vòng đời 8步骤: nháp → chốt giá vốn → duyệt → tạo inbound → theo dõi → đối soát`}
+        sub="SOP-01 · vòng đời 8 bước: nháp → chốt giá vốn → duyệt → tạo inbound → theo dõi → đối soát"
         desc="Đề xuất tự động = velocity × (lead time + safety 14 ngày) − (khả dụng + reserved + đang về). Ghi ra Amazon (createInboundPlan) kích hoạt ở Đợt 2."
       />
       {failed ? (
@@ -56,8 +60,12 @@ async function LiveRestockPlan() {
             <KpiCard
               label="Tổng đề xuất"
               value={totalSuggest.toLocaleString("en-US")}
-              sub="đơn vị"
-              tone="flat"
+              sub={
+                restockValue.missingCost > 0
+                  ? `đơn vị · giá trị ${formatInventoryValueTotal(restockValue)} — ${restockValue.missingCost} SKU thiếu giá vốn`
+                  : `đơn vị · giá trị ${formatInventoryValueTotal(restockValue)}`
+              }
+              tone={restockValue.missingCost > 0 ? "warn" : "flat"}
             />
             <KpiCard
               label="Chờ duyệt / chờ khách"
@@ -72,7 +80,10 @@ async function LiveRestockPlan() {
               tone="flat"
             />
           </KpiGrid>
-          <Panel title="Đề xuất từ dữ liệu thật" hint="tính theo velocity × (lead time + safety) − tồn">
+          <Panel
+            title="Đề xuất từ dữ liệu thật"
+            hint="velocity × (lead time + safety) − tồn · giá trị lô = đề xuất × giá vốn hiệu lực"
+          >
             {plan.length === 0 ? (
               <p className="text-[13px] text-muted">
                 Không có SKU nào cần nhập — tất cả cover đủ hoặc chưa có velocity.
