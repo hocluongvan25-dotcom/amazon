@@ -11,19 +11,36 @@ import { NextResponse, type NextRequest } from "next/server";
  *   Không tin cookie demo_role khi đã cấu hình Supabase (tránh lọt vào
  *   production bằng cookie demo còn sót).
  * Việc phân quyền chi tiết (RLS) thực hiện ở tầng database + server layout.
+ *
+ * Path trong BYPASS_AUTH_PATHS tự kiểm tra Authorization: Bearer <CRON_SECRET>
+ * (hoặc signature webhook) — KHÔNG đòi cookie session. Phải return next()
+ * TRƯỚC khi gọi getUser(), nếu không request không cookie bị 307 /login.
  */
 const PUBLIC_PATHS = ["/login"];
-// Cron + webhook tự kiểm tra signature/CRON_SECRET.
-// /api/whoami là endpoint chẩn đoán — phải vào được cả khi CHƯA đăng nhập.
-const BYPASS_AUTH_PATHS = ["/api/cron/", "/api/webhooks/", "/api/whoami"];
+const BYPASS_AUTH_PATHS = [
+  "/api/cron",
+  "/api/webhooks",
+  "/api/whoami",
+  "/api/amazon/whoami",
+];
 
 const MW_HEADER = "x-vexim-middleware";
 
-function isPublicOrBypass(pathname: string) {
-  return (
-    BYPASS_AUTH_PATHS.some((p) => pathname.startsWith(p)) ||
-    PUBLIC_PATHS.some((p) => pathname.startsWith(p))
-  );
+function normalizePath(pathname: string): string {
+  if (pathname.length > 1 && pathname.endsWith("/")) {
+    return pathname.slice(0, -1);
+  }
+  return pathname;
+}
+
+function isBypassPath(pathname: string): boolean {
+  const p = normalizePath(pathname);
+  return BYPASS_AUTH_PATHS.some((b) => p === b || p.startsWith(`${b}/`));
+}
+
+function isPublicPath(pathname: string): boolean {
+  const p = normalizePath(pathname);
+  return PUBLIC_PATHS.some((b) => p === b || p.startsWith(`${b}/`));
 }
 
 function loginRedirect(req: NextRequest, cookieSource?: NextResponse) {
@@ -39,8 +56,22 @@ function loginRedirect(req: NextRequest, cookieSource?: NextResponse) {
   return res;
 }
 
+function passthrough(req: NextRequest): NextResponse {
+  const requestHeaders = new Headers(req.headers);
+  requestHeaders.set(MW_HEADER, "1");
+  const res = NextResponse.next({ request: { headers: requestHeaders } });
+  res.headers.set(MW_HEADER, "1");
+  return res;
+}
+
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+
+  // Bypass TRƯỚC mọi thứ — cron / whoami / webhook tự kiểm tra token.
+  if (isBypassPath(pathname)) {
+    return passthrough(req);
+  }
+
   const requestHeaders = new Headers(req.headers);
   requestHeaders.set(MW_HEADER, "1");
 
@@ -48,21 +79,13 @@ export async function middleware(req: NextRequest) {
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   if (!url || !anonKey) {
-    if (isPublicOrBypass(pathname)) {
-      const res = NextResponse.next({ request: { headers: requestHeaders } });
-      res.headers.set(MW_HEADER, "1");
-      return res;
-    }
-    if (!req.cookies.has("demo_role")) {
-      return loginRedirect(req);
-    }
-    const res = NextResponse.next({ request: { headers: requestHeaders } });
-    res.headers.set(MW_HEADER, "1");
-    return res;
+    if (isPublicPath(pathname)) return passthrough(req);
+    if (!req.cookies.has("demo_role")) return loginRedirect(req);
+    return passthrough(req);
   }
 
-  // SUPABASE MODE — luôn gọi getUser() để refresh token, kể cả /login và
-  // /api/whoami, rồi mới quyết định có redirect hay không.
+  // SUPABASE MODE — luôn gọi getUser() để refresh token, kể cả /login,
+  // rồi mới quyết định có redirect hay không.
   let response = NextResponse.next({ request: { headers: requestHeaders } });
   response.headers.set(MW_HEADER, "1");
 
@@ -94,7 +117,7 @@ export async function middleware(req: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user && !isPublicOrBypass(pathname)) {
+  if (!user && !isPublicPath(pathname)) {
     return loginRedirect(req, response);
   }
   return response;
