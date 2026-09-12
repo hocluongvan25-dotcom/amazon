@@ -103,6 +103,24 @@ Muốn quay lại 30 phút/lần:
 Hiện tại chưa cần 30 phút: `AMAZON_LWA_*` chưa có và cả 6 shop vẫn
 `data_source='mock'` → `active_production_shops()` = 0 → sync chưa làm gì.
 
+## Auth — middleware refresh session + `/api/whoami` (12/09)
+
+Hai lỗ hổng khi chuyển sang SUPABASE MODE trên production:
+
+1. **Middleware không refresh phiên.** `web/src/lib/supabase/server.ts` ghi
+   *"Server Component đang render — middleware sẽ refresh session"*, nhưng
+   middleware cũ chỉ kiểm tra cookie tên `sb-*` **có tồn tại**. Access token
+   hết hạn → `getUser()` fail → user bị đá ra `/login` dù refresh token còn hạn.
+   Nay gọi `supabase.auth.getUser()` đúng chuẩn `@supabase/ssr` (refresh cookie
+   trên response).
+2. **Cookie `demo_role` được tin trên production.** Middleware + `getAppSession()`
+   ưu tiên `demo_role` trước user Supabase → cookie demo còn sót từ lúc thử
+   DEMO MODE sẽ cho vào app mà không cần đăng nhập thật. Nay: đã cấu hình
+   Supabase thì **chỉ** nhận `getUser()`; `demo_role` chỉ dùng khi chưa có env.
+
+Endpoint chẩn đoán `GET /api/whoami` (whitelist, không redirect `/login`):
+trả cookie **tên** (không value), cờ env (không key), `auth.getUser()`,
+`iam.my_profile`, và header `x-vexim-middleware` để biết middleware có chạy.
 
 ## Trạng thái tổng thể
 
