@@ -27,20 +27,47 @@
  *      phơi trong "Exposed schemas" → vẫn PGRST202 nếu gọi trực tiếp).
  */
 import type {
+  AccountHealthIssueRowInput,
+  AccountHealthSnapshotRowInput,
+  ActiveShop,
+  AlertRowInput,
   DbAdapter,
-  InventorySnapshotRow,
+  FinancialEventRowInput,
   InventoryDailyRow,
+  InventorySnapshotRow,
   ListingStateRow,
   NotificationRecord,
+  OrderDailyRowInput,
+  OrderRowInput,
+  ReturnRowInput,
+  SettlementRowInput,
   SyncJobRecord,
-  AlertRowInput,
-  ActiveShop,
 } from "./adapter.ts";
 
 type Json = unknown;
 
 /** Schema nghiệp vụ VEXIM — value truyền vào header Accept/Content-Profile. */
-type SchemaName = "connections" | "inventory" | "ops";
+type SchemaName =
+  | "connections"
+  | "inventory"
+  | "ops"
+  | "sales"
+  | "finance"
+  | "account_health";
+
+/**
+ * Schema nghiệp vụ PHẢI nằm trong Supabase → Settings → API → "Exposed schemas",
+ * nếu không PostgREST trả PGRST205/PGRST202 (sự cố thật 12/09/2026 — xem migration
+ * 0008). Danh sách này dùng để sinh thông báo lỗi có hướng dẫn thay vì lỗi thô.
+ */
+const REQUIRED_EXPOSED_SCHEMAS = [
+  "connections",
+  "inventory",
+  "ops",
+  "sales",
+  "finance",
+  "account_health",
+] as const;
 
 /**
  * Schema mặc định của PostgREST (public) — RPC ở đây thì KHÔNG set header
@@ -109,7 +136,16 @@ export class SupabaseDbAdapter implements DbAdapter {
       cache: "no-store",
     });
     if (!res.ok) {
-      throw new Error(`Supabase ${method} ${path} → ${res.status}: ${await res.text().catch(() => "")}`);
+      const text = await res.text().catch(() => "");
+      // PGRST205/PGRST202 = schema chưa được PostgREST phơi ra. Lỗi này từng làm
+      // cron inventory-sync chết im lặng (log chỉ hiện "0 shop") → thông báo phải
+      // nêu đích danh việc cần làm, không để người sau đoán.
+      const hint = /PGRST20[25]/.test(text)
+        ? `\n→ Schema chưa được PostgREST phơi ra. Vào Supabase → Settings → API → ` +
+          `"Exposed schemas" và thêm: ${REQUIRED_EXPOSED_SCHEMAS.join(", ")}. ` +
+          `(Chỉ thêm schema cần dùng; sau đó PostgREST tự nạp lại schema cache.)`
+        : "";
+      throw new Error(`Supabase ${method} ${path} → ${res.status}: ${text}${hint}`);
     }
     if (res.status === 204) return undefined as T;
     return (await res.json()) as T;
@@ -286,7 +322,268 @@ export class SupabaseDbAdapter implements DbAdapter {
     });
   }
 
+  // ---------- Module 4 — Đơn hàng ----------
+  /**
+   * Ghi theo LÔ: upsert orders (unique seller_account_id + amazon_order_id) rồi
+   * THAY thế order_items của đúng các đơn đó.
+   * Vì sao thay thế: sales.order_items không có khoá tự nhiên (bảng do migration
+   * 0010 bổ sung cột amazon_order_item_id + unique theo order) → đơn giản và an
+   * toàn nhất là xoá theo order_id rồi insert lại, tránh nhân đôi item khi sync lại.
+   */
+  async upsertOrders(rows: OrderRowInput[]): Promise<void> {
+    if (rows.length === 0) return;
+
+    const created = await this.request<{ id: string; amazon_order_id: string }[]>(
+      "POST",
+      "/rest/v1/orders?on_conflict=seller_account_id,amazon_order_id&select=id,amazon_order_id",
+      {
+        schema: "sales",
+        prefer: "resolution=merge-duplicates,return=representation",
+        body: rows.map((r) => ({
+          seller_account_id: r.sellerAccountId,
+          amazon_order_id: r.amazonOrderId,
+          merchant_order_id: r.merchantOrderId ?? null,
+          status: r.status,
+          channel: r.channel ?? null,
+          purchase_date: r.purchaseDate.toISOString(),
+          last_updated_date: r.lastUpdatedDate?.toISOString() ?? null,
+          order_total: r.orderTotal ?? null,
+          currency: r.currency ?? "USD",
+          items_count: r.itemsCount,
+          marketplace_id: r.marketplaceId ?? null,
+          ship_state: r.shipState ?? null,
+          ship_country: r.shipCountry ?? null,
+          pii_stripped: true,
+        })),
+      },
+    );
+
+    const idByOrder = new Map((created ?? []).map((r) => [r.amazon_order_id, r.id]));
+    const ids = [...idByOrder.values()];
+    if (ids.length === 0) return;
+
+    await this.request("DELETE", "/rest/v1/order_items", {
+      schema: "sales",
+      search: { order_id: `in.(${ids.join(",")})` },
+    });
+
+    const items = rows.flatMap((r) => {
+      const orderId = idByOrder.get(r.amazonOrderId);
+      if (!orderId) return [];
+      return r.orderItems.map((i) => ({
+        order_id: orderId,
+        amazon_order_item_id: i.amazonOrderItemId,
+        asin: i.asin,
+        sku: i.sku,
+        item_name: i.itemName,
+        quantity: i.quantity,
+        item_price: i.itemPrice,
+        item_status: i.itemStatus,
+      }));
+    });
+    if (items.length > 0) {
+      await this.request("POST", "/rest/v1/order_items", {
+        schema: "sales",
+        prefer: "return=minimal",
+        body: items,
+      });
+    }
+  }
+
+  async upsertReturns(rows: ReturnRowInput[]): Promise<void> {
+    if (rows.length === 0) return;
+    await this.request("POST", "/rest/v1/returns_refunds?on_conflict=seller_account_id,dedupe_key", {
+      schema: "sales",
+      prefer: "resolution=merge-duplicates,return=minimal",
+      body: rows.map((r) => ({
+        seller_account_id: r.sellerAccountId,
+        amazon_order_id: r.amazonOrderId,
+        amazon_rma_id: r.amazonRmaId ?? null,
+        dedupe_key: r.dedupeKey,
+        return_date: r.returnDate.toISOString(),
+        reason: r.reason,
+        reason_label: r.reasonLabel,
+        reason_group: r.reasonGroup,
+        status: r.status ?? null,
+        resolution: r.resolution ?? null,
+        refund_amount: r.refundAmount ?? null,
+        currency: r.currency ?? "USD",
+        sku: r.sku ?? null,
+        asin: r.asin ?? null,
+        quantity: r.quantity ?? null,
+      })),
+    });
+  }
+
+  async upsertOrderDaily(row: OrderDailyRowInput): Promise<void> {
+    await this.request("POST", "/rest/v1/order_daily?on_conflict=seller_account_id,day", {
+      schema: "sales",
+      prefer: "resolution=merge-duplicates,return=minimal",
+      body: {
+        seller_account_id: row.sellerAccountId,
+        day: row.day,
+        orders_count: row.ordersCount,
+        units: row.units,
+        sales_amount: row.salesAmount,
+        currency: row.currency,
+        fbm_unshipped: row.fbmUnshipped,
+        fbm_overdue: row.fbmOverdue,
+        returns_count: row.returnsCount,
+        returns_amount: row.returnsAmount,
+      },
+    });
+  }
+
+  // ---------- Module 7 — Account Health ----------
+  async upsertAccountHealthSnapshot(row: AccountHealthSnapshotRowInput): Promise<void> {
+    await this.request(
+      "POST",
+      "/rest/v1/snapshots?on_conflict=seller_account_id,day,marketplace_id",
+      {
+        schema: "account_health",
+        prefer: "resolution=merge-duplicates,return=minimal",
+        body: {
+          seller_account_id: row.sellerAccountId,
+          day: row.day,
+          marketplace_id: row.marketplaceId,
+          account_status: row.accountStatus,
+          ahr_status: row.ahrStatus,
+          tone: row.tone,
+          score: row.score,
+          rates: row.rates,
+          issues: row.issues,
+          source_report_id: row.sourceReportId,
+          captured_at: row.capturedAt.toISOString(),
+        },
+      },
+    );
+  }
+
+  async upsertAccountHealthIssue(row: AccountHealthIssueRowInput): Promise<void> {
+    await this.request(
+      "POST",
+      "/rest/v1/issues?on_conflict=seller_account_id,marketplace_id,category",
+      {
+        schema: "account_health",
+        prefer: "resolution=merge-duplicates,return=minimal",
+        body: {
+          seller_account_id: row.sellerAccountId,
+          marketplace_id: row.marketplaceId,
+          category: row.category,
+          label: row.label,
+          severity: row.severity,
+          group_name: row.groupName,
+          defects_count: row.defectsCount,
+          status: row.status,
+          reporting_from: row.reportingFrom ?? null,
+          reporting_to: row.reportingTo ?? null,
+          updated_at: new Date().toISOString(),
+        },
+      },
+    );
+  }
+
+  // ---------- Module 6 — Tài chính ----------
+  async upsertSettlement(row: SettlementRowInput): Promise<void> {
+    await this.request("POST", "/rest/v1/settlements?on_conflict=seller_account_id,settlement_id", {
+      schema: "finance",
+      prefer: "resolution=merge-duplicates,return=minimal",
+      body: {
+        seller_account_id: row.sellerAccountId,
+        settlement_id: row.settlementId,
+        period_start: row.periodStart,
+        period_end: row.periodEnd,
+        deposit_date: row.depositDate ?? null,
+        total_amount: row.totalAmount,
+        currency: row.currency,
+        status: row.status,
+        breakdown: row.breakdown,
+        reconcile_diff: row.reconcileDiff,
+        reconciled_at: row.reconciledAt?.toISOString() ?? null,
+      },
+    });
+  }
+
+  /** Thay toàn bộ dòng tiền của một kỳ (kỳ đã chốt là bất biến) */
+  async replaceFinancialEvents(
+    sellerAccountId: string,
+    settlementId: string,
+    rows: FinancialEventRowInput[],
+  ): Promise<void> {
+    await this.request("DELETE", "/rest/v1/financial_events", {
+      schema: "finance",
+      search: {
+        seller_account_id: `eq.${sellerAccountId}`,
+        settlement_id: `eq.${settlementId}`,
+      },
+    });
+    if (rows.length === 0) return;
+    await this.request("POST", "/rest/v1/financial_events", {
+      schema: "finance",
+      prefer: "return=minimal",
+      body: rows.map((r) => ({
+        seller_account_id: r.sellerAccountId,
+        settlement_id: r.settlementId ?? null,
+        event_type: r.eventType,
+        event_date: r.eventDate.toISOString(),
+        amount: r.amount,
+        currency: r.currency,
+        sku: r.sku ?? null,
+        amount_type: r.amountType ?? null,
+        amount_description: r.amountDescription ?? null,
+        order_id: r.orderId ?? null,
+        quantity: r.quantity ?? null,
+        marketplace_name: r.marketplaceName ?? null,
+        dedupe_key: r.dedupeKey ?? null,
+        raw: (r.raw as Json) ?? null,
+      })),
+    });
+  }
+
+  // ---------- Alerts (dùng chung) ----------
+  async resolveAlerts(input: {
+    sellerAccountId: string;
+    ruleCode: string;
+    /** ghi chú vận hành — ops.alerts chưa có cột note nên hiện chỉ nhận và bỏ qua */
+    note?: string | null;
+    resolvedAt?: Date;
+  }): Promise<void> {
+    const rules = await this.request<{ id: string }[]>("GET", "/rest/v1/alert_rules", {
+      schema: "ops",
+      search: { rule_code: `eq.${input.ruleCode}`, select: "id" },
+    });
+    const ruleId = rules?.[0]?.id ?? null;
+    if (!ruleId) return;
+
+    await this.request("PATCH", "/rest/v1/alerts", {
+      schema: "ops",
+      prefer: "return=minimal",
+      search: {
+        seller_account_id: `eq.${input.sellerAccountId}`,
+        rule_id: `eq.${ruleId}`,
+        status: "eq.open",
+      },
+      body: {
+        status: "resolved",
+        resolved_at: (input.resolvedAt ?? new Date()).toISOString(),
+      },
+    });
+  }
+
+  // ---------- Notifications (dùng cho mọi handler realtime) ----------
+  async recordNotification(row: NotificationRecord): Promise<void> {
+    await this.request("POST", "/rest/v1/notifications_log", {
+      schema: "connections",
+      prefer: "return=minimal",
+      body: {
+        seller_account_id: row.sellerAccountId,
+        notification_type: row.notificationType,
+        raw: (row.raw as Json) ?? null,
+        received_at: row.receivedAt.toISOString(),
+      },
+    });
+  }
+
   // ---------- Stubs cho Tier sau ----------
-  async recordNotification(_row: NotificationRecord): Promise<void> {}
   async upsertListing(_row: ListingStateRow): Promise<void> {}
 }

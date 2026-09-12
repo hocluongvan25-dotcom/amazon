@@ -14,6 +14,8 @@
  *   6. Kiểm chứng view 0004 + RPC 0005 đọc được dữ liệu thật
  *   7. Kiểm chứng 0008 tạo wrapper RPC trong schema public (chữa PGRST202)
  *   8. Kiểm chứng 0009 đăng ký shop production AQMVYI4HJTI4C (US + CA)
+ *   9. Kiểm chứng 0010 dựng hạ tầng Module 4/6/7 (order_daily, account_health,
+ *      rule cảnh báo, view public) + chốt PII + tính idempotent
  *
  * Không cần Docker, không cần Supabase project, không cần credentials.
  */
@@ -294,6 +296,120 @@ await cmp(
   "0009 lần 2: không tạo thêm seller_accounts",
   "select count(*) n from connections.seller_accounts",
   8,
+);
+
+// ===========================================================================
+console.log("\n=== BƯỚC 9: migration 0010 — hạ tầng Module 4/6/7 ===");
+// ===========================================================================
+ok(
+  await ex(rd("migrations/0010_module_4_6_7_orders_finance_health.sql"), "0010_module_4_6_7_orders_finance_health.sql"),
+  "0010 chạy sạch (DO-block tự kiểm tra bảng/rule/view/PII)",
+);
+
+await cmp(
+  "bảng mới sales.order_daily",
+  "select count(*) n from information_schema.tables where table_schema='sales' and table_name='order_daily'",
+  1,
+);
+await cmp(
+  "schema account_health có 2 bảng",
+  "select count(*) n from information_schema.tables where table_schema='account_health'",
+  2,
+);
+await cmp(
+  "rule cảnh báo mới (fbm_late_ship, return_reason_spike, reconciliation_mismatch)",
+  "select count(*) n from ops.alert_rules where rule_code in ('fbm_late_ship','return_reason_spike','reconciliation_mismatch')",
+  3,
+);
+await cmp(
+  "module_code của rule mới hợp lệ (orders/finance)",
+  "select count(*) n from ops.alert_rules where rule_code='fbm_late_ship' and module='orders'",
+  1,
+);
+await cmp(
+  "view public cho web (4)",
+  "select count(*) n from information_schema.views where table_schema='public' and table_name in ('vexim_shop_health','vexim_health_issues','vexim_order_daily','vexim_fbm_queue')",
+  4,
+);
+await cmp(
+  "RLS bật trên 3 bảng mới",
+  "select count(*) n from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname in ('sales','account_health') and c.relname in ('order_daily','snapshots','issues') and c.relrowsecurity",
+  3,
+);
+
+// Cột phục vụ sync phải tồn tại
+await cmp(
+  "sales.orders có ship_state + last_updated_date + pii_stripped",
+  "select count(*) n from information_schema.columns where table_schema='sales' and table_name='orders' and column_name in ('ship_state','last_updated_date','pii_stripped')",
+  3,
+);
+await cmp(
+  "finance.financial_events có amount_type + dedupe_key",
+  "select count(*) n from information_schema.columns where table_schema='finance' and table_name='financial_events' and column_name in ('amount_type','dedupe_key')",
+  2,
+);
+
+// Chốt PII (quyết định v1.1): không có cột định danh người mua
+await cmp(
+  "KHÔNG có cột PII trong sales/finance/account_health",
+  "select count(*) n from information_schema.columns where table_schema in ('sales','finance','account_health') and column_name in ('buyer_name','buyer_email','buyer_phone_number','ship_address_1','recipient_name','ship_city','ship_postal_code')",
+  0,
+);
+
+// View đọc được dữ liệu thật (join shop production) — đọc order_daily vừa ghi thử
+const usShop = (
+  await db.query("select id from connections.seller_accounts where marketplace = 'ATVPDKIKX0DER' limit 1")
+).rows[0].id;
+ok(
+  await ex(
+    `insert into sales.order_daily (seller_account_id, day, orders_count, units, sales_amount, fbm_unshipped, fbm_overdue, returns_count, returns_amount)
+     values ('${usShop}', '2026-09-12', 12, 18, 1875.50, 3, 1, 2, 199.98)
+     on conflict (seller_account_id, day) do update set orders_count = excluded.orders_count`,
+    "seed order_daily 12/09",
+  ),
+  "ghi thử sales.order_daily",
+);
+const dailyView = await one(
+  "select orders_count, fbm_overdue, returns_amount from public.vexim_order_daily where day = '2026-09-12'",
+);
+ok(
+  Number(dailyView.orders_count) === 12 && Number(dailyView.fbm_overdue) === 1,
+  `view vexim_order_daily đọc đúng dữ liệu thật (orders_count=${dailyView.orders_count}, fbm_overdue=${dailyView.fbm_overdue})`,
+);
+
+// Snapshot account_health + view H1
+ok(
+  await ex(
+    `insert into account_health.snapshots (seller_account_id, day, marketplace_id, account_status, ahr_status, tone, score, rates)
+     values ('${usShop}', '2026-09-12', 'ATVPDKIKX0DER', 'AT_RISK', 'FAIR', 'amber', 62,
+             '[{"key":"orderDefectRate","rate":1.4,"targetValue":1,"targetCondition":"lt","tone":"red"}]'::jsonb)
+     on conflict (seller_account_id, day, marketplace_id) do update set tone = excluded.tone`,
+    "seed account_health.snapshots",
+  ),
+  "ghi thử account_health.snapshots",
+);
+const healthView = await one(
+  "select account_status, tone, score from public.vexim_shop_health where marketplace_id = 'ATVPDKIKX0DER'",
+);
+ok(
+  healthView.account_status === "AT_RISK" && healthView.tone === "amber",
+  `view vexim_shop_health đọc đúng (status=${healthView.account_status}, tone=${healthView.tone})`,
+);
+
+// Idempotent: chạy lại 0010 không nhân đôi rule / không lỗi
+ok(
+  await ex(rd("migrations/0010_module_4_6_7_orders_finance_health.sql"), "0010 chạy LẦN 2"),
+  "0010 idempotent",
+);
+await cmp(
+  "0010 lần 2: vẫn đúng 3 rule mới (không nhân đôi)",
+  "select count(*) n from ops.alert_rules where rule_code in ('fbm_late_ship','return_reason_spike','reconciliation_mismatch')",
+  3,
+);
+await cmp(
+  "0010 lần 2: view vẫn 4 (create or replace)",
+  "select count(*) n from information_schema.views where table_schema='public' and table_name in ('vexim_shop_health','vexim_health_issues','vexim_order_daily','vexim_fbm_queue')",
+  4,
 );
 
 console.log(`\n${"=".repeat(70)}`);

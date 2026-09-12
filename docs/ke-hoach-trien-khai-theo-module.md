@@ -237,8 +237,8 @@ KPI: spend, ACOS, TACOS, đơn từ ads. Alert: `acos_over_target`, `budget_exha
 
 | Dữ liệu | Operation / Report | Loại | Tần suất / rate |
 |---|---|---|---|
-| Dòng tài chính | `listFinancialEvents`, `listFinancialEventGroups`, `listFinancialEventsByGroupId` — Finances API **v0** | Đọc | 0.5 rps/15 burst — hàng đợi cẩn thận |
-| Kỳ settlement chuẩn | Report `GET_V2_SETTLEMENT_REPORT_DATA_FLAT_FILE` | Report | khi có kỳ mới |
+| Dòng tài chính | `listFinancialEvents`, `listFinancialEventGroups`, `listFinancialEventsByGroupId` — Finances API **v0** | Đọc | 0.5 rps/burst 30 — hàng đợi cẩn thận |
+| Kỳ settlement chuẩn | Report `GET_V2_SETTLEMENT_REPORT_DATA_FLAT_FILE_V2` (⚠️ *hiệu chỉnh 12/09: bản `…_FLAT_FILE` và `…_XML` đã bị Amazon deprecated; đã implement bản V2 trong `worker/src/reports/settlement.parser.ts`*) | Report | khi có kỳ mới |
 | Sổ cái chi tiết | Report `GET_LEDGER_DETAIL_VIEW_DATA` | Report | hằng ngày |
 | Bồi hoàn | Report `GET_FBA_REIMBURSEMENTS_DATA` | Report | hằng tuần |
 | Phí theo SKU | `getMyFeesEstimates` (Product Fees, dùng chung Module 2) | Đọc | theo yêu cầu |
@@ -264,7 +264,7 @@ KPI: tiền về, phí, doanh thu chưa thanh toán, giá trị claim. Alert: l�
 | Dữ liệu | Operation / Report | Loại | Tần suất |
 |---|---|---|---|
 | Marketplace tham gia | `getMarketplaceParticipations` — Sellers API v1 | Đọc | khi kết nối + kiểm tra sức khỏe định kỳ |
-| Toàn bộ chỉ số performance | Report **`GET_V1_SELLER_PERFORMANCE_REPORT`** (AHR, ODR, LSR, VTR, IP complaints, listing policy violations, document requests…) | Report | hằng ngày |
+| Toàn bộ chỉ số performance | Report **`GET_V2_SELLER_PERFORMANCE_REPORT`** (AHR, ODR, LSR, VTR, IP complaints, listing policy violations, document requests…) — ⚠️ *hiệu chỉnh 12/09: `GET_V1_…` là bản **XML** cũ (chỉ vài chỉ số, không có warningStates/AHR); bản V2 chính là dữ liệu Account Health dashboard, đã implement trong `worker/src/reports/seller-performance.parser.ts`* | Report | hằng ngày |
 | Trạng thái tài khoản realtime | Notification **`ACCOUNT_STATUS_CHANGED`** (NORMAL/AT_RISK/DEACTIVATED) | Đọc | realtime |
 
 ### Đầu ra cho dashboard

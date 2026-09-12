@@ -167,6 +167,7 @@ curl -sS -H "Authorization: Bearer $CRON_SECRET" \
 | | Typed clients SP-API (từ Swagger models) + sandbox e2e | 🟠 bắt đầu — worker/ Module 3: LWA + FBA Inventory v1 + notification handler + MYI parser (16/16 test, chạy mock; sandbox chờ App duyệt) |
 | **7. Account Health** | H1 Health theo shop (dashboard) | ✅ (mock) |
 | | H2 Chi tiết vấn đề đang mở (vi phạm theo severity + case SOP-08) | ✅ (mock) |
+| | **Domain + sync layer Health** (worker/): ngưỡng Amazon > fallback (đánh dấu nguồn), AHR 0–1000, 10 nhóm vi phạm + severity, SOP-08 (red 24h / amber 72h) · parser report V2 · job snapshot/issue/alert · handler ACCOUNT_STATUS_CHANGED | ✅ 46 test |
 | **4. Đơn hàng** | O1 Danh sách đơn (không PII) · O2 Chi tiết đơn (PII khóa) · O3 Queue FBM (đếm ngược) · O4 Returns (mã lý do Amazon) | ✅ (mock) |
 | **3. Kho vận (đọc)** | I1 Tồn theo SKU (filter, cover, đề xuất) · I2 Chi tiết tồn (90 ngày, FC, nhận hàng) · I3 Kế hoạch nhập (SOP-01, ghi khóa Đợt 2) · I4 Inbound (trạng thái chuẩn Amazon + đối soát) — kèm **phân tích kỹ thuật** `docs/phan-tich-ky-thuat-module-3-kho-van.md` (đã kiểm chứng: notification FBA_INVENTORY_AVAILABILITY_CHANGES, cột report MYI, report theo FC) | ✅ (mock) |
 | | **Sync layer 3 tầng** (worker/): notification → getInventorySummaries → report MYI đối soát; chỉ số velocity/cover/đề xuất nhập đúng công thức §2 | ✅ Tier 1 (mock, 16/16 test) |
@@ -174,8 +175,10 @@ curl -sS -H "Authorization: Bearer $CRON_SECRET" \
 | | **Sync layer Listing** (worker/): getListingsItem + LISTINGS_ITEM_STATUS_CHANGE/ISSUES_CHANGE + 3 report parser (Merchant ALL/INACTIVE, Stranded) | ✅ (mock, 12 test) |
 | **2. Giá & Buy Box** | P1 Bảng giá & Featured Offer (FOEP, giá sàn, biên, box status) · P2 Chi tiết giá (30 ngày, breakdown giá sàn, offers đối thủ) · P3 Duyệt & áp giá (≤2% operator / >2% trưởng phòng, khóa dưới sàn, SOP-02) | ✅ mock (PR #2) |
 | | **Sync layer Pricing** (worker/): computeFloorPrice / computeMargin / computeBoxStatus / suggestPrice / pricingFlag · buildPricingSnapshot · batch/retry đúng SP-API 2022-05-01 (FOEP batch 40, offers 20, RPS 0.5) | ✅ mock, 73/73 test |
+| | **Sync layer Orders** (worker/): parser report All Orders (bỏ cột PII khi parse) + Returns, gom đơn/tiền, queue FBM đếm ngược theo LatestShipDate, KPI/rollup ngày, alert `fbm_late_ship`/`return_reason_spike`, handler ORDER_CHANGE | ✅ 43 test |
 | **6. Tài chính (đọc)** | F1 Danh sách kỳ settlement (filter shop/status, tổng tiền vào/ra/phí/ads) · F1 Chi tiết kỳ (phân loại nhóm phí, breakdown SKU, take rate/TACOS) · F2 Financial events (filter loại/shop/search, tổng hợp vào/ra/net) | ✅ mock |
 | | **Domain Finance** (worker/): reconcileSettlement (dung sai 1% — SOP-10), totalCredits/Debits/netTransfer, feeTakeRate/TACOS/totalTakeRate, estimateReserveHold/OpenPayout, summarizeEvents | ✅ 91/91 test |
+| | **Sync layer Finance** (worker/): parser settlement **V2** (số kiểu local 95,00/1.234,56), nhóm phí khớp domain, đối soát trừ dòng Transfer, replace (không cộng dồn) dòng tiền khi import lại | ✅ 24 test |
 
 **Kiểm chứng build (12/09, sau khi sửa sự cố):** `next build` ✓ Compiled successfully · **39/39 routes** · exit 0 · worker test **96/96** · `supabase` test **53/53** trên PostgreSQL 18.3 ✅
 
@@ -196,6 +199,42 @@ curl -sS -H "Authorization: Bearer $CRON_SECRET" \
 - ☐ Cần thêm **`CRON_SECRET`** trên Vercel (Production + Preview) rồi Redeploy.
 - ✅ `SUPABASE_SERVICE_ROLE_KEY` đã có trên Vercel (API invite-user dùng được).
 
+## Hạ tầng Module 4 · 6 · 7 (12/09 — theo thứ tự build 7 → 4 → 6)
+
+Đã dựng **tầng dữ liệu + logic thật** cho 3 module ưu tiên (màn hình đã có từ PR #1/#2,
+vẫn đang đọc mock — bước cắm UI vào dữ liệu thật làm ngay sau khi có report thật).
+
+**Migration `0010_module_4_6_7_orders_finance_health.sql`** — bổ sung đúng những gì tầng
+sync cần, không đổi/xoá cột cũ:
+- `sales.orders` + merchant_order_id/last_updated_date/marketplace_id/ship_state/ship_country/`pii_stripped` + index queue FBM; `sales.order_items` + amazon_order_item_id/item_name/item_status; `sales.returns_refunds` + sku/asin/quantity/amazon_rma_id/reason_label/reason_group/resolution/**dedupe_key** (chống trùng khi import lại)
+- bảng mới `sales.order_daily` (KPI ngày: đơn/đơn vị/tiền/FBM quá hạn/returns) và schema mới **`account_health`**: `snapshots` (ngày × marketplace: status, AHR, tone, điểm nội bộ, rates jsonb) + `issues` (vi phạm mở: severity, nhóm, defects_count, case_id, owner, resolved_at)
+- `finance.settlements` + deposit_date/status/breakdown/reconcile_diff/reconciled_at; `finance.financial_events` + sku/amount_type/amount_description/order_id/quantity/marketplace_name/dedupe_key
+- 3 rule cảnh báo: `fbm_late_ship` (red) · `return_reason_spike` (amber) · `reconciliation_mismatch` (red); RLS + grant; **4 view public** để web đọc không phụ thuộc "Exposed schemas": `vexim_shop_health`, `vexim_health_issues`, `vexim_order_daily`, `vexim_fbm_queue`
+- DO-block tự kiểm tra cuối migration: đủ 3 bảng + 3 rule + 4 view, và **raise nếu phát hiện cột PII** trong sales/finance/account_health
+
+**Code worker (đã có test):**
+- `domain/orders.ts` (43 test) — chuẩn hoá trạng thái (không tự bịa "Delivered"), hạn ship FBM (dùng LatestShipDate thật; report thiếu thì đánh dấu `assumed`), KPI, hotspot trả hàng (≥3 đơn hoặc ≥5%), cửa sổ delta 15 phút lùi 5 phút chồng lấn, alert theo `rule_code`
+- `reports/all-orders.parser.ts` + `reports/returns.parser.ts` — **bỏ `ship-city`/`ship-postal-code` ngay khi parse** (quyết định PII v1.1), gom đơn từ dòng item, dịch mã lý do trả hàng sang tiếng Việt + nhóm
+- `jobs/orders-sync.job.ts` — `buildOrdersSnapshot` (thuần, test được) + `runOrdersSync` (ghi orders/items/returns/order_daily/alerts/sync_jobs); giới hạn đúng SP-API: getOrders 0.0167 rps/burst 20, getOrderItems 0.5/30, report all-orders ≤30 ngày, returns ≤60 ngày
+- `notifications/orders.handler.ts` — ORDER_CHANGE: **bóc DestinationPostalCode** (PII) trước khi lưu log, upsert đơn, cảnh báo FBM theo hạn ship thật, nhận cả casing PascalCase/camelCase
+- `reports/settlement.parser.ts` + `jobs/finance-sync.job.ts` (24 test) — parser bám bản **`GET_V2_SETTLEMENT_REPORT_DATA_FLAT_FILE_V2`** (bản `_FLAT_FILE`/`_XML` đã deprecated), parse số kiểu local (95,00 → 95), đối soát theo SOP-10: tổng các nhóm **trừ dòng Transfer** vs số tiền chuyển, lệch >1% → alert `reconciliation_mismatch`
+- `domain/account-health.ts` + `reports/seller-performance.parser.ts` + `jobs/account-health-sync.job.ts` + `notifications/account-health.handler.ts` (46 test) — parser bám **`GET_V2_SELLER_PERFORMANCE_REPORT`** (bản JSON của Account Health dashboard: accountStatuses, 6 chỉ số, warningStates 10 nhóm vi phạm + AHR) — *tài liệu kế hoạch ghi V1; V1 là bản XML cũ, V2 mới có đủ AHR + vi phạm*; hạ tầng: ưu tiên ngưỡng Amazon, thiếu thì dùng ngưỡng VEXIM và **đánh dấu nguồn**, "thiếu dữ liệu" không bao giờ hiện xanh; ACCOUNT_STATUS_CHANGED về NORMAL → tự đóng alert đang mở
+- `db/adapter.ts` + `db/supabase.ts` — 9 method ghi mới cho 3 module (upsertOrders có thay order_items, dedupe returns, snapshot/issue, settlement + **replace** financial_events của kỳ, resolveAlerts); schema `sales|finance|account_health` đã thêm vào gợi ý **Exposed schemas** khi gặp PGRST205/PGRST202
+- CLI: `worker orders:sync --file=orders.tsv [--returns=returns.tsv]` · `worker finance:sync --file=settlement.tsv` · `worker account-health:sync --file=performance.json` — chỉ ghi DB thật khi `mode === "production"`; mặc định/`--dry-run` chạy trong bộ nhớ và in bản tóm tắt
+
+**Kiểm chứng (chạy thật):**
+
+```bash
+cd worker && npm test     # 241 tests / 241 pass / 0 fail  (trước đó 116)
+cd supabase && npm test   # TẤT CẢ PASS — BƯỚC 9 chạy 0010 + chạy lại lần 2 (idempotent)
+cd web && npx tsc --noEmit && npx next build   # ✓ Compiled successfully
+```
+
+**Việc cần VEXIM làm:** chạy migration `0010` trong SQL Editor (sau `0006`/`0007`/`0008`/`0009`),
+sau đó thêm schema **`sales`, `finance`, `account_health`** vào Supabase → Settings → API →
+*Exposed schemas* để các view `vexim_*` đọc được bằng anon key (worker dùng service_role
+nên không phụ thuộc bước này).
+
 ## Cách verify nhanh (DEMO MODE)
 
 1. Mở preview (port 3000) → trang đăng nhập → chọn vai trò.
@@ -206,6 +245,7 @@ curl -sS -H "Authorization: Bearer $CRON_SECRET" \
 
 - ✅ Tạo project Supabase (`pitmyzovjwflkyoqjbkz`) + set 14 biến môi trường trên Vercel — **xong 12/09**
 - ☐ **Chạy `0006` rồi `0007` trong SQL Editor** (dọn fixture test + tạo super_admin/alerts)
+- ☐ Chạy `0008` → `0009` → **`0010`** (wrapper RPC · shop production · hạ tầng Module 4/6/7)
 - ☐ **Thêm `CRON_SECRET` trên Vercel** (Production + Preview) → Redeploy
 - ☐ `AMAZON_LWA_CLIENT_ID` / `_CLIENT_SECRET` / `_REFRESH_TOKEN` khi Developer Profile được duyệt — thiếu 3 biến này thì worker chỉ chạy demo trong bộ nhớ (an toàn, không ghi DB thật)
 - ☐ 4 thông tin thật cho landing page (email/phone/địa chỉ/tên pháp lý)
