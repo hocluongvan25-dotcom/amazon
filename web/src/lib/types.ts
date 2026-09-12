@@ -238,6 +238,63 @@ export type InboundRow = {
   reconcileTone: "up" | "down" | "flat" | "warn";
 };
 
+/* ---------- Module 3 nâng cao (migration 0018): phân bổ FC + lịch sử nhận ---------- */
+
+/**
+ * I2 — một trung tâm fulfilment đang giữ hàng của SKU.
+ * Nguồn: report GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA (snapshot mới nhất),
+ * KHÔNG phải API realtime — API chỉ trả tổng theo SKU, không tách theo FC.
+ */
+export type FcAllocationRow = {
+  sku: string;
+  /** "(không rõ FC)" khi report không có mã FC — không bịa mã */
+  fc: string;
+  units: number;
+  /** disposition = SELLABLE */
+  sellable: number;
+  /** disposition khác rỗng và khác SELLABLE (hỏng / không bán được) */
+  unsellable: number;
+  /** disposition RỖNG = report không cho biết → đếm riêng, không tính là bán được */
+  unknown: number;
+  /** NULL khi tổng tồn của SKU = 0 (không có hàng để chia) — không bịa 0% */
+  sharePct: number | null;
+  shareLabel: string;
+  snapshotDate: string;
+};
+
+/** I2 — một lần Amazon thực nhận hàng của SKU (report receipts). */
+export type ReceiptRow = {
+  sku: string;
+  date: string;
+  daysAgo: number | null;
+  dateLabel: string;
+  /** NULL = report không gắn mã lô (không đối soát theo lô được) */
+  shipment: string | null;
+  fc: string | null;
+  units: number;
+};
+
+/**
+ * I4 — đối soát nhận theo lô: thực nhận (report receipts) so với số gửi
+ * (inventory.inbound_shipments do worker inventory:sync ghi từ Inbound API).
+ * `expected = null` nghĩa là CHƯA RÕ số gửi — khác với "nhận đủ".
+ */
+export type ReceiptShipmentRow = {
+  shipmentId: string;
+  fc: string | null;
+  received: number;
+  expected: number | null;
+  diff: number | null;
+  ratePct: number | null;
+  state: "matched" | "short" | "over" | "unknown_expected";
+  label: string;
+  tone: "up" | "down" | "flat" | "warn";
+  expectedSource: "inbound_shipments" | "none";
+  firstDate: string | null;
+  lastDate: string | null;
+  skuCount: number;
+};
+
 /* ---------- Chuông thông báo & Profile & Quản trị user ---------- */
 
 export type NotificationItem = {

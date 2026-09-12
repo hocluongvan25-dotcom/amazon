@@ -2,6 +2,71 @@
 
 > Cập nhật: 12/09/2026 · Thứ tự build đã chốt: **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** (21 màn Đợt 1)
 
+## Cập nhật 12/09 — MODULE 3 NÂNG CAO: phân bổ tồn theo FC + lịch sử nhận hàng (migration 0018)
+
+I2 có hai khối treo nhãn "chưa có dữ liệu" từ Đợt 1, và lý do không phải "chưa làm" mà là **API không
+có số này**: `listInventorySummaries`/`getFulfillmentInventory` chỉ trả TỔNG theo SKU (không tách
+theo FC), còn Inbound API chỉ mô tả lô ĐANG mở (lô CLOSED thì không còn số nhận chi tiết). Nguồn thật
+là 2 report FBA — nay đã nối xong report → DB → màn hình:
+
+- **Migration `0018_fc_allocation_receipts.sql`** (idempotent + self-check 11 mục: bảng · RLS · quyền
+  RPC · `security_invoker` · hợp đồng cột view · regression 0017):
+  - Bảng **`inventory.fc_allocation`** ← report `GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA`
+    (cột: `snapshot-date · fnsku · sku · product-name · quantity · fulfillment-center-id ·
+    detailed-disposition · country`). Khoá unique (shop × ngày snapshot × SKU × FC × disposition).
+  - Bảng **`inventory.receipts`** ← report `GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA`
+    (cột: `received-date · fnsku · sku · product-name · quantity · fba-shipment-id ·
+    fulfillment-center-id`). Khoá unique (shop × ngày nhận × SKU × lô × FC).
+  - 2 RPC **`vexim_worker_upsert_fc_allocation`** / **`vexim_worker_upsert_receipts`** (`security
+    definer`, revoke khỏi `authenticated`): set-based (1 câu INSERT…SELECT cho cả lô), trả
+    `inserted · updated · skipped · merged · units · snapshots|shipments`. Dòng trùng khoá trong cùng
+    file → **CỘNG dồn** (nếu ghi 2 lần Postgres báo "cannot affect row a second time"); dòng thiếu
+    khoá/số không đọc được → `skipped`; nhập lại cùng file → `updated`, **không phình bảng**.
+  - 4 view `security_invoker`: **`vexim_inventory_fc`** (SKU × FC của snapshot MỚI NHẤT +
+    `sellable_qty`/`unsellable_qty`/`unknown_qty` + `sku_total_qty` + `sku_fc_count` +
+    `fc_share_pct`), **`vexim_inventory_fc_rows`** (drill-down theo disposition),
+    **`vexim_inventory_receipts`** (từng lần nhận + `days_ago`),
+    **`vexim_inbound_receipt_shipments`** (đối soát theo lô: thực nhận vs số gửi + `diff_units` +
+    `receipt_rate_pct` + `reconcile_state` + `expected_source`).
+  - RLS: 2 bảng mới **chỉ có policy SELECT** theo `iam.can_read_seller_account` — không có policy ghi,
+    web không ghi được; mọi đường ghi đi qua RPC service_role (như `catalog.listings` của 0016).
+- **Worker**: parser `worker/src/reports/fba-inventory.parser.ts` (đọc cột **THEO TÊN** nên Amazon đổi
+  thứ tự cột vẫn chạy; ngày về `YYYY-MM-DD`; dòng rác bỏ kèm số dòng; trần 20 cảnh báo để file lỗi
+  không làm ngập log), job `inventory-fc-sync.job.ts`, runner `run-inventory-fc-sync.ts`, lệnh mới
+  **`worker inventory:fc --fc=<file> [--receipts=<file>] [--seller=<uuid>] [--top-fc=10] [--dry-run]`**
+  (script `npm run worker:inventory-fc`). **Không cần thêm biến env nào**; chỉ ghi DB thật khi
+  `mode = production` và không `--dry-run`.
+- **Web**: I2 (live) thay 2 panel "chưa có dữ liệu" bằng bảng **Phân bổ theo FC** (FC · Tổng · % của
+  SKU · bán được · không bán được · không rõ) và **Lịch sử nhận hàng** (ngày · lô · FC · thực nhận);
+  mỗi panel đọc tách biệt nên nếu DB chưa chạy 0018 thì panel tự giải thích, **không sập cả trang**.
+  I4 (live) hết placeholder ở cột **FC đích** và **Đối soát nhận**: ghép
+  `vexim_inbound_receipt_shipments` theo mã lô → "Nhận đủ 50/50" · "Thiếu 7 (nhận 18/25) → SOP-09" ·
+  "Thừa 10 (nhận 30/20)" · "Chưa rõ số gửi (đã nhận 12)", kèm panel "lô có số nhận nhưng không còn
+  trong danh sách" (lô CLOSED trước khi worker kịp sync).
+- **Số trung thực**: `fc_share_pct` **NULL** khi tổng tồn của SKU = 0 (không hiện 0%); disposition rỗng
+  đếm riêng `unknown_qty`, KHÔNG gộp vào "bán được"; report receipts **không có cột số gửi** →
+  `expected_units` NULL + `expected_source = 'none'` chứ không suy "gửi = nhận"; ngày kiểu
+  `09/11/2026` hiểu theo MM/DD/YYYY nhưng **có cảnh báo** trong log.
+- **Kiểm chứng local (chạy thật):** `supabase npm test` **TẤT CẢ PASS** — BƯỚC 19 chạy trên Postgres
+  thật (PGlite): nhập 10 dòng FC → ghi 6 · bỏ 3 dòng rác · gộp 1 cặp trùng khoá · 145 đơn vị ·
+  2 snapshot; nhập lại → 6 update/0 insert; view chỉ phơi snapshot mới nhất; ONT8 50/85 = 58,8% +
+  PHX7 41,2% = tròn 100%; SKU tổng 0 → % NULL; đối soát 5 lô (matched · short −7 · over +10 ·
+  unknown_expected vì không có dòng lô · unknown_expected vì `quantity` NULL); `authenticated` bị chặn
+  ghi thẳng + bị chặn gọi cả 2 RPC; người lạ không thấy gì; 0018 chạy 2 lần không lỗi ·
+  `worker npm test` **321/321** (+28 test parser/job/runner) · `web npm test` **128/128** (+15 test
+  model) · `npx tsc --noEmit` sạch.
+
+### Chờ VEXIM (Module 3 nâng cao)
+
+- ☐ Chạy `supabase/migrations/0018_fc_allocation_receipts.sql` trong SQL Editor (sau `0017`).
+- ☐ Tải 2 report rồi nhập: Seller Central → **Reports → Fulfillment → Inventory** →
+  *FBA Daily Inventory History* (phân bổ FC) và *FBA Received Inventory* (lịch sử nhận), định dạng TSV →
+  `npm run worker:inventory-fc -- --fc=<daily-inventory.tsv> --receipts=<received-inventory.tsv>`
+  (thêm `--seller=<uuid>` nếu có >1 shop; chạy `--dry-run` trước để xem số mà không ghi DB).
+- ☐ Report FBA dạng daily chỉ được yêu cầu **mỗi 4 giờ** → nhập 1 lần/ngày là đủ. Đợt 2 sẽ tự đặt lịch
+  qua Reports API (`createReport` → `getReportDocument`) — **không cần thêm biến env**, dùng lại
+  `AMAZON_LWA_*` + role **Amazon Fulfillment** (đã nộp kèm trong Developer Profile).
+
 ## Cập nhật 12/09 — ĐỢT B: "hái quả ngay" (migration 0017 · doanh số 30 ngày · người phụ trách · giá trị tồn kho)
 
 Đợt A mở khoá giá vốn + ghi listing thật. Đợt B lấy nốt **ba thứ dữ liệu ĐÃ CÓ SẴN trong DB nhưng
@@ -597,7 +662,7 @@ nên không phụ thuộc bước này).
 - ✅ Tạo project Supabase (`pitmyzovjwflkyoqjbkz`) + set 14 biến môi trường trên Vercel — **xong 12/09**
 - ☐ **Chạy `0006` rồi `0007` trong SQL Editor** (dọn fixture test + tạo super_admin/alerts)
 - ☐ Chạy `0008` → `0009` → **`0010`** (wrapper RPC · shop production · hạ tầng Module 4/6/7)
-- ☐ ✅ `0011`/`0012`/`0013` đã chạy · ☐ **`0014`** (trình soạn listing L3) · ☐ **`0015`** (bồi hoàn FBA + lợi nhuận SKU) · ☐ **`0016`** (Đợt A: giá vốn + ghi listing + `vexim_pricing` dùng giá vốn) · ☐ **`0017`** (Đợt B: doanh số 30 ngày + người phụ trách + giá trị tồn kho)
+- ☐ ✅ `0011`/`0012`/`0013` đã chạy · ☐ **`0014`** (trình soạn listing L3) · ☐ **`0015`** (bồi hoàn FBA + lợi nhuận SKU) · ☐ **`0016`** (Đợt A: giá vốn + ghi listing + `vexim_pricing` dùng giá vốn) · ☐ **`0017`** (Đợt B: doanh số 30 ngày + người phụ trách + giá trị tồn kho) · ☐ **`0018`** (Module 3 nâng cao: phân bổ tồn theo FC + lịch sử nhận hàng)
 - ☐ **Thêm `CRON_SECRET` trên Vercel** (Production + Preview) → Redeploy
 - ☐ `AMAZON_LWA_CLIENT_ID` / `_CLIENT_SECRET` / `_REFRESH_TOKEN` khi Developer Profile được duyệt — thiếu 3 biến này thì worker chỉ chạy demo trong bộ nhớ (an toàn, không ghi DB thật)
 - ☐ 4 thông tin thật cho landing page (email/phone/địa chỉ/tên pháp lý)

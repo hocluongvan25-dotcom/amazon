@@ -32,12 +32,15 @@ import type {
   ActiveShop,
   AlertRowInput,
   DbAdapter,
+  FcAllocationRowInput,
   FinancialEventRowInput,
   InventoryDailyRow,
   InventorySnapshotRow,
   ListingPublishQueueRow,
   ListingPublishResultInput,
   ProductTypeSchemaInput,
+  ReceiptRowInput,
+  ReportUpsertCounts,
   ReimbursementRowInput,
   ReimbursementClaimRowInput,
   ReimbursementClaimRow,
@@ -98,7 +101,32 @@ const RPC_PATHS = {
   // Đợt A (migration 0016) — ghi listing (L1/L2/L4). Giá vốn worker vẫn đọc qua
   // vexim_worker_effective_costs của 0015 (không tạo RPC trùng chức năng).
   upsertListings: "/rest/v1/rpc/vexim_worker_upsert_listings",
+  // Module 3 nâng cao (migration 0018) — nhập 2 report FBA inventory:
+  // phân bổ tồn theo FC (I2) + lịch sử nhận hàng (I2/I4 đối soát).
+  upsertFcAllocation: "/rest/v1/rpc/vexim_worker_upsert_fc_allocation",
+  upsertReceipts: "/rest/v1/rpc/vexim_worker_upsert_receipts",
 } as const;
+
+/**
+ * RPC 0018 trả (inserted, updated, skipped, merged, units, snapshots|shipments).
+ * PostgREST có thể trả số dưới dạng chuỗi → ép Number để tầng trên cộng được.
+ */
+type RpcReportCounts = {
+  inserted?: number | string | null;
+  updated?: number | string | null;
+  skipped?: number | string | null;
+  merged?: number | string | null;
+};
+
+function toReportCounts(row?: RpcReportCounts | null): ReportUpsertCounts {
+  const num = (v: number | string | null | undefined) => Number(v ?? 0) || 0;
+  return {
+    inserted: num(row?.inserted),
+    updated: num(row?.updated),
+    skipped: num(row?.skipped),
+    merged: num(row?.merged),
+  };
+}
 
 export class SupabaseDbAdapter implements DbAdapter {
   private readonly url: string;
@@ -670,6 +698,34 @@ export class SupabaseDbAdapter implements DbAdapter {
         p_schema: input.schema,
       },
     });
+  }
+
+  /* ---- Module 3 nâng cao (0018) — qua RPC service_role của migration 0018 ---- */
+
+  /**
+   * Nhập report GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA (phân bổ tồn theo FC).
+   * RPC tự khử trùng theo (shop, ngày, SKU, FC, disposition) và CỘNG dồn dòng
+   * trùng khoá → nhập lại cùng file không nhân đôi tồn.
+   */
+  async upsertFcAllocation(
+    sellerAccountId: string,
+    rows: FcAllocationRowInput[],
+  ): Promise<ReportUpsertCounts> {
+    const result = await this.request<RpcReportCounts[]>("POST", RPC_PATHS.upsertFcAllocation, {
+      body: { p_seller: sellerAccountId, p_rows: rows },
+    });
+    return toReportCounts(result?.[0]);
+  }
+
+  /** Nhập report GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA (lịch sử nhận hàng). */
+  async upsertReceipts(
+    sellerAccountId: string,
+    rows: ReceiptRowInput[],
+  ): Promise<ReportUpsertCounts> {
+    const result = await this.request<RpcReportCounts[]>("POST", RPC_PATHS.upsertReceipts, {
+      body: { p_seller: sellerAccountId, p_rows: rows },
+    });
+    return toReportCounts(result?.[0]);
   }
 
   /* ---- Module 6 Đợt 2 (F3/F4) — qua RPC service_role của migration 0015 ---- */

@@ -132,9 +132,9 @@ Giá vốn từng SKU (import Excel/API nội bộ), biên tối thiểu %, ngư
 | # | Màn hình | Nội dung chính | Cấp |
 |---|---|---|---|
 | I1 | **Tồn kho theo SKU** | Bảng: SKU, ảnh, tồn khả dụng / reserved / đang về (inbound), **days of cover**, velocity 14 ngày, SKU sắp hết (đỏ), tồn lâu. Sort theo doanh thu/SKU · ✅ **0017**: **giá trị tồn kho** = Σ (khả dụng + reserved + đang về) × giá vốn hiệu lực, theo tiền của giá vốn; SKU thiếu giá vốn hiện "—" và đếm riêng ở KPI | 🟢 |
-| I2 | **Chi tiết tồn 1 SKU** | Biểu đồ tồn + doanh số 90 ngày, phân bổ theo fulfillment center, lịch sử nhận hàng · ✅ **0017**: panel "Giá trị tồn kho" diễn giải vốn hiệu lực → khả dụng × vốn → cộng reserved + đang về | 🟢 |
+| I2 | **Chi tiết tồn 1 SKU** | Biểu đồ tồn + doanh số 90 ngày, phân bổ theo fulfillment center, lịch sử nhận hàng · ✅ **0017**: panel "Giá trị tồn kho" diễn giải vốn hiệu lực → khả dụng × vốn → cộng reserved + đang về · ✅ **0018**: **phân bổ theo FC** (FC · tổng · % của SKU · bán được/không bán được/không rõ) và **lịch sử nhận hàng** (ngày · lô · FC · thực nhận) chạy bằng số thật từ 2 report FBA — API không có hai số này | 🟢 |
 | I3 | **Kế hoạch nhập hàng** | Danh sách SKU cần nhập (đề xuất tự động = velocity × (lead time + safety) − tồn − đang về) → chốt số lượng + giá vốn → duyệt → **tạo inbound plan** → theo dõi · ✅ **0017**: cột giá vốn + **giá trị lô** = đề xuất × giá vốn hiệu lực (thiếu giá vốn thì ghi rõ "— chưa có giá vốn", không in $0) | 🟡 (đọc 🟢) |
-| I4 | **Inbound shipments** | Bảng lô hàng: trạng thái (WORKING/SHIPPED/RECEIVING/CLOSED…), số lượng, FC đích, ETA; cảnh báo "nhận thiếu so với kế hoạch" | 🟡 (đọc 🟢) |
+| I4 | **Inbound shipments** | Bảng lô hàng: trạng thái (WORKING/SHIPPED/RECEIVING/CLOSED…), số lượng, FC đích, ETA; cảnh báo "nhận thiếu so với kế hoạch" · ✅ **0018**: cột *FC đích* + *Đối soát nhận* hết placeholder — ghép report receipts theo mã lô (Nhận đủ / Thiếu → SOP-09 / Thừa / Chưa rõ số gửi) và panel "lô có số nhận nhưng không còn trong danh sách" | 🟡 (đọc 🟢) |
 
 ### Ánh xạ API (đã kiểm chứng)
 
@@ -152,7 +152,7 @@ Giá vốn từng SKU (import Excel/API nội bộ), biên tối thiểu %, ngư
 - Notification **`FBA_SHIPMENT_STATUS`**? — dùng báo cáo + `getShipment` theo lịch cho I4 (an toàn hơn vì không phải shop nào cũng có notification type này)
 
 ### Đầu ra cho dashboard
-Alert `stockout_risk` → SOP-01 (toàn bộ vòng đời nằm ở I3). KPI: số SKU sắp hết, in-stock %, giá trị tồn (✅ **0017** đã tính được từ giá vốn hiệu lực).
+Alert `stockout_risk` → SOP-01 (toàn bộ vòng đời nằm ở I3). KPI: số SKU sắp hết, in-stock %, giá trị tồn (✅ **0017** đã tính được từ giá vốn hiệu lực), số lô nhận thiếu so với số gửi (✅ **0018** — `vexim_inbound_receipt_shipments.reconcile_state = 'short'` → đầu vào SOP-09).
 
 ### Input VEXIM
 Lead time nhập hàng (VN→US theo từng đường: nhanh/chậm), tồn kho ngoài Amazon (nếu có), safety stock chuẩn.
@@ -323,6 +323,7 @@ Alert `account_health`, `odr_threshold` → SOP-08. KPI: số shop xanh/vàng/đ
 | 4 | Giá vốn | **Import Excel/CSV theo template + nhập tay SKU lẻ** — lưu theo khoảng thời gian hiệu lực (bảng `catalog.cost_inputs`, migration 0003). API nội bộ: cân nhắc ở Đợt 3 · ✅ **ĐÃ XONG (Đợt A, 12/09)**: trang `/finance/costs` + template CSV tải trong app + import atomic (migration 0016) |
 | 5 | Thứ tự build Đợt 1 | **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** — Listing-đọc lên trước Giá (là dữ liệu nền SKU master cho Giá & Kho) |
 | 6 | Doanh số 30 ngày · người phụ trách · giá trị tồn | ✅ **ĐÃ XONG (Đợt B, 12/09)** — migration `0017`: view `vexim_sku_sales_30d` (loại đơn huỷ, SKU không có đơn → NULL chứ không 0), `iam.module_owner()` (security definer vì RLS `iam.*` chỉ cho đọc chính mình; chỉ trả TÊN, không email/uuid), 7 cột nối cuối `vexim_pricing`/`vexim_listings`/`vexim_listing_queue`, 8 cột giá trị nối cuối `vexim_inventory_latest`, và sửa `effective_cost_row()` tra SKU không phân biệt hoa/thường |
+| 7 | Phân bổ tồn theo FC · lịch sử nhận hàng (Module 3 nâng cao) | ✅ **ĐÃ XONG (12/09)** — migration `0018`: 2 bảng `inventory.fc_allocation` + `inventory.receipts` (khoá đúng theo report, RLS chỉ đọc, ghi qua 2 RPC service_role idempotent + cộng dòng trùng khoá), 4 view `security_invoker` (`vexim_inventory_fc`, `vexim_inventory_fc_rows`, `vexim_inventory_receipts`, `vexim_inbound_receipt_shipments` đối soát thực nhận vs số gửi của Inbound API), worker `inventory:fc` (parser đọc cột theo tên · ngày về ISO · dòng rác đếm `skipped`), I2/I4 hết placeholder. **Không cần thêm biến env**; Đợt 2 mới tự đặt lịch report qua Reports API (trần 4 giờ/lần với report daily) |
 | + | Buyer Communication, A+ (L5), auto-pricing (P4), MCF | **Defer đúng kế hoạch** 🟡/🔵 — không xin role/module trước khi có tính năng thật |
 
 ---

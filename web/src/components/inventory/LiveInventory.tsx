@@ -5,10 +5,16 @@
  * Các trang fulfillment/* gọi component này thay vì mock data.
  */
 import { Chip, KpiCard, KpiGrid, MiniList, PageHeader, Panel, tableCls } from "@/components/ui";
-import { readInventoryLatest, readInboundShipments } from "@/lib/data/inventory";
+import {
+  readInventoryLatest,
+  readInboundShipments,
+  readReceiptShipments,
+} from "@/lib/data/inventory";
 import {
   mapInventoryRow,
   mapInboundRow,
+  mapReceiptShipmentRow,
+  mergeInboundReconcile,
   computeFulfillKpis,
   buildSkuStock,
   formatInventoryValueTotal,
@@ -18,7 +24,7 @@ import {
   type InventoryLatestRaw,
   type InboundShipmentRaw,
 } from "@/lib/data/inventory-model";
-import type { InventoryRow, InboundRow } from "@/lib/types";
+import type { InventoryRow, InboundRow, ReceiptShipmentRow } from "@/lib/types";
 
 const statusTone: Record<InventoryRow["status"], "red" | "amber" | "green" | "gray"> = {
   out: "red",
@@ -395,11 +401,23 @@ export async function LiveInboundShipments() {
     failed = true;
   }
 
-  const rows = rawRows.map(mapInboundRow);
+  // 0018: đối soát nhận hàng đọc TÁCH BIỆT — chưa chạy 0018 / chưa nhập report
+  // thì bảng lô vẫn hiện, chỉ cột "Đối soát nhận" giữ nhãn cũ (không bịa "nhận đủ").
+  let reconRows: ReceiptShipmentRow[] = [];
+  let reconFailed = false;
+  try {
+    reconRows = (await readReceiptShipments()).map(mapReceiptShipmentRow);
+  } catch {
+    reconFailed = true;
+  }
+
+  const merged = mergeInboundReconcile(rawRows.map(mapInboundRow), reconRows);
+  const rows = merged.rows;
   const moving = rows.filter((r) =>
     ["IN_TRANSIT", "SHIPPED", "DELIVERED", "RECEIVING"].includes(r.status),
   );
   const pending = rows.filter((r) => r.status === "WORKING");
+  const shortCount = reconRows.filter((r) => r.state === "short").length;
 
   return (
     <>
@@ -408,7 +426,10 @@ export async function LiveInboundShipments() {
       </div>
       <PageHeader
         title="Inbound shipments"
-        sub={`${rows.length} lô · ${moving.length} đang di chuyển · ${pending.length} chờ placement`}
+        sub={`${rows.length} lô · ${moving.length} đang di chuyển · ${pending.length} chờ placement` +
+          (reconFailed || reconRows.length === 0
+            ? " · chưa có số nhận từ report"
+            : ` · ${merged.matched} lô đã có số nhận${shortCount > 0 ? ` · ${shortCount} lô THIẾU` : ""}`)}
         desc="Nguồn: Fulfillment Inbound API v2024-03-20 (getInboundPlan/getShipment) · đối soát nhận hàng: GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA. Trạng thái chuẩn Amazon."
       />
       {failed ? (
@@ -452,11 +473,67 @@ export async function LiveInboundShipments() {
               </tbody>
             </table>
           </Panel>
-          <Panel title="Quy tắc đối soát">
+          {reconFailed ? (
+            <Panel title="Đối soát nhận hàng">
+              <p className="text-[13px] text-muted">
+                <b className="text-amber">Chưa đọc được vexim_inbound_receipt_shipments</b> — kiểm tra đã
+                chạy migration 0018 và quyền SELECT chưa. Bảng lô ở trên vẫn là dữ liệu thật; riêng cột
+                &quot;Đối soát nhận&quot; giữ nhãn chờ, hệ thống KHÔNG tự coi là đã nhận đủ.
+              </p>
+            </Panel>
+          ) : reconRows.length === 0 ? (
+            <Panel title="Đối soát nhận hàng">
+              <p className="text-[13px] text-muted">
+                Chưa có số thực nhận. Nguồn duy nhất là report{" "}
+                <b>FBA Received Inventory</b> (GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA) — nhập bằng{" "}
+                <code className="text-[12px]">npm run worker:inventory-fc -- --receipts=&lt;file.tsv&gt;</code>.
+              </p>
+            </Panel>
+          ) : merged.orphans.length > 0 ? (
+            <Panel
+              title="Lô có số nhận nhưng không còn trong danh sách"
+              hint="report receipts · vexim_inbound_receipt_shipments"
+            >
+              <table className={tableCls.table}>
+                <thead>
+                  <tr>
+                    <th className={tableCls.th}>Shipment</th>
+                    <th className={tableCls.th}>FC nhận</th>
+                    <th className={`${tableCls.th} text-right`}>Thực nhận</th>
+                    <th className={tableCls.th}>Ngày nhận cuối</th>
+                    <th className={tableCls.th}>Đối soát</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {merged.orphans.map((o) => (
+                    <tr key={o.shipmentId}>
+                      <td className={`${tableCls.td} font-mono text-[12px] font-bold`}>{o.shipmentId}</td>
+                      <td className={tableCls.td}>{o.fc ?? "—"}</td>
+                      <td className={`${tableCls.tdNum} font-bold`}>{o.received}</td>
+                      <td className={tableCls.td}>{o.lastDate ?? "—"}</td>
+                      <td className={tableCls.td}>
+                        <Chip tone={recTone[o.tone]}>{o.label}</Chip>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="mt-2 text-[12px] text-soft">
+                Thường là lô đã CLOSED trước khi worker kịp sync nên không còn dòng trong
+                inventory.inbound_shipments — số nhận vẫn giữ, chỉ không có &quot;số gửi&quot; để so.
+              </p>
+            </Panel>
+          ) : null}
+          <Panel title="Quy tắc đối soát" hint="số nhận = report receipts (0018) · số gửi = Inbound API">
             <ul className="list-disc space-y-1.5 pl-5 text-[13px] text-muted">
               <li>Lô CLOSED: so thực nhận vs kế hoạch — thiếu &gt; 0 sinh task SOP-09 (claim bồi hoàn) kèm giá trị.</li>
+              <li>
+                <b>Thực nhận</b> lấy từ report GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA (không có trong
+                Inbound API); <b>số gửi</b> lấy từ inventory.inbound_shipments. Thiếu một trong hai → nhãn
+                &quot;Chưa rõ số gửi&quot;, KHÔNG hiển thị &quot;nhận đủ&quot;.
+              </li>
               <li>Đang di chuyển (IN_TRANSIT/RECEIVING): theo dõi ETA, trễ &gt; 3 ngày so lịch sử tuyến → cảnh báo.</li>
-              <li>WORKING chờ placement: đẩy hoàn tất các步骤 confirm (Đợt 2 — thao tác ghi).</li>
+              <li>WORKING chờ placement: đẩy hoàn tất các bước confirm (Đợt 2 — thao tác ghi).</li>
             </ul>
           </Panel>
         </>

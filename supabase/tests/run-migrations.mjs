@@ -18,6 +18,10 @@
  *      rule cảnh báo, view public) + chốt PII + tính idempotent
  *  10. Kiểm chứng 0014 — L3 Listing Editor: staging + lịch sử + máy trạng thái
  *      + RPC cho web/worker + cache JSON Schema product type (form động)
+ *  11. Kiểm chứng 0015..0017 — F3/F4 bồi hoàn + lợi nhuận · Đợt A gỡ chặn dữ liệu
+ *      lõi · Đợt B doanh số 30 ngày / người phụ trách / giá trị tồn
+ *  12. Kiểm chứng 0018 — Module 3 nâng cao: phân bổ tồn theo FC + lịch sử nhận
+ *      hàng từ report, RPC worker idempotent, đối soát nhận với số gửi của I4
  *
  * Không cần Docker, không cần Supabase project, không cần credentials.
  */
@@ -1942,6 +1946,362 @@ await cmp(
   "0017 lần 2: index order_items không bị tạo trùng",
   `select count(*) n from pg_indexes where tablename='order_items' and indexname='idx_order_items_order'`,
   1,
+);
+
+// ============================================================================
+console.log("\n=== BƯỚC 19: 0018 — Module 3 nâng cao (phân bổ tồn theo FC · lịch sử nhận hàng) ===");
+// ============================================================================
+// `db.query` NÉM lỗi (khác `one()` có bắt). Nếu 0018 fail, ta muốn thấy từng
+// mục FAIL để biết thiếu gì — không muốn harness chết giữa chừng.
+// PGlite trả cột `date` về thành JS Date (toISOString kèm giờ). So sánh nguyên
+// chuỗi sẽ là "Fri Sep 11 2026…" ≠ "2026-09-11" → phải chuẩn về 10 ký tự ISO.
+const d10 = (v) => {
+  if (v === null || v === undefined) return null;
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  return String(v).slice(0, 10);
+};
+
+const rows19 = async (sql) => {
+  try {
+    return (await db.query(sql)).rows;
+  } catch (e) {
+    return [{ error: e.message.split("\n")[0] }];
+  }
+};
+ok(
+  await ex(rd("migrations/0018_fc_allocation_receipts.sql"), "0018_fc_allocation_receipts.sql"),
+  "0018 chạy sạch (DO-block tự soát: bảng · RLS · RPC · view · hợp đồng cột)",
+);
+
+// Web đọc 4 view mới bằng chuỗi select cố định → chốt hợp đồng ngay tại đây.
+const colsOf = async (view) =>
+  (await one(`select string_agg(column_name, ',' order by ordinal_position) c
+     from information_schema.columns
+    where table_schema='public' and table_name='${view}'`)).c;
+ok(
+  (await colsOf("vexim_inventory_fc")) ===
+    "seller_account_id,shop,snapshot_date,sku,fnsku,product_name,fc,country,quantity," +
+    "sellable_qty,unsellable_qty,unknown_qty,sku_total_qty,sku_fc_count,fc_share_pct,source,imported_at",
+  "0018: vexim_inventory_fc đúng hợp đồng cột (I2 đọc bằng tên)",
+);
+ok(
+  (await colsOf("vexim_inbound_receipt_shipments")) ===
+    "seller_account_id,shop,shipment_id,fc,first_received_date,last_received_date,received_units," +
+    "sku_count,shipment_status,expected_eta,expected_units,diff_units,receipt_rate_pct," +
+    "reconcile_state,expected_source",
+  "0018: vexim_inbound_receipt_shipments đúng hợp đồng cột (đối soát nhận hàng)",
+);
+await cmp(
+  "0018: 2 bảng mới bật RLS",
+  `select count(*) n from pg_class c join pg_namespace ns on ns.oid=c.relnamespace
+    where ns.nspname='inventory' and c.relname in ('fc_allocation','receipts') and c.relrowsecurity`,
+  2,
+);
+await cmp(
+  "0018: index unique đúng khoá report (nhập lại không nhân đôi)",
+  `select count(*) n from pg_indexes where schemaname='inventory'
+     and indexname in ('uq_fc_allocation_key','uq_receipts_key') and indexdef like '%UNIQUE%'`,
+  2,
+);
+await cmp(
+  "0018: KHÔNG có policy ghi nào cho web trên 2 bảng mới",
+  `select count(*) n from pg_policies where schemaname='inventory'
+     and tablename in ('fc_allocation','receipts') and cmd <> 'SELECT'`,
+  0,
+);
+await cmp(
+  "0018: 2 RPC worker = security definer và chỉ service_role execute được",
+  `select count(*) n from pg_proc p join pg_namespace ns on ns.oid=p.pronamespace
+    where ns.nspname='public'
+      and p.proname in ('vexim_worker_upsert_fc_allocation','vexim_worker_upsert_receipts')
+      and p.prosecdef
+      and not has_function_privilege('authenticated', p.oid, 'EXECUTE')
+      and has_function_privilege('service_role', p.oid, 'EXECUTE')`,
+  2,
+);
+await cmp(
+  "0018: 4 view công khai đều security_invoker (RLS bảng gốc vẫn áp)",
+  `select count(*) n from pg_class c join pg_namespace ns on ns.oid=c.relnamespace
+    where ns.nspname='public'
+      and c.relname in ('vexim_inventory_fc','vexim_inventory_fc_rows',
+                        'vexim_inventory_receipts','vexim_inbound_receipt_shipments')
+      and 'security_invoker=true'=any(c.reloptions)`,
+  4,
+);
+
+// ---- fixture: user kho (có shop) + người lạ ---------------------------------
+await ex("begin");
+await ex("reset role;");
+const cShop = (await one("select id from connections.seller_accounts order by seller_id limit 1")).id;
+const cWhUser   = "c1000000-0000-4000-8000-000000000001";
+const cStranger = "c1000000-0000-4000-8000-000000000002";
+ok(
+  await ex(`insert into auth.users(id,email) values
+     ('${cWhUser}','local-c-kho@example.test'),
+     ('${cStranger}','local-c-stranger@example.test');
+   insert into iam.user_profiles(id,display_name,email,vexim_employee) values
+     ('${cWhUser}','Kho VEXIM','local-c-kho@example.test',true),
+     ('${cStranger}','Người lạ','local-c-stranger@example.test',true);
+   insert into iam.assignments(user_id,seller_account_id,module,can_write,created_at) values
+     ('${cWhUser}','${cShop}','inventory',true, now() - interval '1 day');
+   insert into iam.role_assignments(user_id,role) values ('${cWhUser}','operator');`),
+  "0018 fixture: 1 user kho được gán shop + 1 người lạ",
+);
+
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role service_role;");
+
+// ---- 1. Import report phân bổ FC --------------------------------------------
+// Lô nhập cố ý có: 2 snapshot (chỉ snapshot MỚI NHẤT được phơi ra UI), 1 SKU nằm
+// 2 FC, disposition hỏng (DAMAGED), disposition RỖNG (không rõ), 2 dòng trùng khoá
+// (phải cộng dồn, không được nổ lỗi "affect row a second time"), 3 dòng RÁC
+// (quantity không phải số / ngày sai định dạng / thiếu SKU), và 1 SKU tổng = 0.
+const fcReport = JSON.stringify([
+  { snapshotDate: "2026-09-10", sku: "FC-SKU", fnsku: "X001FC", productName: "Vali 20 inch", quantity: 60, fulfillmentCenterId: "ont8", detailedDisposition: "Sellable", country: "us" },
+  { snapshotDate: "2026-09-11", sku: "FC-SKU", fnsku: "X001FC", productName: "Vali 20 inch", quantity: 40, fulfillmentCenterId: "ONT8", detailedDisposition: "SELLABLE", country: "US" },
+  { snapshotDate: "2026-09-11", sku: "FC-SKU", quantity: 10, fulfillmentCenterId: "ONT8", detailedDisposition: "DAMAGED", country: "US" },
+  { snapshotDate: "2026-09-11", sku: "FC-SKU", quantity: 25, fulfillmentCenterId: "PHX7", detailedDisposition: "Sellable", country: "US" },
+  { snapshotDate: "2026-09-11", sku: "FC-SKU", quantity: 5,  fulfillmentCenterId: "PHX7", detailedDisposition: "", country: "US" },
+  { snapshotDate: "2026-09-11", sku: "FC-SKU", quantity: 5,  fulfillmentCenterId: "phx7", country: "US" },
+  { snapshotDate: "2026-09-11", sku: "FC-SKU", quantity: "abc", fulfillmentCenterId: "MDW2", detailedDisposition: "SELLABLE" },
+  { snapshotDate: "11/09/2026", sku: "FC-SKU", quantity: 7, fulfillmentCenterId: "MDW2", detailedDisposition: "SELLABLE" },
+  { snapshotDate: "2026-09-11", sku: "", quantity: 7, fulfillmentCenterId: "MDW2", detailedDisposition: "SELLABLE" },
+  { snapshotDate: "2026-09-11", sku: "FC-EMPTY", quantity: 0, fulfillmentCenterId: "ONT8", detailedDisposition: "SELLABLE" },
+]);
+const fcNum = (r) => ({
+  inserted: Number(r?.inserted), updated: Number(r?.updated), skipped: Number(r?.skipped),
+  merged: Number(r?.merged), units: Number(r?.units), snapshots: Number(r?.snapshots),
+});
+const fc1 = fcNum(await one(`select * from public.vexim_worker_upsert_fc_allocation('${cShop}', '${fcReport}'::jsonb)`));
+ok(
+  fc1.inserted === 6 && fc1.updated === 0 && fc1.skipped === 3 && fc1.merged === 1
+    && fc1.units === 145 && fc1.snapshots === 2,
+  `0018 RPC FC: ghi 6 dòng · bỏ 3 dòng rác · gộp 1 cặp trùng khoá · 145 đơn vị · 2 snapshot — ${JSON.stringify(fc1)}`,
+);
+const fc2 = fcNum(await one(`select * from public.vexim_worker_upsert_fc_allocation('${cShop}', '${fcReport}'::jsonb)`));
+ok(
+  fc2.inserted === 0 && fc2.updated === 6,
+  `0018 RPC FC: nhập LẠI cùng file → 6 update / 0 insert (idempotent) — ${JSON.stringify(fc2)}`,
+);
+await cmp(
+  "0018: nhập 2 lần vẫn đúng 6 dòng, không phình bảng",
+  `select count(*) n from inventory.fc_allocation where seller_account_id='${cShop}'`,
+  6,
+);
+await cmp(
+  "0018: 2 dòng trùng khoá được CỘNG dồn (5+5=10), không ghi 2 dòng",
+  `select coalesce(sum(quantity),-1) n from inventory.fc_allocation
+    where seller_account_id='${cShop}' and sku='FC-SKU' and fulfillment_center_id='PHX7'
+      and detailed_disposition='' and snapshot_date=date '2026-09-11'`,
+  10,
+);
+
+// ---- 2. View phân bổ FC: chỉ snapshot mới nhất + tỉ trọng --------------------
+const fcView = (await rows19(
+  `select sku, fc, quantity, sellable_qty, unsellable_qty, unknown_qty, sku_total_qty,
+          sku_fc_count, fc_share_pct, snapshot_date
+     from public.vexim_inventory_fc where seller_account_id='${cShop}' order by sku, fc`));
+const fcOf = (sku, fc) => fcView.find((r) => r.sku === sku && r.fc === fc);
+ok(fcView.length === 3, `0018 view FC: 3 dòng (2 FC của FC-SKU + 1 SKU rỗng) — nhận ${fcView.length}`);
+ok(
+  fcView.every((r) => d10(r.snapshot_date) === "2026-09-11"),
+  "0018 view FC: chỉ phơi snapshot MỚI NHẤT (snapshot 2026-09-10 không lọt ra UI)",
+);
+const ont = fcOf("FC-SKU", "ONT8");
+ok(
+  Number(ont?.quantity) === 50 && Number(ont?.sellable_qty) === 40 && Number(ont?.unsellable_qty) === 10
+    && Number(ont?.unknown_qty) === 0 && Number(ont?.sku_total_qty) === 85
+    && Number(ont?.sku_fc_count) === 2 && Number(ont?.fc_share_pct) === 58.8,
+  `0018 view FC: ONT8 = 40 bán được + 10 hỏng = 50/85 (58,8%) — ${JSON.stringify(ont)}`,
+);
+const phx = fcOf("FC-SKU", "PHX7");
+ok(
+  Number(phx?.quantity) === 35 && Number(phx?.sellable_qty) === 25 && Number(phx?.unknown_qty) === 10
+    && Number(phx?.fc_share_pct) === 41.2,
+  `0018 view FC: PHX7 = 25 bán được + 10 KHÔNG RÕ disposition = 35/85 (41,2%) — ${JSON.stringify(phx)}`,
+);
+ok(
+  Number(ont?.fc_share_pct) + Number(phx?.fc_share_pct) === 100,
+  "0018 view FC: tỉ trọng 2 FC cộng đủ 100% (không lệch do làm tròn)",
+);
+const empty = fcOf("FC-EMPTY", "ONT8");
+ok(
+  Number(empty?.quantity) === 0 && empty?.fc_share_pct === null,
+  `0018 view FC: SKU tổng = 0 → fc_share_pct NULL, KHÔNG bịa 0% — ${JSON.stringify(empty)}`,
+);
+
+const fcDetail = (await rows19(
+  `select fc, disposition, disposition_group, quantity
+     from public.vexim_inventory_fc_rows
+    where seller_account_id='${cShop}' and sku='FC-SKU' order by fc, disposition_group`));
+ok(
+  fcDetail.length === 4
+    && fcDetail.some((r) => r.fc === "ONT8" && r.disposition_group === "unsellable" && Number(r.quantity) === 10)
+    && fcDetail.some((r) => r.fc === "PHX7" && r.disposition === null && r.disposition_group === "unknown"),
+  `0018 view FC chi tiết: drill-down ra đúng 4 dòng disposition (hỏng 10 · không rõ → NULL) — ${JSON.stringify(fcDetail)}`,
+);
+
+// ---- 3. Import report lịch sử nhận hàng + đối soát với số gửi (I4) -----------
+ok(
+  await ex(`insert into inventory.inbound_shipments(seller_account_id,shipment_id,status,quantity,eta_date) values
+     ('${cShop}','FBA15ABC','CLOSED',50,     current_date - 8),
+     ('${cShop}','FBA15SHORT','RECEIVING',25, current_date - 5),
+     ('${cShop}','FBA15OVER','CLOSED',20,     current_date - 4),
+     ('${cShop}','FBA15NULLQTY','WORKING',null, current_date - 2);`),
+  "0018 fixture: 4 lô inbound (FBA15NOPLAN cố ý KHÔNG có để thử nhánh thiếu số gửi)",
+);
+
+const rxReport = JSON.stringify([
+  { receivedDate: "2026-09-05", sku: "FC-SKU", fnsku: "X001FC", productName: "Vali 20 inch", quantity: 40, fbaShipmentId: "fba15abc", fulfillmentCenterId: "ont8" },
+  { receivedDate: "2026-09-06", sku: "FC-SKU", quantity: 10, fbaShipmentId: "FBA15ABC", fulfillmentCenterId: "ONT8" },
+  { receivedDate: "2026-09-08", sku: "RX-SHORT", quantity: 18, fbaShipmentId: "FBA15SHORT", fulfillmentCenterId: "PHX7" },
+  { receivedDate: "2026-09-09", sku: "RX-NOPLAN", quantity: 12, fbaShipmentId: "FBA15NOPLAN", fulfillmentCenterId: "MDW2" },
+  { receivedDate: "2026-09-09", sku: "RX-OVER", quantity: 30, fbaShipmentId: "FBA15OVER", fulfillmentCenterId: "ONT8" },
+  { receivedDate: "2026-09-09", sku: "RX-NULLQTY", quantity: 6, fbaShipmentId: "FBA15NULLQTY", fulfillmentCenterId: "ONT8" },
+  { receivedDate: "2026-09-09", sku: "RX-NOSHIP", quantity: 4, fulfillmentCenterId: "ONT8" },
+  { receivedDate: "09/09/2026", sku: "RX-BAD", quantity: 4, fbaShipmentId: "FBA15BAD" },
+  { receivedDate: "2026-09-09", sku: "RX-BADQTY", quantity: "n/a", fbaShipmentId: "FBA15BAD2" },
+]);
+const rxNum = (r) => ({
+  inserted: Number(r?.inserted), updated: Number(r?.updated), skipped: Number(r?.skipped),
+  merged: Number(r?.merged), units: Number(r?.units), shipments: Number(r?.shipments),
+});
+const rx1 = rxNum(await one(`select * from public.vexim_worker_upsert_receipts('${cShop}', '${rxReport}'::jsonb)`));
+ok(
+  rx1.inserted === 7 && rx1.updated === 0 && rx1.skipped === 2 && rx1.merged === 0
+    && rx1.units === 120 && rx1.shipments === 5,
+  `0018 RPC receipts: ghi 7 dòng · bỏ 2 dòng rác · 120 đơn vị · 5 lô — ${JSON.stringify(rx1)}`,
+);
+const rx2 = rxNum(await one(`select * from public.vexim_worker_upsert_receipts('${cShop}', '${rxReport}'::jsonb)`));
+ok(
+  rx2.inserted === 0 && rx2.updated === 7,
+  `0018 RPC receipts: nhập LẠI → 7 update / 0 insert (idempotent) — ${JSON.stringify(rx2)}`,
+);
+await cmp(
+  "0018: receipts nhập 2 lần vẫn 7 dòng",
+  `select count(*) n from inventory.receipts where seller_account_id='${cShop}'`,
+  7,
+);
+
+const recon = (await rows19(
+  `select shipment_id, fc, first_received_date, last_received_date, received_units, sku_count,
+          shipment_status, expected_units, diff_units, receipt_rate_pct, reconcile_state, expected_source
+     from public.vexim_inbound_receipt_shipments
+    where seller_account_id='${cShop}' order by shipment_id`));
+const recOf = (id) => recon.find((r) => r.shipment_id === id);
+ok(recon.length === 5, `0018 đối soát: 5 lô (dòng không có mã lô không vào bảng đối soát) — nhận ${recon.length}`);
+const abc = recOf("FBA15ABC");
+ok(
+  Number(abc?.received_units) === 50 && Number(abc?.expected_units) === 50 && Number(abc?.diff_units) === 0
+    && Number(abc?.receipt_rate_pct) === 100 && abc?.reconcile_state === "matched"
+    && abc?.expected_source === "inbound_shipments" && Number(abc?.sku_count) === 1
+    && d10(abc?.first_received_date) === "2026-09-05"
+    && d10(abc?.last_received_date) === "2026-09-06"
+    && abc?.fc === "ONT8",
+  `0018 đối soát: lô nhận 2 đợt 40+10 = 50/50 → matched, FC viết thường được chuẩn hoá — ${JSON.stringify(abc)}`,
+);
+const short = recOf("FBA15SHORT");
+ok(
+  Number(short?.received_units) === 18 && Number(short?.diff_units) === -7
+    && Number(short?.receipt_rate_pct) === 72 && short?.reconcile_state === "short",
+  `0018 đối soát: gửi 25 nhận 18 → THIẾU 7 (72%) — chỗ đau thật của FBA — ${JSON.stringify(short)}`,
+);
+const over = recOf("FBA15OVER");
+ok(
+  Number(over?.diff_units) === 10 && over?.reconcile_state === "over" && Number(over?.receipt_rate_pct) === 150,
+  `0018 đối soát: gửi 20 nhận 30 → THỪA 10 (150%), không âm thầm coi là đủ — ${JSON.stringify(over)}`,
+);
+const noplan = recOf("FBA15NOPLAN");
+ok(
+  noplan?.expected_units === null && noplan?.diff_units === null && noplan?.receipt_rate_pct === null
+    && noplan?.reconcile_state === "unknown_expected" && noplan?.expected_source === "none",
+  `0018 đối soát: không có dòng lô trong I4 → expected NULL + nhãn 'none' (không suy "gửi = nhận") — ${JSON.stringify(noplan)}`,
+);
+const nullqty = recOf("FBA15NULLQTY");
+ok(
+  nullqty?.expected_units === null && nullqty?.reconcile_state === "unknown_expected"
+    && nullqty?.expected_source === "inbound_shipments",
+  `0018 đối soát: có lô nhưng quantity NULL → vẫn 'chưa rõ số gửi', nguồn = inbound_shipments — ${JSON.stringify(nullqty)}`,
+);
+
+const rxView = (await rows19(
+  `select sku, quantity, shipment_id, fc, received_date, days_ago
+     from public.vexim_inventory_receipts where seller_account_id='${cShop}' order by received_date, sku`));
+const dbToday = d10((await one("select current_date as d")).d);
+const wantDays = Math.round((Date.parse(dbToday) - Date.parse("2026-09-05")) / 86400000);
+ok(
+  rxView.length === 7
+    && rxView.some((r) => r.sku === "RX-NOSHIP" && r.shipment_id === null)
+    && Number(rxView[0]?.days_ago) === wantDays,
+  `0018 view receipts: 7 dòng · lô trống → shipment_id NULL · days_ago=${rxView[0]?.days_ago} (JS tính ${wantDays})`,
+);
+
+// ---- 4. RLS: user kho đọc được, người lạ không, web không ghi được ----------
+await ex("reset role;");
+await ex(`select set_config('request.jwt.claim.sub','${cWhUser}',false);`);
+await ex("set role authenticated;");
+await cmp(
+  "0018 RLS: user kho đọc được phân bổ FC của shop mình",
+  `select count(*) n from public.vexim_inventory_fc where seller_account_id='${cShop}'`,
+  3,
+);
+await cmp(
+  "0018 RLS: user kho đọc được đối soát nhận hàng",
+  `select count(*) n from public.vexim_inbound_receipt_shipments where seller_account_id='${cShop}'`,
+  5,
+);
+ok(
+  await mustBlock(`insert into inventory.receipts(seller_account_id,received_date,sku,quantity)
+     values ('${cShop}', date '2026-09-11','HACK',1)`),
+  "0018 CHẶN: authenticated không ghi thẳng lịch sử nhận hàng (chỉ worker qua RPC)",
+);
+ok(
+  await mustBlock(`update inventory.fc_allocation set quantity=999 where seller_account_id='${cShop}'`),
+  "0018 CHẶN: authenticated không sửa được tồn theo FC",
+);
+ok(
+  await mustBlock(`select * from public.vexim_worker_upsert_receipts('${cShop}', '[]'::jsonb)`),
+  "0018 CHẶN: RPC nhập receipts chỉ dành cho service_role",
+);
+ok(
+  await mustBlock(`select * from public.vexim_worker_upsert_fc_allocation('${cShop}', '[]'::jsonb)`),
+  "0018 CHẶN: RPC nhập phân bổ FC chỉ dành cho service_role",
+);
+
+await ex(`select set_config('request.jwt.claim.sub','${cStranger}',false);`);
+await cmp(
+  "0018 RLS: người lạ không thấy phân bổ FC của shop",
+  `select count(*) n from public.vexim_inventory_fc where seller_account_id='${cShop}'`,
+  0,
+);
+await cmp(
+  "0018 RLS: người lạ không thấy lịch sử nhận hàng của shop",
+  `select count(*) n from public.vexim_inventory_receipts where seller_account_id='${cShop}'`,
+  0,
+);
+await cmp(
+  "0018 RLS: người lạ không thấy đối soát lô của shop",
+  `select count(*) n from public.vexim_inbound_receipt_shipments where seller_account_id='${cShop}'`,
+  0,
+);
+
+await ex("reset role; rollback;");
+
+// ---- 5. idempotent ----------------------------------------------------------
+ok(
+  await ex(rd("migrations/0018_fc_allocation_receipts.sql"), "0018 lần 2"),
+  "0018 idempotent (chạy lại không lỗi, không đổi hợp đồng)",
+);
+ok(
+  (await colsOf("vexim_inventory_fc")).endsWith("fc_share_pct,source,imported_at"),
+  "0018 lần 2: hợp đồng cột view FC giữ nguyên",
+);
+await cmp(
+  "0018 lần 2: index unique không bị tạo trùng",
+  `select count(*) n from pg_indexes where schemaname='inventory'
+     and indexname in ('uq_fc_allocation_key','uq_receipts_key')`,
+  2,
 );
 
 console.log(`\n${"=".repeat(70)}`);

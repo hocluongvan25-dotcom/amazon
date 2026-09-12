@@ -374,6 +374,50 @@ export type ListingPublishResultInput = {
   blockReason?: string | null;
 };
 
+/* ---- Module 3 nâng cao (migration 0018) ---- */
+/**
+ * Kết quả nhập một lô dòng report. Bốn số này PHẢI tách bạch:
+ *  • skipped = dòng thiếu khoá / số không đọc được → KHÔNG được ghi (log nói rõ)
+ *  • merged  = dòng trùng khoá trong CÙNG file → đã cộng dồn thành 1 dòng
+ * Gộp hai số đó làm một sẽ che mất "file report có vấn đề".
+ */
+export type ReportUpsertCounts = {
+  inserted: number;
+  updated: number;
+  skipped: number;
+  merged: number;
+};
+
+/** Một dòng GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA (đã parse + chuẩn hoá). */
+export type FcAllocationRowInput = {
+  /** YYYY-MM-DD — ngày Amazon chụp snapshot */
+  snapshotDate: string;
+  sku: string;
+  fnsku?: string | null;
+  productName?: string | null;
+  quantity: number;
+  /** Rỗng = report không cho biết FC */
+  fulfillmentCenterId?: string;
+  /** Rỗng = report không cho biết disposition (không được đếm là bán được) */
+  detailedDisposition?: string;
+  country?: string | null;
+  source?: string;
+};
+
+/** Một dòng GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA (đã parse + chuẩn hoá). */
+export type ReceiptRowInput = {
+  /** YYYY-MM-DD — ngày Amazon hoàn tất nhận */
+  receivedDate: string;
+  sku: string;
+  fnsku?: string | null;
+  productName?: string | null;
+  quantity: number;
+  /** Rỗng = report không gắn lô → không đối soát theo lô được */
+  fbaShipmentId?: string;
+  fulfillmentCenterId?: string;
+  source?: string;
+};
+
 export interface DbAdapter {
   upsertInventorySnapshot(row: InventorySnapshotRow): Promise<void>;
   upsertInventoryDaily(row: InventoryDailyRow): Promise<void>;
@@ -436,6 +480,25 @@ export interface DbAdapter {
   /** Ghi/cập nhật cache JSON Schema product type cho form động L3 */
   upsertProductTypeSchema(input: ProductTypeSchemaInput): Promise<void>;
 
+  /* ---- Module 3 nâng cao (0018): phân bổ FC + lịch sử nhận hàng ---- */
+  /**
+   * Nhập report GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA.
+   * Idempotent theo (shop, snapshot_date, sku, FC, disposition) — nhập lại cùng
+   * file phải ra updated, KHÔNG nhân đôi tồn.
+   */
+  upsertFcAllocation(
+    sellerAccountId: string,
+    rows: FcAllocationRowInput[],
+  ): Promise<ReportUpsertCounts>;
+  /**
+   * Nhập report GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA.
+   * Idempotent theo (shop, received_date, sku, lô, FC).
+   */
+  upsertReceipts(
+    sellerAccountId: string,
+    rows: ReceiptRowInput[],
+  ): Promise<ReportUpsertCounts>;
+
   /* ---- Module 6 Đợt 2 (F3/F4) ---- */
   /** Nhập report GET_FBA_REIMBURSEMENTS_DATA (idempotent theo dedupeKey) */
   upsertReimbursements(
@@ -462,6 +525,74 @@ export interface DbAdapter {
   ): Promise<FinancialEventQueryRow[]>;
 }
 
+/**
+ * Luật nhập report của RPC 0018, áp y hệt trong MockDbAdapter để test không
+ * "xanh giả" so với production:
+ *   1. dòng không dựng được khoá (thiếu SKU / ngày sai / quantity không phải số)
+ *      → BỎ QUA, đếm `skipped`;
+ *   2. trùng khoá trong cùng lô → CỘNG quantity, đếm `merged` (nếu ghi 2 lần
+ *      Postgres sẽ báo "cannot affect row a second time");
+ *   3. khoá đã có trong bảng → đè số mới, đếm `updated` (không phình bảng).
+ */
+function upsertReportBatch<R, T extends { quantity: number }>(spec: {
+  store: (T & { sellerAccountId: string })[];
+  sellerAccountId: string;
+  rows: R[];
+  /** null = dòng không hợp lệ → skipped */
+  project: (row: R) => T | null;
+  /** khoá tự nhiên của report, dùng được cho cả dòng mới và dòng đang lưu */
+  key: (row: T) => string;
+}): ReportUpsertCounts {
+  const { store, sellerAccountId, rows, project, key } = spec;
+  let skipped = 0;
+  let merged = 0;
+  const batch = new Map<string, T>();
+  for (const row of rows) {
+    const value = project(row);
+    if (value === null) {
+      skipped++;
+      continue;
+    }
+    const k = key(value);
+    const prev = batch.get(k);
+    if (prev) {
+      prev.quantity += value.quantity;
+      merged++;
+    } else {
+      batch.set(k, value);
+    }
+  }
+  let inserted = 0;
+  let updated = 0;
+  for (const [k, value] of batch) {
+    const i = store.findIndex(
+      (r) => r.sellerAccountId === sellerAccountId && key(r) === k,
+    );
+    if (i >= 0) {
+      store[i] = { ...store[i], ...value, sellerAccountId };
+      updated++;
+    } else {
+      store.push({ ...value, sellerAccountId });
+      inserted++;
+    }
+  }
+  return { inserted, updated, skipped, merged };
+}
+
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Ngày + SKU + số nguyên hợp lệ? RPC 0018 cũng từ chối đúng ba thứ này. */
+function validReportKey(date: unknown, sku: unknown, quantity: unknown): boolean {
+  return (
+    typeof date === "string" &&
+    ISO_DATE_RE.test(date) &&
+    typeof sku === "string" &&
+    sku.trim() !== "" &&
+    typeof quantity === "number" &&
+    Number.isInteger(quantity)
+  );
+}
+
 /** In-memory — cho test & DEMO MODE */
 export class MockDbAdapter implements DbAdapter {
   snapshots: InventorySnapshotRow[] = [];
@@ -480,6 +611,9 @@ export class MockDbAdapter implements DbAdapter {
   publishQueue: ListingPublishQueueRow[] = [];
   publishResults: ListingPublishResultInput[] = [];
   productTypeSchemas: ProductTypeSchemaInput[] = [];
+  /* Module 3 nâng cao (0018) */
+  fcAllocation: (FcAllocationRowInput & { sellerAccountId: string })[] = [];
+  receipts: (ReceiptRowInput & { sellerAccountId: string })[] = [];
   /* Module 6 Đợt 2 (F3/F4) */
   reimbursements: (ReimbursementRowInput & { sellerAccountId: string })[] = [];
   reimbursementClaims: (ReimbursementClaimRowInput & { id: string; sellerAccountId: string; status: string })[] = [];
@@ -700,6 +834,59 @@ export class MockDbAdapter implements DbAdapter {
   }
 
   /* ---- Module 6 Đợt 2 (F3/F4) ---- */
+
+  async upsertFcAllocation(
+    sellerAccountId: string,
+    rows: FcAllocationRowInput[],
+  ): Promise<ReportUpsertCounts> {
+    return upsertReportBatch<FcAllocationRowInput, FcAllocationRowInput>({
+      store: this.fcAllocation,
+      sellerAccountId,
+      rows,
+      project: (r) =>
+        validReportKey(r.snapshotDate, r.sku, r.quantity)
+          ? {
+              snapshotDate: r.snapshotDate,
+              sku: r.sku.trim(),
+              fnsku: r.fnsku ?? null,
+              productName: r.productName ?? null,
+              quantity: r.quantity,
+              fulfillmentCenterId: (r.fulfillmentCenterId ?? "").trim().toUpperCase(),
+              detailedDisposition: (r.detailedDisposition ?? "").trim().toUpperCase(),
+              country: r.country ?? null,
+              source: r.source ?? "report",
+            }
+          : null,
+      key: (r) =>
+        [r.snapshotDate, r.sku, r.fulfillmentCenterId ?? "", r.detailedDisposition ?? ""].join("\u0000"),
+    });
+  }
+
+  async upsertReceipts(
+    sellerAccountId: string,
+    rows: ReceiptRowInput[],
+  ): Promise<ReportUpsertCounts> {
+    return upsertReportBatch<ReceiptRowInput, ReceiptRowInput>({
+      store: this.receipts,
+      sellerAccountId,
+      rows,
+      project: (r) =>
+        validReportKey(r.receivedDate, r.sku, r.quantity)
+          ? {
+              receivedDate: r.receivedDate,
+              sku: r.sku.trim(),
+              fnsku: r.fnsku ?? null,
+              productName: r.productName ?? null,
+              quantity: r.quantity,
+              fbaShipmentId: (r.fbaShipmentId ?? "").trim().toUpperCase(),
+              fulfillmentCenterId: (r.fulfillmentCenterId ?? "").trim().toUpperCase(),
+              source: r.source ?? "report",
+            }
+          : null,
+      key: (r) =>
+        [r.receivedDate, r.sku, r.fbaShipmentId ?? "", r.fulfillmentCenterId ?? ""].join("\u0000"),
+    });
+  }
 
   async upsertReimbursements(
     sellerAccountId: string,

@@ -32,7 +32,7 @@ Cảnh báo (alert) ──► Tác vụ (task) ──► Các bước (steps) �
 | | |
 |---|---|
 | **Kích hoạt** | Alert `stockout_risk` (days of cover < 14) |
-| **Dữ liệu** | FBA Inventory API · report Sales & Traffic · Fulfillment Inbound |
+| **Dữ liệu** | FBA Inventory API · report Sales & Traffic · Fulfillment Inbound · report **FBA Daily Inventory History** (tồn theo FC) + **FBA Received Inventory** (thực nhận) — nhập bằng `worker inventory:fc` (0018) |
 | **Phòng** | Kho vận (chủ trì) · Tài chính (đối soát) · Khách hàng (xác nhận) |
 
 | # | Bước | Ai | Dữ liệu / hành động | Xong khi |
@@ -43,20 +43,20 @@ Cảnh báo (alert) ──► Tác vụ (task) ──► Các bước (steps) �
 | 4 | Chốt số lượng + giá vốn với khách hàng | Kho vận | task liên quan client (nếu hợp đồng yêu cầu) | khách xác nhận |
 | 5 | Trưởng phòng duyệt (giá trị lô > ngưỡng $) | Trưởng phòng Kho vận | màn duyệt trong hệ thống | duyệt xong |
 | 6 | Tạo inbound shipment | Hệ thống → Amazon | **Fulfillment Inbound API** (role Amazon Fulfillment) | shipment_id sinh ra |
-| 7 | Theo dõi vận chuyển & nhận hàng tại FC | Kho vận | inbound status | trạng thái CLOSED |
-| 8 | Đối soát số nhận vs kế hoạch — thiếu/mất → mở **SOP-09** | Kho vận + Tài chính | đối chiếu | lệch = 0 hoặc đã mở claim |
+| 7 | Theo dõi vận chuyển & nhận hàng tại FC | Kho vận | inbound status + màn **I4** (`/fulfillment/inbound`) | trạng thái CLOSED |
+| 8 | Đối soát số nhận vs kế hoạch — thiếu/mất → mở **SOP-09** | Kho vận + Tài chính | màn **I4** cột *Đối soát nhận* (`vexim_inbound_receipt_shipments`, 0018): thực nhận từ report ⋈ số gửi từ Inbound API — nhãn *Thiếu N* là đầu vào SOP-09; *Chưa rõ số gửi* nghĩa là thiếu một trong hai nguồn, KHÔNG phải đã nhận đủ | lệch = 0 hoặc đã mở claim |
 
 ### SOP-09 · Claim bồi hoàn FBA ⏱ chu kỳ hằng tuần
 
 | | |
 |---|---|
 | **Kích hoạt** | Đối chiếu tồn (bước 8 của SOP-01) · rà tuần tự thứ Hai |
-| **Dữ liệu** | FBA reports (Reimbursements, Ledger, Inventory Aged) |
+| **Dữ liệu** | FBA reports (Reimbursements, Ledger, Inventory Aged) + **Received Inventory** (thực nhận từng lô) + **Daily Inventory History** (tồn theo FC, disposition hỏng/không bán được) — 0018 |
 | **Phòng** | Tài chính (chủ trì) · Kho vận |
 
 | # | Bước | Ai | Xong khi |
 |---|------|----|----------|
-| 1 | Đối chiếu tồn báo cáo vs thực nhận từng lô | Tài chính | danh sách khoản nghi ngờ |
+| 1 | Đối chiếu tồn báo cáo vs thực nhận từng lô | Tài chính | màn **I4** (lô *Thiếu N*) + màn **I2** (phân bổ FC, cột *không bán được* / *không rõ*) → danh sách khoản nghi ngờ |
 | 2 | Phân loại: mất tại FC · hư khi nhập · thu sai phí · mất khi trả hàng | Tài chính | phân loại xong |
 | 3 | Ước tính giá trị từng khoản | Tài chính | tổng $ hiện ra |
 | 4 | Nộp case trên Seller Central + đính kèm bằng chứng | Tài chính | case ID ghi vào hệ thống |
