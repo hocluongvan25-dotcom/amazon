@@ -9,3 +9,6 @@ npm-debug.log*
 .vercel
 *.log
 supabase/.temp/
+
+# Local test / one-off scripts
+web/scripts/
