@@ -39,11 +39,44 @@ revert tạm).
 
 ### Việc VEXIM cần làm (theo thứ tự)
 
-1. SQL Editor → chạy `migrations/0006_cleanup_rls_test_fixtures.sql`
-2. SQL Editor → chạy `migrations/0007_seed_admin_and_alerts.sql`
-3. Vercel → thêm **`CRON_SECRET`** (Production + Preview) → Redeploy
-4. Chưa thêm `AMAZON_LWA_*` thì cron vẫn an toàn: worker chạy demo trong bộ nhớ,
-   **không** ghi DB thật
+1. ✅ SQL Editor → chạy `migrations/0006_cleanup_rls_test_fixtures.sql` — **đã chạy 12/09**
+2. ✅ SQL Editor → chạy `migrations/0007_seed_admin_and_alerts.sql` — **đã chạy 12/09**
+   (xác nhận: `orgs=1, shops=6, users=1, admins=1, alerts=9, listings=0` — khớp kỳ vọng)
+3. ✅ Vercel → thêm `CRON_SECRET` — **đã thêm 12/09**
+4. ☐ Merge PR #3 để build Vercel chạy được (xem mục "Build Vercel" dưới)
+
+## Build Vercel fail — nguyên nhân & cách sửa (12/09)
+
+Deployment fail từ **PR #2** (`10974b6`), **không phải** do PR #3:
+
+| Commit | Vercel |
+|---|---|
+| `6dd39aa` (PR #1) | ✅ success |
+| `10974b6` (PR #2) | ❌ failure |
+| `8194884`, `38be50c` (PR #3) | ❌ failure |
+
+**Nguyên nhân:** Vercel đặt **Root Directory = `web`**, mà `web/src/lib/worker/index.ts`
+import `"../../../../worker/src/runtime/run-inventory-sync"` — vượt ra ngoài `web/`.
+Tái hiện bằng cách build `web/` trong thư mục cô lập:
+
+```
+./src/lib/worker/index.ts
+Module not found: Can't resolve '../../../../worker/src/runtime/run-inventory-sync'
+Import trace: ./src/app/api/cron/inventory-sync/route.ts
+> Build failed because of webpack errors          BUILD_EXIT=1
+```
+
+**Đã sửa:**
+- Chuyển 8 file của inventory sync engine vào `web/src/lib/worker/` (closure khép kín,
+  không kéo thêm gì): `config`, `amazon/{lwa,fba-inventory}`, `db/{adapter,supabase}`,
+  `domain/inventory-metrics`, `jobs/inventory-sync.job`, `run-inventory-sync`
+- `worker/src/…` tương ứng thành **shim re-export** → `cli.ts` + 96 test không đổi
+- **Dời `vercel.json` từ repo root vào `web/`** — Root Directory = `web` nên file ở
+  root **không được Vercel đọc**, cron chưa bao giờ được đăng ký
+- Đã loại trừ nguyên nhân khác: `npm ci --dry-run` trong `web/` exit 0 (lockfile đồng bộ)
+
+**Kiểm chứng:** build `web/` cô lập (không có `worker/` bên cạnh) → `BUILD_EXIT=0`,
+39/39 routes, có `/api/cron/inventory-sync`. Trước khi sửa: `BUILD_EXIT=1`.
 
 
 ## Trạng thái tổng thể

@@ -9,6 +9,19 @@
 | 2 — Snapshot | `getInventorySummaries` (FBA Inventory v1) | 30–60 phút/shop | `src/jobs/inventory-sync.job.ts` + `src/amazon/fba-inventory.ts` |
 | 3 — Đối soát | Report `GET_FBA_MYI_UNSUPPRESSED_INVENTORY_DATA` (TSV) | 2h sáng | `src/reports/myi.parser.ts` |
 
+> **⚠️ VỊ TRÍ CODE (đổi 12/09/2026):** inventory sync engine giờ nằm ở
+> **`web/src/lib/worker/`**, không còn ở `worker/src/`.
+> Lý do: Vercel đặt **Root Directory = `web`**, nên `web/` phải tự đủ — import cũ
+> `"../../../../worker/src/runtime/run-inventory-sync"` làm build Vercel fail với
+> `Module not found`. Các file `worker/src/{config,amazon/lwa,amazon/fba-inventory,
+> db/adapter,db/supabase,domain/inventory-metrics,jobs/inventory-sync.job,
+> runtime/run-inventory-sync}.ts` nay là **shim re-export** nên `cli.ts` và
+> `worker/tests/*.test.ts` không phải đổi gì (96/96 test vẫn pass).
+>
+> `worker/` vẫn giữ phần **không** deploy lên Vercel: listings, pricing, finance,
+> reports (MYI / merchant listings / stranded), notification handlers.
+
+
 Nguyên tắc đã chốt: **không bao giờ đè số khi lệch nguồn** — lệch được đẩy
 vào Sync Health để con người quyết (tránh bẫy cột `afn-reserved-*` rỗng
 trong một số kỳ report).
