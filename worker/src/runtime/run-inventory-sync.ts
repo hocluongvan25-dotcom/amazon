@@ -120,7 +120,9 @@ export async function runInventorySyncAll(
           `KHÔNG ghi DB thật (chống demo data lọt vào production). Chạy demo trong bộ nhớ.\n`,
       );
     } else {
-      log(`[inventory-sync] mode=mock (không có Supabase/LWA — chạy trên dữ liệu demo)\n`);
+      log(
+        `[inventory-sync] mode=${cfg.mode} (chưa đủ Supabase + LWA — chạy demo trong bộ nhớ, không ghi DB)\n`,
+      );
     }
   }
 

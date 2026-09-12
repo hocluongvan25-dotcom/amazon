@@ -88,7 +88,10 @@ export async function GET(req: Request) {
       totalAlerts: res.totalAlerts,
       errors: res.errors,
       log,
-      spapiConfigured: !!getSpApiConfig(),
+      // LƯU Ý: getSpApiConfig() trả OBJECT {region, configured}, không phải null.
+      // `!!getSpApiConfig()` luôn true (bug có từ commit 10974b6) — phải đọc .configured.
+      spapiConfigured: getSpApiConfig().configured,
+      spapiRegion: getSpApiConfig().region,
       cronSecretConfigured: !!process.env.CRON_SECRET,
     });
   } catch (e) {
