@@ -19,6 +19,9 @@ const eventTone: Record<FinancialEventType, "green" | "red" | "amber" | "blue" |
   ServiceFee: "red",
   Subscription: "red",
   Reserve: "gray",
+  // Bổ sung khi cắm dữ liệu thật từ report settlement V2 (module 6)
+  Transfer: "blue",
+  PromotionRebate: "amber",
 };
 void eventTone;
 

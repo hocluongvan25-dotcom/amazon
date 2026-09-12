@@ -333,7 +333,10 @@ export type FinancialEventType =
   | "Adjustment"
   | "ServiceFee"
   | "Subscription"
-  | "Reserve";
+  | "Reserve"
+  /* bổ sung từ report settlement V2 (module 6, đợt sync thật) */
+  | "Transfer"
+  | "PromotionRebate";
 
 export type FinancialEventRow = {
   id: string;

@@ -940,6 +940,8 @@ const eventTypeLabels: Record<FinancialEventType, string> = {
   ServiceFee: "Service fee",
   Subscription: "Pro subscription",
   Reserve: "Reserve hold/release",
+  Transfer: "Chuyển về ngân hàng",
+  PromotionRebate: "Promotional rebate",
 };
 
 export const financialEvents: FinancialEventRow[] = [
@@ -971,6 +973,8 @@ export const eventTypeFilters: { id: FinancialEventType | "all"; label: string }
   { id: "Reimbursement", label: "Reimbursements" },
   { id: "StorageFee", label: "Storage fees" },
   { id: "Adjustment", label: "Adjustments" },
+  { id: "PromotionRebate", label: "Promotional rebates" },
+  { id: "Transfer", label: "Chuyển tiền về NH" },
 ];
 
 /* ---------- Notifications chuông (theo persona) ---------- */
