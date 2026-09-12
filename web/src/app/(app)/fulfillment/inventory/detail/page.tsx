@@ -1,6 +1,16 @@
 import { Bars, Chip, NoAccess, PageHeader, Panel, tableCls } from "@/components/ui";
 import { requireSession } from "@/lib/auth/session";
 import { readFcAllocation, readInventoryLatest, readReceipts } from "@/lib/data/inventory";
+import { readStorageFees } from "@/lib/data/fees";
+import {
+  feeByFcForSku,
+  feeTrend,
+  latestFeeMonth,
+  mapStorageFeeRow,
+  storageFeesForSku,
+  type StorageFeeRaw,
+  type StorageFeeUiRow,
+} from "@/lib/data/fees-model";
 import {
   fcAllocationForSku,
   formatStockValue,
@@ -47,6 +57,16 @@ async function LiveInventoryDetail({ sku }: { sku: string }) {
   } catch {
     rxFailed = true;
   }
+  // 0019: phí lưu kho của SKU này (report phí KHÔNG có cột SKU → view suy SKU
+  // qua FNSKU/ASIN, nên ở đây khớp bằng CẢ BA: sku, fnsku, asin).
+  let feeRaw: StorageFeeRaw[] = [];
+  let feeFailed = false;
+  try {
+    feeRaw = await readStorageFees();
+  } catch {
+    feeFailed = true;
+  }
+
   const fcRows = fcAllocationForSku(fcRaw.map(mapFcAllocationRow), sku);
   const fcSummary = summarizeFcAllocation(fcRows);
   const rxRows = receiptsForSku(rxRaw.map(mapReceiptRow), sku);
@@ -55,6 +75,21 @@ async function LiveInventoryDetail({ sku }: { sku: string }) {
   const allRows = rawRows.map(mapInventoryRow);
   const row = allRows.find((r) => r.sku === sku);
   const raw = rawRows.find((r) => r.sku === sku);
+
+  // FNSKU không có trong vexim_inventory_latest → lấy từ report phân bổ FC (0018),
+  // nơi mỗi dòng tồn theo FC đều kèm FNSKU của chính SKU đó.
+  const fcRawForSku = fcRaw.find(
+    (r) => r.sku.trim().toLowerCase() === sku.trim().toLowerCase() && r.fnsku,
+  );
+  const feeRows: StorageFeeUiRow[] = storageFeesForSku(feeRaw.map(mapStorageFeeRow), {
+    sku,
+    fnsku: fcRawForSku?.fnsku ?? null,
+    asin: raw?.asin ?? null,
+  });
+  const feeMonth = latestFeeMonth(feeRows);
+  const feeThisMonth = feeMonth ? feeByFcForSku(feeRows, feeMonth) : [];
+  const feeMonths = feeTrend(feeRows);
+  const feeUnmapped = feeRows.filter((r) => r.skuSource === "none").length;
 
   if (failed) {
     return (
@@ -286,6 +321,124 @@ async function LiveInventoryDetail({ sku }: { sku: string }) {
           )}
         </Panel>
       </div>
+
+      {/* ------------------------------------------------------------------ */}
+      {/* 0019 — PHÍ LƯU KHO CỦA SKU NÀY: nằm ở FC nào thì tốn bao nhiêu tiền  */}
+      {/* ------------------------------------------------------------------ */}
+      <Panel
+        title="Phí lưu kho theo FC"
+        hint={
+          feeMonth
+            ? `kỳ ${feeMonth} · report GET_FBA_STORAGE_FEE_CHARGES_DATA`
+            : "report GET_FBA_STORAGE_FEE_CHARGES_DATA (chưa có dữ liệu)"
+        }
+      >
+        {feeFailed ? (
+          <p className="text-[13px] text-muted">
+            <b className="text-amber">Chưa đọc được vexim_storage_fees</b> — kiểm tra đã chạy
+            migration 0019 và quyền SELECT chưa. Các khối khác của trang này vẫn dùng dữ liệu thật.
+          </p>
+        ) : feeRows.length === 0 ? (
+          <p className="text-[13px] text-muted">
+            Chưa có phí lưu kho của SKU này. Phí lưu kho <b>không có trong API tồn kho</b> — Amazon chỉ
+            đưa qua report tháng. Kéo bằng{" "}
+            <code className="text-[12px]">npm run worker:reports-pull -- --type=storage-fees</code> hoặc
+            nạp file <code className="text-[12px]">--storage-fees=&lt;file.tsv&gt;</code>.
+          </p>
+        ) : (
+          <>
+            {feeUnmapped > 0 ? (
+              <p className="mb-2 text-[12.5px] text-amber">
+                {feeUnmapped} dòng phí chưa gắn được SKU trong catalog — hệ thống khớp theo FNSKU/ASIN
+                của report. Kiểm tra lại FNSKU trong report phân bổ FC (0018) hoặc ASIN trong catalog để
+                gắn chắc chắn hơn.
+              </p>
+            ) : null}
+            <table className={tableCls.table}>
+              <thead>
+                <tr>
+                  <th className={tableCls.th}>Kỳ</th>
+                  <th className={tableCls.th}>FC</th>
+                  <th className={`${tableCls.th} text-right`}>Phí lưu kho</th>
+                  <th className={`${tableCls.th} text-right`}>Rate</th>
+                  <th className={`${tableCls.th} text-right`}>Tồn BQ</th>
+                  <th className={`${tableCls.th} text-right`}>Thể tích</th>
+                  <th className={tableCls.th}>Khớp SKU qua</th>
+                </tr>
+              </thead>
+              <tbody>
+                {feeThisMonth.map((f) => (
+                  <tr key={`${f.month}-${f.fc}-${f.fnsku ?? f.asin}`}>
+                    <td className={tableCls.td}>{f.monthLabel}</td>
+                    <td className={`${tableCls.td} font-mono text-[12px] font-bold`}>{f.fc}</td>
+                    <td className={`${tableCls.tdNum} font-extrabold`}>{f.feeLabel}</td>
+                    <td className={tableCls.tdNum}>{f.storageRate ?? "—"}</td>
+                    <td className={tableCls.tdNum}>
+                      {f.avgOnHand === null ? <span className="text-soft">chưa rõ</span> : f.avgOnHand}
+                    </td>
+                    <td className={tableCls.tdNum}>
+                      {f.totalVolume === null ? (
+                        <span className="text-soft">chưa rõ</span>
+                      ) : (
+                        `${f.totalVolume}${f.volumeUnits ? ` ${f.volumeUnits}` : ""}`
+                      )}
+                    </td>
+                    <td className={tableCls.td}>
+                      <Chip tone={f.skuSource === "none" ? "amber" : "gray"}>{f.skuSourceLabel}</Chip>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            {feeMonths.length > 1 ? (
+              <div className="mt-3">
+                <div className="mb-1 text-[12.5px] font-bold text-muted">Diễn biến phí theo kỳ</div>
+                <table className={tableCls.table}>
+                  <thead>
+                    <tr>
+                      <th className={tableCls.th}>Kỳ</th>
+                      <th className={`${tableCls.th} text-right`}>Phí</th>
+                      <th className={`${tableCls.th} text-right`}>So kỳ trước</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {feeMonths.map((m, idx) => {
+                      const prev = idx > 0 ? feeMonths[idx - 1] : null;
+                      const delta =
+                        prev && prev.fee !== null && m.fee !== null && prev.currency === m.currency
+                          ? Math.round((m.fee - prev.fee) * 100) / 100
+                          : null;
+                      return (
+                        <tr key={m.month}>
+                          <td className={tableCls.td}>{m.monthLabel}</td>
+                          <td className={`${tableCls.tdNum} font-bold`}>
+                            {m.fee === null ? "chưa rõ" : m.fee.toLocaleString("vi-VN", { minimumFractionDigits: 2 })}
+                            {m.currency ? ` ${m.currency}` : ""}
+                          </td>
+                          <td
+                            className={`${tableCls.tdNum} font-bold ${
+                              delta === null ? "text-soft" : delta > 0 ? "text-red" : delta < 0 ? "text-green" : ""
+                            }`}
+                          >
+                            {delta === null
+                              ? "—"
+                              : `${delta > 0 ? "+" : ""}${delta.toLocaleString("vi-VN", { minimumFractionDigits: 2 })}`}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <p className="mt-2 text-[12px] text-soft">
+                  So kỳ trước chỉ tính khi HAI kỳ cùng một tiền tệ (không so USD với CAD). Q4 rate lưu kho
+                  của Amazon cao hơn hẳn — phí nhảy vọt ở kỳ 09–12 thường là do rate, không phải do tồn nhiều.
+                </p>
+              </div>
+            ) : null}
+          </>
+        )}
+      </Panel>
     </>
   );
 }

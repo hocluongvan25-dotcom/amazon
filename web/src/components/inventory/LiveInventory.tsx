@@ -11,6 +11,26 @@ import {
   readReceiptShipments,
 } from "@/lib/data/inventory";
 import {
+  readInboundIssues,
+  readInboundIssueShipments,
+  readStorageFeeByFc,
+  readStorageFees,
+} from "@/lib/data/fees";
+import {
+  feeByFcForMonth,
+  issueFeesByCurrency,
+  latestFeeMonth,
+  mapInboundIssueRow,
+  mapInboundIssueShipmentRow,
+  mapStorageFeeByFcRow,
+  mapStorageFeeRow,
+  mergeInboundIssues,
+  moneyLabel,
+  type InboundIssueShipmentUiRow,
+  type InboundIssueUiRow,
+  type StorageFeeByFcUiRow,
+} from "@/lib/data/fees-model";
+import {
   mapInventoryRow,
   mapInboundRow,
   mapReceiptShipmentRow,
@@ -271,6 +291,18 @@ export async function LiveFulfillmentOverview() {
     failed = true;
   }
 
+  // 0019: phí lưu kho theo FC đọc TÁCH BIỆT — chưa chạy 0019 / chưa kéo report
+  // thì trang tổng quan vẫn chạy, chỉ panel phí hiện nhãn "chưa có dữ liệu".
+  let feeByFc: StorageFeeByFcUiRow[] = [];
+  let feeFailed = false;
+  try {
+    feeByFc = (await readStorageFeeByFc()).map(mapStorageFeeByFcRow);
+  } catch {
+    feeFailed = true;
+  }
+  const feeMonth = latestFeeMonth(feeByFc);
+  const feeGroups = feeMonth ? feeByFcForMonth(feeByFc, feeMonth) : [];
+
   const allRows = inventoryRaw.map(mapInventoryRow);
   const kpis = computeFulfillKpis(allRows);
   const skuStock = buildSkuStock(allRows);
@@ -374,6 +406,89 @@ export async function LiveFulfillmentOverview() {
               />
             </Panel>
           </div>
+
+          {/* -------------------------------------------------------------- */}
+          {/* 0019 — PHÂN BỔ PHÍ LƯU KHO THEO FC                              */}
+          {/* Trả lời câu "hàng đang nằm ở FC nào thì TỐN BAO NHIÊU tiền".     */}
+          {/* Tiền KHÔNG được cộng qua lại giữa các currency: mỗi nhóm một tổng. */}
+          {/* -------------------------------------------------------------- */}
+          <Panel
+            title={`Phí lưu kho theo FC${feeMonth ? ` · kỳ ${feeMonth}` : ""}`}
+            hint="GET_FBA_STORAGE_FEE_CHARGES_DATA · worker: reports:pull · cron 03:00 UTC"
+          >
+            {feeFailed ? (
+              <p className="text-[13px] text-muted">
+                Không đọc được <code>vexim_storage_fee_by_fc</code>. Kiểm tra migration 0019
+                đã chạy chưa và quyền SELECT của role.
+              </p>
+            ) : feeGroups.length === 0 ? (
+              <p className="text-[13px] text-muted">
+                Chưa có phí lưu kho nào được nhập. Kéo report bằng{" "}
+                <code>npm run worker:reports-pull -- --type=storage-fees</code> (cần role
+                SP-API), hoặc nạp file đã tải từ Seller Central:{" "}
+                <code>--storage-fees=&lt;file.tsv&gt;</code>.
+              </p>
+            ) : (
+              <div className="space-y-4">
+                {feeGroups.map((g) => (
+                  <div key={g.currency}>
+                    <div className="mb-1.5 flex flex-wrap items-baseline gap-2 text-[12.5px]">
+                      <b className="font-bold text-accent-ink">{g.currency}</b>
+                      <span className="text-muted">
+                        tổng kỳ {feeMonth}:{" "}
+                        <b className="font-extrabold">{moneyLabel(g.total, g.currency === "(không rõ tiền)" ? null : g.currency)}</b>
+                      </span>
+                      <span className="text-soft">
+                        {g.rows.length} FC · {g.rows.reduce((s, r) => s + r.lines, 0)} dòng sản phẩm
+                      </span>
+                    </div>
+                    <table className={tableCls.table}>
+                      <thead>
+                        <tr>
+                          <th className={tableCls.th}>FC</th>
+                          <th className={`${tableCls.th} text-right`}>Phí kỳ này</th>
+                          <th className={`${tableCls.th} text-right`}>Tỉ trọng</th>
+                          <th className={`${tableCls.th} text-right`}>Thể tích</th>
+                          <th className={`${tableCls.th} text-right`}>Tồn BQ</th>
+                          <th className={`${tableCls.th} text-right`}>SKU</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {g.rows.map((r) => (
+                          <tr key={`${r.month}-${r.fc}-${r.currency}`}>
+                            <td className={`${tableCls.td} font-mono text-[12px] font-bold`}>{r.fc}</td>
+                            <td className={`${tableCls.tdNum} font-extrabold`}>{r.feeLabel}</td>
+                            <td
+                              className={`${tableCls.tdNum} font-bold ${
+                                r.sharePct !== null && r.sharePct >= 40 ? "text-amber" : ""
+                              }`}
+                            >
+                              {r.shareLabel}
+                            </td>
+                            <td className={tableCls.tdNum}>
+                              {r.volume === null ? (
+                                <span className="text-soft">chưa rõ</span>
+                              ) : (
+                                `${r.volume.toLocaleString("vi-VN", { maximumFractionDigits: 2 })}${r.volumeUnits ? ` ${r.volumeUnits}` : ""}`
+                              )}
+                            </td>
+                            <td className={tableCls.tdNum}>
+                              {r.units === null ? <span className="text-soft">—</span> : r.units.toLocaleString("vi-VN", { maximumFractionDigits: 1 })}
+                            </td>
+                            <td className={tableCls.tdNum}>{r.fnskuCount}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ))}
+                <p className="text-[12px] text-soft">
+                  Mỗi bảng là MỘT tiền tệ — hệ thống không cộng USD với CAD. FC chiếm ≥40% phí
+                  được tô vàng: đó là nơi đáng xem lại (rút hàng, thanh lý, hoặc chuyển kỳ nhập).
+                </p>
+              </div>
+            )}
+          </Panel>
         </>
       )}
     </>
@@ -411,13 +526,40 @@ export async function LiveInboundShipments() {
     reconFailed = true;
   }
 
-  const merged = mergeInboundReconcile(rawRows.map(mapInboundRow), reconRows);
+  // 0019: phí inbound sai quy cách — cũng đọc tách biệt (chưa kéo report thì
+  // bảng lô vẫn chạy, chỉ thiếu cột phí).
+  let issueShipments: InboundIssueShipmentUiRow[] = [];
+  let issues: InboundIssueUiRow[] = [];
+  let issueFailed = false;
+  try {
+    const [shipRaw, issueRaw] = await Promise.all([
+      readInboundIssueShipments(),
+      readInboundIssues(),
+    ]);
+    issueShipments = shipRaw.map(mapInboundIssueShipmentRow);
+    issues = issueRaw.map(mapInboundIssueRow);
+  } catch {
+    issueFailed = true;
+  }
+
+  const reconMerged = mergeInboundReconcile(rawRows.map(mapInboundRow), reconRows);
+  const issueMerged = mergeInboundIssues(reconMerged.rows, issueShipments);
+  const merged = { ...reconMerged, rows: issueMerged.rows };
   const rows = merged.rows;
   const moving = rows.filter((r) =>
     ["IN_TRANSIT", "SHIPPED", "DELIVERED", "RECEIVING"].includes(r.status),
   );
   const pending = rows.filter((r) => r.status === "WORKING");
   const shortCount = reconRows.filter((r) => r.state === "short").length;
+  const issueFees = issueFeesByCurrency(issues);
+  const issueTotalLabel =
+    issueFees.length === 0
+      ? "chưa rõ"
+      : issueFees.map((f) => moneyLabel(f.fee, f.currency === "(không rõ tiền)" ? null : f.currency)).join(" + ");
+  const worstShipments = [...issueShipments]
+    .sort((a, b) => b.severity - a.severity || b.fee - a.fee)
+    .slice(0, 8);
+  const orphanIssues = issueMerged.orphans;
 
   return (
     <>
@@ -429,8 +571,11 @@ export async function LiveInboundShipments() {
         sub={`${rows.length} lô · ${moving.length} đang di chuyển · ${pending.length} chờ placement` +
           (reconFailed || reconRows.length === 0
             ? " · chưa có số nhận từ report"
-            : ` · ${merged.matched} lô đã có số nhận${shortCount > 0 ? ` · ${shortCount} lô THIẾU` : ""}`)}
-        desc="Nguồn: Fulfillment Inbound API v2024-03-20 (getInboundPlan/getShipment) · đối soát nhận hàng: GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA. Trạng thái chuẩn Amazon."
+            : ` · ${merged.matched} lô đã có số nhận${shortCount > 0 ? ` · ${shortCount} lô THIẾU` : ""}`) +
+          (issueFailed || issues.length === 0
+            ? ""
+            : ` · ${issues.length} vấn đề inbound, phí ${issueTotalLabel}`)}
+        desc="Nguồn: Fulfillment Inbound API v2024-03-20 (getInboundPlan/getShipment) · đối soát nhận hàng: GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA · phí/vấn đề khi nhận: GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA. Trạng thái chuẩn Amazon."
       />
       {failed ? (
         <Panel title="Không tải được dữ liệu">
@@ -452,6 +597,7 @@ export async function LiveInboundShipments() {
                   <th className={tableCls.th}>FC đích</th>
                   <th className={tableCls.th}>ETA</th>
                   <th className={tableCls.th}>Đối soát nhận</th>
+                  <th className={tableCls.th}>Phí / vấn đề inbound</th>
                 </tr>
               </thead>
               <tbody>
@@ -467,6 +613,15 @@ export async function LiveInboundShipments() {
                     <td className={tableCls.td}>{s.eta}</td>
                     <td className={tableCls.td}>
                       <Chip tone={recTone[s.reconcileTone]}>{s.reconcile}</Chip>
+                    </td>
+                    <td className={tableCls.td}>
+                      {s.issueCount === undefined ? (
+                        <span className="text-soft">—</span>
+                      ) : (
+                        <Chip tone={recTone[s.issueTone ?? "flat"]}>
+                          {s.issueCount} vấn đề · {s.issueFeeLabel}
+                        </Chip>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -524,6 +679,154 @@ export async function LiveInboundShipments() {
               </p>
             </Panel>
           ) : null}
+
+          {/* -------------------------------------------------------------- */}
+          {/* 0019 — PHÍ INBOUND SAI QUY CÁCH: tiền mất vì lô nhập không chuẩn  */}
+          {/* -------------------------------------------------------------- */}
+          {issueFailed ? (
+            <Panel title="Phí &amp; vấn đề khi nhận lô">
+              <p className="text-[13px] text-muted">
+                <b className="text-amber">Chưa đọc được vexim_inbound_issue_shipments</b> — kiểm tra đã chạy
+                migration 0019 và quyền SELECT chưa. Bảng lô ở trên vẫn là dữ liệu thật; riêng cột
+                &quot;Phí / vấn đề inbound&quot; để trống, hệ thống KHÔNG suy ra &quot;không có phí&quot;.
+              </p>
+            </Panel>
+          ) : issueShipments.length === 0 ? (
+            <Panel title="Phí &amp; vấn đề khi nhận lô" hint="GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA">
+              <p className="text-[13px] text-muted">
+                Chưa có vấn đề/phí inbound nào được nhập. Kéo report bằng{" "}
+                <code>npm run worker:reports-pull -- --type=noncompliance</code> hoặc nạp file{" "}
+                <code>--noncompliance=&lt;file.tsv&gt;</code>. <b>Lưu ý:</b> report này RỖNG là chuyện
+                bình thường — nghĩa là Amazon không ghi nhận vấn đề gì, không phải lỗi.
+              </p>
+            </Panel>
+          ) : (
+            <>
+              <Panel
+                title="Phí &amp; vấn đề khi Amazon nhận lô"
+                hint={`tổng phí: ${issueTotalLabel} · lô nghiêm trọng nhất lên trước`}
+              >
+                <table className={tableCls.table}>
+                  <thead>
+                    <tr>
+                      <th className={tableCls.th}>Shipment</th>
+                      <th className={tableCls.th}>FC</th>
+                      <th className={`${tableCls.th} text-right`}>Vấn đề</th>
+                      <th className={`${tableCls.th} text-right`}>Đơn vị lỗi</th>
+                      <th className={`${tableCls.th} text-right`}>Phí</th>
+                      <th className={tableCls.th}>Loại vấn đề</th>
+                      <th className={tableCls.th}>Coaching / cảnh báo</th>
+                      <th className={tableCls.th}>Ngày báo</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {worstShipments.map((r) => (
+                      <tr key={`${r.shipmentId}-${r.currency}`}>
+                        <td className={`${tableCls.td} font-mono text-[12px] font-bold`}>{r.shipmentId}</td>
+                        <td className={tableCls.td}>{r.fc ?? "—"}</td>
+                        <td className={`${tableCls.tdNum} font-bold`}>{r.issueCount}</td>
+                        <td className={tableCls.tdNum}>{r.problemUnits}</td>
+                        <td className={`${tableCls.tdNum} font-extrabold`}>{r.feeLabel}</td>
+                        <td className={tableCls.td}>{r.problemTypes.join(" · ")}</td>
+                        <td className={tableCls.td}>
+                          <Chip tone={recTone[r.tone]}>
+                            {[...r.coachingLevels, ...r.alertStatuses].filter(Boolean).join(" · ") || "—"}
+                          </Chip>
+                        </td>
+                        <td className={tableCls.td}>{r.lastDate ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p className="mt-2 text-[12px] text-soft">
+                  Phí chỉ được cộng TRONG CÙNG một tiền tệ (mỗi lô một currency từ report). Coaching level
+                  là cách Amazon chấm việc nhập hàng của mình — lên LEVEL_3 thì lô sau dễ bị soi hơn.
+                </p>
+              </Panel>
+
+              <Panel
+                title="Chi tiết từng vấn đề"
+                hint="expected/received là của DÒNG có vấn đề — không phải của cả lô"
+              >
+                <table className={tableCls.table}>
+                  <thead>
+                    <tr>
+                      <th className={tableCls.th}>Ngày báo</th>
+                      <th className={tableCls.th}>Shipment</th>
+                      <th className={tableCls.th}>Carton</th>
+                      <th className={tableCls.th}>SKU</th>
+                      <th className={tableCls.th}>Vấn đề</th>
+                      <th className={`${tableCls.th} text-right`}>Số lỗi</th>
+                      <th className={`${tableCls.th} text-right`}>Kế hoạch / thực nhận</th>
+                      <th className={`${tableCls.th} text-right`}>Phí</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {issues.slice(0, 15).map((r, i) => (
+                      <tr key={`${r.date}-${r.shipmentId}-${r.cartonId}-${r.problemType}-${i}`}>
+                        <td className={tableCls.td}>{r.dateLabel}</td>
+                        <td className={`${tableCls.td} font-mono text-[12px]`}>{r.shipmentId ?? "—"}</td>
+                        <td className={`${tableCls.td} font-mono text-[11px]`}>{r.cartonId ?? "—"}</td>
+                        <td className={`${tableCls.td} font-bold`}>{r.sku ?? "—"}</td>
+                        <td className={tableCls.td}>
+                          {r.problemTypeLabel}
+                          {r.problemLevel ? <span className="text-soft"> · {r.problemLevel}</span> : null}
+                        </td>
+                        <td className={tableCls.tdNum}>{r.problemQty ?? "—"}</td>
+                        <td className={tableCls.tdNum}>
+                          {r.expected === null && r.received === null ? (
+                            <span className="text-soft">không rõ</span>
+                          ) : (
+                            `${r.expected ?? "?"} / ${r.received ?? "?"}`
+                          )}
+                        </td>
+                        <td className={`${tableCls.tdNum} font-bold`}>{r.feeLabel}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p className="mt-2 text-[12px] text-soft">
+                  Đối soát CẢ LÔ (gửi bao nhiêu · nhận bao nhiêu) vẫn lấy từ report nhận hàng ở panel trên —
+                  hai cột expected/received ở đây chỉ mô tả dòng có vấn đề, cộng dồn theo lô sẽ ra số sai.
+                </p>
+              </Panel>
+
+              {orphanIssues.length > 0 ? (
+                <Panel
+                  title="Lô có vấn đề nhưng không nằm trong danh sách"
+                  hint={`${orphanIssues.length} lô — report phí nói có, Inbound API không còn dòng`}
+                >
+                  <table className={tableCls.table}>
+                    <thead>
+                      <tr>
+                        <th className={tableCls.th}>Shipment</th>
+                        <th className={tableCls.th}>FC</th>
+                        <th className={`${tableCls.th} text-right`}>Vấn đề</th>
+                        <th className={`${tableCls.th} text-right`}>Phí</th>
+                        <th className={tableCls.th}>Loại vấn đề</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {orphanIssues.map((o) => (
+                        <tr key={`${o.shipmentId}-${o.currency}`}>
+                          <td className={`${tableCls.td} font-mono text-[12px] font-bold`}>{o.shipmentId}</td>
+                          <td className={tableCls.td}>{o.fc ?? "—"}</td>
+                          <td className={tableCls.tdNum}>{o.issueCount}</td>
+                          <td className={`${tableCls.tdNum} font-extrabold`}>{o.feeLabel}</td>
+                          {/* problemTypes đã được dịch nhãn ở mapper — không dịch lần 2 */}
+                          <td className={tableCls.td}>{o.problemTypes.join(" · ")}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <p className="mt-2 text-[12px] text-soft">
+                    Phí vẫn được tính dù lô không còn trong Inbound API — đừng bỏ qua chỉ vì bảng lô không thấy.
+                  </p>
+                </Panel>
+              ) : null}
+            </>
+          )}
+
           <Panel title="Quy tắc đối soát" hint="số nhận = report receipts (0018) · số gửi = Inbound API">
             <ul className="list-disc space-y-1.5 pl-5 text-[13px] text-muted">
               <li>Lô CLOSED: so thực nhận vs kế hoạch — thiếu &gt; 0 sinh task SOP-09 (claim bồi hoàn) kèm giá trị.</li>
@@ -534,6 +837,11 @@ export async function LiveInboundShipments() {
               </li>
               <li>Đang di chuyển (IN_TRANSIT/RECEIVING): theo dõi ETA, trễ &gt; 3 ngày so lịch sử tuyến → cảnh báo.</li>
               <li>WORKING chờ placement: đẩy hoàn tất các bước confirm (Đợt 2 — thao tác ghi).</li>
+              <li>
+                <b>Phí inbound</b> (0019): report GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA cho biết
+                Amazon tính phí gì vì lô sai quy cách (thiếu nhãn, thùng quá khổ, hàng hư) kèm coaching
+                level. Phí này KHÔNG nằm trong đối soát thiếu/thừa — nó là chi phí phải trừ vào lãi lô.
+              </li>
             </ul>
           </Panel>
         </>

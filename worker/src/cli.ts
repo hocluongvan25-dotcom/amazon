@@ -18,6 +18,7 @@ import { runListingSchemaCli } from "./runtime/run-listing-schema.ts";
 import { runFinanceClaimsCli } from "./runtime/run-finance-claims.ts";
 import { runListingsSyncCli } from "./runtime/run-listings-sync.ts";
 import { runInventoryFcSyncCli } from "./runtime/run-inventory-fc-sync.ts";
+import { runReportPullCli } from "./runtime/run-report-pull.ts";
 
 /** Đọc tham số dạng --key=value / --flag (không có giá trị) */
 function parseArgs(argv: string[]): { flags: Set<string>; values: Record<string, string> } {
@@ -234,6 +235,28 @@ async function main() {
       });
       break;
     }
+    case "reports:pull": {
+      // Module 3 nâng cao (0019): TỰ KÉO 4 report FBA qua Reports API, hoặc nạp
+      // file TSV local. Đây là lệnh mà Vercel Cron (/api/cron/report-pull) chạy
+      // mỗi ngày — CLI để nạp tay / kiểm tra / nạp dữ liệu lịch sử.
+      if (loaded) process.stderr.write(`[worker] loaded env from ${loaded}\n`);
+      const { values, flags } = parseArgs(process.argv.slice(3));
+      await runReportPullCli({
+        type: values.type ?? null,
+        days: values.days ? Number(values.days) : null,
+        sellerAccountId: values.seller ?? null,
+        files: {
+          fc: values.fc ?? null,
+          receipts: values.receipts ?? null,
+          "storage-fees": values["storage-fees"] ?? null,
+          noncompliance: values.noncompliance ?? null,
+        },
+        dryRun: flags.has("dry-run"),
+        pollAttempts: values.poll ? Number(values.poll) : undefined,
+        stdout: process.stdout,
+      });
+      break;
+    }
     case "finance:claims": {
       // Module 6 Đợt 2: F3 bồi hoàn FBA (SOP-09) + F4 lợi nhuận SKU
       const { values, flags } = parseArgs(process.argv.slice(3));
@@ -267,6 +290,8 @@ async function main() {
           "  listing:schema       L3: tải JSON Schema product type cho form động (--product-type=LUGGAGE)",
           "  finance:claims       F3+F4: claim bồi hoàn FBA + lợi nhuận SKU (--ledger=<file> --reimbursements=<file>)",
           "  inventory:fc         M3 nâng cao: phân bổ tồn theo FC + lịch sử nhận hàng (--fc=<file> [--receipts=<file>])",
+          "  reports:pull         M3 nâng cao: TỰ KÉO 4 report FBA qua Reports API (--type=all|fc|receipts|storage-fees|noncompliance",
+          "                       [--days=7] [--poll=3]) hoặc nạp file: --storage-fees=<tsv> --noncompliance=<tsv>",
           "",
           "Cờ dùng chung: --seller=<uuid> (bắt buộc khi >1 shop) · --dry-run (chỉ chạy trong bộ nhớ)",
           "",

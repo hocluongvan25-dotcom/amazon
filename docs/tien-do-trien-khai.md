@@ -2,6 +2,118 @@
 
 > Cập nhật: 12/09/2026 · Thứ tự build đã chốt: **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** (21 màn Đợt 1)
 
+## Cập nhật 12/09 — MODULE 3 NÂNG CAO (phần 2): PHÍ theo FC + phí inbound noncompliance + cron tự kéo Reports API (migration 0019)
+
+Phần 1 (0018) trả lời "hàng nằm ở đâu, nhận đủ chưa" nhưng vẫn phải **tải file TSV bằng tay** và
+vẫn **chưa thấy TIỀN**. Phần 2 đóng cả hai khoảng trống:
+
+1. **Phí lưu kho theo FC** — `GET_FBA_STORAGE_FEE_CHARGES_DATA`: Amazon thu bao nhiêu cho hàng nằm ở
+   từng FC, theo từng tháng (`storage_rate`, `estimated_monthly_storage_fee`, tồn bình quân, thể tích,
+   size tier, phí khuyến khích, hàng nguy hiểm).
+2. **Phí/vấn đề inbound noncompliance** — `GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA`: lô nào bị
+   Amazon bắt lỗi (thiếu nhãn, sai thùng, gửi dư/thiếu…), lỗi gì, bao nhiêu đơn vị, **phạt bao nhiêu
+   tiền**, mức coaching, trạng thái cảnh báo.
+3. **Tự động hoá Reports API** — không ai phải vào Seller Central tải file nữa: `createReport` →
+   `getReport` (poll) → `getReportDocument` (tải, tự giải nén GZIP) cho **cả 4 report** (2 report của
+   0018 + 2 report phí của 0019), chạy bằng **Vercel Cron** mỗi ngày 03:00 UTC.
+
+- **Migration `0019_fc_fees_report_requests.sql`** (idempotent + DO-block tự soát **8 mục**: RLS 3 bảng ·
+  index unique · KHÔNG có policy ghi · 3 RPC `security definer` chỉ service_role · 5 view
+  `security_invoker` · hợp đồng cột từng view · helper đọc số · regression 0018):
+  - Bảng **`finance.storage_fees`** ← report phí lưu kho. Khoá unique (shop × `month_of_charge` × ASIN ×
+    FNSKU × FC × `dangerous_goods_storage_type`). `month_of_charge` được parser chuẩn hoá về `YYYY-MM`
+    (report có thể ghi `September 2026`).
+  - Bảng **`inventory.inbound_noncompliance`** ← report lỗi nhập kho. Khoá unique (shop ×
+    `issue_reported_date` × lô × carton × SKU × `problem_type`).
+  - Bảng **`connections.report_requests`** — **sổ tay trạng thái từng lần yêu cầu report**: reportId,
+    documentId, `status` (requested/in_queue/in_progress/done/imported/no_data/failed/fatal/cancelled),
+    `rows_imported`, `attempts`, `last_error`, kỳ dữ liệu. Nhờ bảng này cron **nối tiếp được**: lần sau
+    poll đúng reportId đang chờ thay vì xin report mới (Amazon chỉ cho xin report daily **1 lần/4 giờ**
+    cho mỗi loại).
+  - 3 RPC **`vexim_worker_upsert_storage_fees`** / **`vexim_worker_upsert_noncompliance`** /
+    **`vexim_worker_set_report_request`** (`security definer`, revoke khỏi `authenticated`, nhận JSON
+    **camelCase** như quy ước 0015): set-based, trả `inserted · updated · skipped` (+ `groups` và danh
+    sách `currencies` với RPC phí). Nhập lại cùng file → `updated`, **không phình bảng**.
+  - 5 view `security_invoker`: **`vexim_storage_fees`** (phí theo SKU/FNSKU/ASIN × FC × tháng, kèm
+    **`sku` SUY RA + nhãn `sku_source`** = `fnsku` / `asin` / `none` — report phí **không có SKU người
+    bán**, hệ thống nối qua `inventory.fc_allocation` (0018) rồi `catalog.listings`, không âm thầm đoán),
+    **`vexim_storage_fee_by_fc`** (shop × tháng × FC × **currency**: `storage_fee`, `fee_share_pct`,
+    `avg_units_on_hand`, `total_volume`, `month_fee_total`), **`vexim_inbound_issues`** (từng dòng lỗi +
+    `days_ago`), **`vexim_inbound_issue_shipments`** (gộp theo lô: `issue_count`, `fee_total`,
+    `problem_units`, `problem_types`, `coaching_levels`, `alert_statuses`), **`vexim_report_requests`**
+    (+ `age_minutes`, `is_stale` — màn Sync health đọc).
+  - Helper **`finance.num_or_null`** / **`finance.bool_or_null`**: giá trị report lạ (`N/A`, `1,234.56`,
+    `abc`, rỗng) → **NULL** chứ không làm nổ cả lô nhập.
+  - RLS: 3 bảng mới **chỉ có policy SELECT** theo `iam.can_read_seller_account` (self-check đếm và
+    **fail nếu có bất kỳ policy ghi nào**); mọi đường ghi đi qua RPC service_role.
+- **Engine (đặt trong `web/src/lib/worker/` vì Vercel Cron phải tự chứa trong `web/`; `worker/src/*`
+  là shim re-export)**:
+  - `amazon/reports.ts` — **ReportsClient**: `createReport` → poll `getReport` → `getReportDocument`
+    (tải nội dung, tự giải nén **GZIP** qua `node:zlib`), nhận diện throttle (`SpApiRequestError
+    .isThrottled`) để cron không đốt quota.
+  - `reports/registry.ts` — khai báo 4 report: `fc` (2 ngày) · `receipts` (30 ngày) · `storage-fees`
+    (**95 ngày** — Amazon giữ ~3 kỳ phí) · `noncompliance` (60 ngày); **mọi loại `cooldownHours = 4`**
+    đúng trần của Amazon.
+  - `reports/fba-fees.parser.ts` — đọc cột **THEO TÊN** (Amazon đổi thứ tự cột vẫn chạy), gom
+    `byMonthFcCurrency` (khoá `tháng|FC|tiền tệ`) và `feeByType` (khoá `loại phí|tiền tệ`), tiền làm tròn
+    2 số để `0.30 + 0.55` không thành `0.8500000000000001`; dòng rác đếm `skipped` kèm số dòng, trần 20
+    cảnh báo.
+  - `jobs/report-pull.job.ts` + `run-report-pull.ts` — luật: tôn trọng cooldown **theo từng loại
+    report**; trạng thái còn làm được (requested/in_queue/in_progress/done) thì **POLL tiếp, không tạo
+    report mới**; report DONE nhưng rỗng → `no_data` (không phải lỗi); kỳ dữ liệu tính theo **UTC**;
+    `--dry-run` **không ghi gì**; `rowsImported = inserted + updated`.
+  - CLI **`npm run worker:reports-pull -- [--type=all|fc|receipts|storage-fees|noncompliance] [--days=N]
+    [--seller=<uuid>] [--poll=N] [--dry-run]`** — có credential Amazon thì gọi API thật; hoặc nạp file đã
+    tải tay: `--fc=<tsv> --receipts=<tsv> --storage-fees=<tsv> --noncompliance=<tsv>` (bỏ qua Amazon).
+- **Cron**: route **`/api/cron/report-pull`** (GET/POST, `?kinds=` · `?days=` · `?dryRun=`), bảo vệ bằng
+  `Authorization: Bearer <CRON_SECRET>` — **dùng lại biến đã có** của `/api/cron/inventory-sync`, nên
+  **vẫn không cần thêm biến môi trường nào** (chỉ `AMAZON_LWA_*` + Supabase). Thiếu `CRON_SECRET` trên
+  production → trả **500 kèm hướng dẫn** thay vì 401 mơ hồ. `maxDuration = 60` và **chỉ poll 2 lần cách
+  nhau 5 giây**: report chưa xong thì ghi trạng thái vào `report_requests` để lần sau poll tiếp — cron
+  KHÔNG ngồi chờ. `web/vercel.json` nay có 2 cron (02:00 inventory-sync · **03:00 report-pull** UTC).
+- **Web UI (4 chỗ mới, đều đọc TÁCH BIỆT để trang không sập khi DB chưa chạy 0019):**
+  - **Tổng quan kho vận**: panel **"Phí lưu kho theo FC"** — kỳ mới nhất, mỗi **tiền tệ một khối riêng**
+    (tổng kỳ · % từng FC · số dòng sản phẩm · tồn bình quân · thể tích), không cộng chéo tiền tệ.
+  - **I2 Chi tiết tồn SKU**: panel **"Phí lưu kho theo FC"** của riêng SKU đó — bảng kỳ mới nhất theo FC
+    + bảng **chênh lệch kỳ phí** (so kỳ trước, chỉ so khi cùng tiền tệ), khớp phí theo **SKU HOẶC FNSKU
+    HOẶC ASIN** vì report phí không có SKU người bán; cảnh báo khi có dòng phí chưa ánh xạ được SKU.
+  - **I4 Inbound shipments**: cột mới **"Phí / vấn đề inbound"** trên bảng lô (`N vấn đề · $X`, `—` khi
+    chưa biết) + header đếm tổng vấn đề/tổng phí + 3 panel: **lô nặng nhất** (sắp theo mức độ/phí),
+    **từng vấn đề** (loại lỗi · đơn vị · coaching · phí, ghi rõ `expected/received` là **theo DÒNG** chứ
+    không phải cả lô), **lô mồ côi** (report có lỗi nhưng lô không còn trong danh sách Inbound API).
+  - **Module 0 → Sức khỏe đồng bộ**: panel **"Report đã kéo qua Reports API"** — từng loại report × shop ×
+    kỳ dữ liệu × trạng thái × số dòng đã nhập × số lần chạm × tuổi (nhãn **CHỜ QUÁ LÂU** khi > 6 giờ) ×
+    lỗi gần nhất, kèm giải thích trần 4 giờ và vì sao "Lần chạm" tăng là bình thường. Ba trạng thái
+    hiển thị riêng: **chưa nối Supabase** (chế độ demo) / **chưa đọc được view** (thiếu 0019 hoặc quyền) /
+    **chưa có lần yêu cầu nào**.
+- **Số trung thực (không bịa):** phí **NULL ≠ 0** — dòng không đọc được tiền thì để "chưa biết", không
+  đếm vào tổng; **không cộng tiền khác tiền tệ** ở bất kỳ tầng nào (parser · RPC · view · UI);
+  `fee_share_pct` chỉ tính trong cùng một tiền tệ của cùng kỳ; `expected/received` của report lỗi là
+  **theo dòng vấn đề**, KHÔNG được cộng ra "cả lô" (đối soát lô vẫn dùng 0018); lô có vấn đề nhưng
+  không đọc được phí → hiện `—`, không hiện `$0`.
+- **Kiểm chứng local (chạy thật):** `supabase npm test` **TẤT CẢ PASS (428 mục)** — BƯỚC 20 chạy trên
+  Postgres thật (PGlite): nhập phí lưu kho 2 lần vẫn 5 dòng (không phình), dòng `month_of_charge =
+  "September 2026"` được chuẩn hoá, dòng thiếu ASIN+FNSKU và dòng `fee = "abc"` bị `skipped`,
+  USD/CAD **không bị cộng chung**, `authenticated` bị chặn ghi thẳng và bị chặn gọi cả 3 RPC, người lạ
+  không thấy gì, 0019 chạy 2 lần không lỗi · `worker npm test` **391/391** (+70 test parser/registry/
+  job/runner: cooldown, poll-không-tạo-mới, DONE rỗng → no_data, dry-run không ghi, GZIP, throttle) ·
+  `web npm test` **152/152** (+24 test `fees-model`: hợp đồng SELECT 5 view, ép số dạng chuỗi, không cộng
+  chéo tiền tệ, khớp SKU/FNSKU/ASIN, gộp vấn đề vào lô, nhãn trạng thái report + `is_stale`) ·
+  `npx tsc --noEmit` sạch · `npm run build` sạch.
+
+### Chờ VEXIM (Module 3 nâng cao phần 2)
+
+- ☐ Chạy `supabase/migrations/0019_fc_fees_report_requests.sql` trong SQL Editor (sau `0018`).
+- ☐ Kiểm tra role **Amazon Fulfillment** đã được Amazon cấp (đã nộp trong Developer Profile) — thiếu
+  role thì `createReport` cho 2 report phí sẽ bị chặn.
+- ☐ Chạy tay lần đầu để xem số mà **không ghi DB**: `npm run worker:reports-pull -- --type=all
+  --dry-run`. Ưng ý thì bỏ `--dry-run` (worker chỉ ghi DB thật khi shop có `data_source = 'production'`).
+- ☐ Trên Vercel: redeploy để `vercel.json` nhận cron thứ hai (`/api/cron/report-pull`, 03:00 UTC) —
+  `CRON_SECRET` dùng lại cái đã có; gói Hobby giới hạn **2 cron/ngày chạy theo lịch**, đủ cho 2 job này.
+- ☐ Sau 1–2 ngày, vào **Module 0 → Sức khỏe đồng bộ** xem panel "Report đã kéo qua Reports API": trạng
+  thái `imported` là xong; `in_queue`/`in_progress` là Amazon đang tạo (cron poll tiếp); **CHỜ QUÁ LÂU**
+  (> 6 giờ) thì chạy `npm run worker:reports-pull -- --type=storage-fees` để poll tay.
+
 ## Cập nhật 12/09 — MODULE 3 NÂNG CAO: phân bổ tồn theo FC + lịch sử nhận hàng (migration 0018)
 
 I2 có hai khối treo nhãn "chưa có dữ liệu" từ Đợt 1, và lý do không phải "chưa làm" mà là **API không
@@ -63,9 +175,11 @@ là 2 report FBA — nay đã nối xong report → DB → màn hình:
   *FBA Daily Inventory History* (phân bổ FC) và *FBA Received Inventory* (lịch sử nhận), định dạng TSV →
   `npm run worker:inventory-fc -- --fc=<daily-inventory.tsv> --receipts=<received-inventory.tsv>`
   (thêm `--seller=<uuid>` nếu có >1 shop; chạy `--dry-run` trước để xem số mà không ghi DB).
-- ☐ Report FBA dạng daily chỉ được yêu cầu **mỗi 4 giờ** → nhập 1 lần/ngày là đủ. Đợt 2 sẽ tự đặt lịch
-  qua Reports API (`createReport` → `getReportDocument`) — **không cần thêm biến env**, dùng lại
-  `AMAZON_LWA_*` + role **Amazon Fulfillment** (đã nộp kèm trong Developer Profile).
+- ☑ ~~Đợt 2 sẽ tự đặt lịch qua Reports API~~ → **đã làm ngay trong phần 2 (0019, xem mục trên)**: cron
+  `/api/cron/report-pull` tự `createReport` → poll `getReport` → `getReportDocument`, tôn trọng trần
+  **mỗi 4 giờ cho mỗi loại report**; vẫn **không cần thêm biến env** (dùng lại `AMAZON_LWA_*` +
+  `CRON_SECRET` + role **Amazon Fulfillment** đã nộp trong Developer Profile). Nhập tay bằng file TSV
+  vẫn chạy được như cũ (`--fc=` / `--receipts=` / `--storage-fees=` / `--noncompliance=`).
 
 ## Cập nhật 12/09 — ĐỢT B: "hái quả ngay" (migration 0017 · doanh số 30 ngày · người phụ trách · giá trị tồn kho)
 

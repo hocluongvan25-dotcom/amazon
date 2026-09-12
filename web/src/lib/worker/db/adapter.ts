@@ -418,6 +418,120 @@ export type ReceiptRowInput = {
   source?: string;
 };
 
+/**
+ * Kết quả nhập report PHÍ (0019). Ngoài 4 số đếm như 0018, trả thêm:
+ *  • groups     = số tháng (phí lưu kho) hoặc số lô (phí inbound) trong lô nhập
+ *  • currencies = tiền tệ có mặt, đã sắp xếp
+ * KHÔNG trả tổng tiền: report có thể chứa nhiều tiền tệ (shop US + CA) và cộng
+ * gộp hai tiền tệ là ra con số vô nghĩa — tầng view mới là nơi cộng, theo
+ * từng currency một.
+ */
+export type FeeUpsertCounts = ReportUpsertCounts & {
+  groups: number;
+  currencies: string[];
+};
+
+/** Một dòng GET_FBA_STORAGE_FEE_CHARGES_DATA (đã parse + chuẩn hoá). */
+export type StorageFeeRowInput = {
+  /** YYYY-MM — RPC từ chối mọi dạng khác (kể cả "August 2026") */
+  monthOfCharge: string;
+  /** Report phí KHÔNG có seller SKU — DB suy SKU qua fnsku/asin */
+  asin?: string;
+  fnsku?: string;
+  fulfillmentCenter?: string;
+  dangerousGoodsStorageType?: string;
+  productName?: string | null;
+  countryCode?: string | null;
+  productSizeTier?: string | null;
+  averageQuantityOnHand?: number | null;
+  averageQuantityPendingRemoval?: number | null;
+  averageQuantityCustomerOrders?: number | null;
+  estimatedTotalItemVolume?: number | null;
+  volumeUnits?: string | null;
+  itemVolume?: number | null;
+  longestSide?: number | null;
+  medianSide?: number | null;
+  shortestSide?: number | null;
+  measurementUnits?: string | null;
+  weight?: number | null;
+  weightUnits?: string | null;
+  storageRate?: number | null;
+  currency?: string | null;
+  estimatedMonthlyStorageFee?: number | null;
+  eligibleForInventoryDiscount?: boolean | null;
+  qualifiesForInventoryDiscount?: boolean | null;
+  totalIncentiveFeeAmount?: number | null;
+  breakdownIncentiveFeeAmount?: number | null;
+  source?: string;
+};
+
+/** Một dòng GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA (đã parse + chuẩn hoá). */
+export type NoncomplianceRowInput = {
+  /** YYYY-MM-DD — ngày Amazon báo vấn đề */
+  issueReportedDate: string;
+  shipmentCreationDate?: string | null;
+  fbaShipmentId?: string;
+  fbaCartonId?: string;
+  fulfillmentCenterId?: string;
+  sku?: string;
+  fnsku?: string | null;
+  asin?: string | null;
+  productName?: string | null;
+  problemType?: string;
+  problemQuantity?: number | null;
+  /** của DÒNG có vấn đề — không cộng dồn theo lô để đối soát */
+  expectedQuantity?: number | null;
+  receivedQuantity?: number | null;
+  performanceMeasurementUnit?: string | null;
+  coachingLevel?: string | null;
+  feeType?: string | null;
+  currency?: string | null;
+  feeTotal?: number | null;
+  problemLevel?: string | null;
+  alertStatus?: string | null;
+  source?: string;
+};
+
+/**
+ * Vòng đời một lần yêu cầu report (Reports API chạy bất đồng bộ):
+ *   requested → in_queue / in_progress → done → imported
+ *                                     ↘ no_data (report rỗng)
+ *   failed / fatal / cancelled = Amazon hoặc ta bỏ cuộc (ghi kèm lastError)
+ */
+export type ReportRequestStatus =
+  | "requested" | "in_queue" | "in_progress" | "done"
+  | "imported" | "no_data" | "failed" | "fatal" | "cancelled";
+
+export const REPORT_REQUEST_STATUSES: readonly ReportRequestStatus[] = [
+  "requested", "in_queue", "in_progress", "done",
+  "imported", "no_data", "failed", "fatal", "cancelled",
+];
+
+/** Trạng thái một lần yêu cầu report — khoá (shop × loại report × khoảng ngày). */
+export type ReportRequestInput = {
+  reportType: string;
+  marketplaceId?: string | null;
+  /** YYYY-MM-DD; null = report không cần khoảng ngày (ví dụ current inventory) */
+  dataStart?: string | null;
+  dataEnd?: string | null;
+  reportId?: string | null;
+  reportDocumentId?: string | null;
+  status: ReportRequestStatus;
+  rowsImported?: number | null;
+  lastError?: string | null;
+  /** ISO string */
+  requestedAt?: string | null;
+  completedAt?: string | null;
+  importedAt?: string | null;
+};
+
+export type ReportRequestRow = ReportRequestInput & {
+  id: string;
+  sellerAccountId: string;
+  /** số lần cron chạm vào dòng này — >1 là bình thường (poll nhiều lần) */
+  attempts: number;
+};
+
 export interface DbAdapter {
   upsertInventorySnapshot(row: InventorySnapshotRow): Promise<void>;
   upsertInventoryDaily(row: InventoryDailyRow): Promise<void>;
@@ -499,6 +613,38 @@ export interface DbAdapter {
     rows: ReceiptRowInput[],
   ): Promise<ReportUpsertCounts>;
 
+  /* ---- Module 3 nâng cao (0019): phí theo FC + trạng thái report ---- */
+  /**
+   * Nhập report GET_FBA_STORAGE_FEE_CHARGES_DATA (phí lưu kho theo ASIN/FNSKU × FC × tháng).
+   * Idempotent theo (shop, tháng, ASIN, FNSKU, FC, loại hàng nguy hiểm).
+   */
+  upsertStorageFees(
+    sellerAccountId: string,
+    rows: StorageFeeRowInput[],
+  ): Promise<FeeUpsertCounts>;
+  /**
+   * Nhập report GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA (phí inbound sai quy cách).
+   * Idempotent theo (shop, ngày báo, lô, carton, SKU, loại vấn đề).
+   */
+  upsertNoncompliance(
+    sellerAccountId: string,
+    rows: NoncomplianceRowInput[],
+  ): Promise<FeeUpsertCounts>;
+  /**
+   * Ghi/cập nhật trạng thái một lần yêu cầu report.
+   * Vì sao cần: report FBA daily có TRẦN 1 lần / 4 giờ và chạy bất đồng bộ —
+   * cron phải nhớ reportId đang chờ để lần sau POLL tiếp thay vì xin report mới.
+   */
+  setReportRequest(
+    sellerAccountId: string,
+    req: ReportRequestInput,
+  ): Promise<ReportRequestRow>;
+  /** Đọc trạng thái report để quyết định: poll tiếp · xin mới · hay bỏ qua. */
+  listReportRequests(
+    sellerAccountId: string,
+    opts?: { reportType?: string; limit?: number },
+  ): Promise<ReportRequestRow[]>;
+
   /* ---- Module 6 Đợt 2 (F3/F4) ---- */
   /** Nhập report GET_FBA_REIMBURSEMENTS_DATA (idempotent theo dedupeKey) */
   upsertReimbursements(
@@ -523,6 +669,85 @@ export interface DbAdapter {
     to: string,
     limit?: number,
   ): Promise<FinancialEventQueryRow[]>;
+}
+
+/* ---- helper cho luật nhập report PHÍ (0019) trong MockDbAdapter ---- */
+
+const MONTH_RE = /^\d{4}-\d{2}$/;
+
+function storageFeeKey(r: {
+  monthOfCharge?: string | null; asin?: string | null; fnsku?: string | null;
+  fulfillmentCenter?: string | null; dangerousGoodsStorageType?: string | null;
+}): string {
+  return [
+    r.monthOfCharge ?? "", r.asin ?? "", r.fnsku ?? "",
+    r.fulfillmentCenter ?? "", r.dangerousGoodsStorageType ?? "",
+  ].join("\u0000");
+}
+
+function noncomplianceKey(r: {
+  issueReportedDate?: string | null; fbaShipmentId?: string | null;
+  fbaCartonId?: string | null; sku?: string | null; problemType?: string | null;
+}): string {
+  return [
+    r.issueReportedDate ?? "", r.fbaShipmentId ?? "", r.fbaCartonId ?? "",
+    r.sku ?? "", r.problemType ?? "",
+  ].join("\u0000");
+}
+
+function reportRequestKey(r: {
+  reportType: string; dataStart?: string | null; dataEnd?: string | null;
+}): string {
+  return [r.reportType, r.dataStart ?? "", r.dataEnd ?? ""].join("\u0000");
+}
+
+/** Tiền tệ có mặt, đã sắp xếp — không cộng gộp, chỉ liệt kê. */
+function distinctSorted(values: (string | null | undefined)[]): string[] {
+  return [...new Set(values.map((v) => (v ?? "").trim()).filter((v) => v !== ""))].sort();
+}
+
+/** Số lớn hơn thắng (RPC dùng max()) — cùng một sự việc đo 2 lần, không cộng. */
+function biggerOf<T>(a: T | null | undefined, b: T | null | undefined): T | null | undefined {
+  if (a === null || a === undefined) return b;
+  if (b === null || b === undefined) return a;
+  if (typeof a === "number" && typeof b === "number") return a >= b ? a : b;
+  if (typeof a === "boolean" && typeof b === "boolean") return a || b ? (a ? a : b) : a;
+  return String(a) >= String(b) ? a : b;
+}
+
+/** Gộp 2 dòng trùng khoá trong CÙNG file: mỗi trường lấy giá trị lớn hơn / khác rỗng. */
+function maxFeeRow<T extends Record<string, unknown>>(prev: T, next: T): T {
+  const out: Record<string, unknown> = { ...prev };
+  for (const [k, v] of Object.entries(next)) {
+    if (k === "source" || k === "monthOfCharge" || k === "issueReportedDate") {
+      out[k] = v ?? out[k];
+      continue;
+    }
+    out[k] = biggerOf(out[k] as never, v as never) ?? out[k];
+  }
+  return out as T;
+}
+
+/** Ghi đè dòng đã có: số mới KHÁC NULL thắng, null GIỮ số cũ (đúng luật coalesce của RPC). */
+function coalesceFeeRow<T extends Record<string, unknown>>(prev: T, next: T): T {
+  const out: Record<string, unknown> = { ...prev };
+  for (const [k, v] of Object.entries(next)) {
+    if (v !== null && v !== undefined) out[k] = v;
+  }
+  return out as T;
+}
+
+/** Trạng thái lạ → "failed" (RPC cũng vậy) để view lọc được theo status. */
+export function normalizeReportRequestStatus(status: string | null | undefined): ReportRequestStatus {
+  const s = (status ?? "").trim().toLowerCase();
+  return (REPORT_REQUEST_STATUSES as readonly string[]).includes(s)
+    ? (s as ReportRequestStatus)
+    : "failed";
+}
+
+/** Tháng hợp lệ để Mock từ chối đúng như RPC (YYYY-MM). */
+export function isValidReportMonth(month: string | null | undefined): boolean {
+  return MONTH_RE.test((month ?? "").trim());
 }
 
 /**
@@ -614,6 +839,10 @@ export class MockDbAdapter implements DbAdapter {
   /* Module 3 nâng cao (0018) */
   fcAllocation: (FcAllocationRowInput & { sellerAccountId: string })[] = [];
   receipts: (ReceiptRowInput & { sellerAccountId: string })[] = [];
+  /* Module 3 nâng cao (0019): phí theo FC + trạng thái report */
+  storageFees: (StorageFeeRowInput & { sellerAccountId: string })[] = [];
+  noncompliance: (NoncomplianceRowInput & { sellerAccountId: string })[] = [];
+  reportRequests: ReportRequestRow[] = [];
   /* Module 6 Đợt 2 (F3/F4) */
   reimbursements: (ReimbursementRowInput & { sellerAccountId: string })[] = [];
   reimbursementClaims: (ReimbursementClaimRowInput & { id: string; sellerAccountId: string; status: string })[] = [];
@@ -886,6 +1115,192 @@ export class MockDbAdapter implements DbAdapter {
       key: (r) =>
         [r.receivedDate, r.sku, r.fbaShipmentId ?? "", r.fulfillmentCenterId ?? ""].join("\u0000"),
     });
+  }
+
+  /* ---- Module 3 nâng cao (0019): phí theo FC + trạng thái report ---- */
+
+  /**
+   * Luật của RPC 0019, áp y hệt trong Mock để test không "xanh giả":
+   *   1. tháng sai dạng / không có cả ASIN lẫn FNSKU → BỎ, đếm skipped;
+   *   2. trùng khoá trong cùng file → lấy giá trị LỚN HƠN cho số đo (RPC dùng
+   *      max()), đếm merged — vì đây là số đo của cùng một sự việc, không phải
+   *      số lượng để cộng dồn như 0018;
+   *   3. khoá đã có → số mới KHÁC NULL đè số cũ, null GIỮ số cũ (coalesce).
+   */
+  async upsertStorageFees(
+    sellerAccountId: string,
+    rows: StorageFeeRowInput[],
+  ): Promise<FeeUpsertCounts> {
+    let skipped = 0;
+    let merged = 0;
+    const batch = new Map<string, StorageFeeRowInput>();
+    for (const r of rows) {
+      const month = (r.monthOfCharge ?? "").trim();
+      const asin = (r.asin ?? "").trim().toUpperCase();
+      const fnsku = (r.fnsku ?? "").trim().toUpperCase();
+      if (!/^\d{4}-\d{2}$/.test(month) || (asin === "" && fnsku === "")) {
+        skipped++;
+        continue;
+      }
+      const clean: StorageFeeRowInput = {
+        ...r,
+        monthOfCharge: month,
+        asin,
+        fnsku,
+        fulfillmentCenter: (r.fulfillmentCenter ?? "").trim().toUpperCase(),
+        dangerousGoodsStorageType: (r.dangerousGoodsStorageType ?? "").trim().toUpperCase(),
+        currency: r.currency ? r.currency.trim().toUpperCase() : null,
+        source: r.source ?? "report",
+      };
+      const k = storageFeeKey(clean);
+      const prev = batch.get(k);
+      batch.set(k, prev ? maxFeeRow(prev, clean) : clean);
+      if (prev) merged++;
+    }
+    const valid = [...batch.values()];
+    let inserted = 0;
+    let updated = 0;
+    for (const row of valid) {
+      const k = storageFeeKey(row);
+      const i = this.storageFees.findIndex(
+        (x) => x.sellerAccountId === sellerAccountId && storageFeeKey(x) === k,
+      );
+      if (i >= 0) {
+        this.storageFees[i] = coalesceFeeRow(this.storageFees[i], { ...row, sellerAccountId });
+        updated++;
+      } else {
+        this.storageFees.push({ ...row, sellerAccountId });
+        inserted++;
+      }
+    }
+    return {
+      inserted,
+      updated,
+      skipped,
+      merged,
+      groups: new Set(valid.map((r) => r.monthOfCharge)).size,
+      currencies: distinctSorted(valid.map((r) => r.currency)),
+    };
+  }
+
+  async upsertNoncompliance(
+    sellerAccountId: string,
+    rows: NoncomplianceRowInput[],
+  ): Promise<FeeUpsertCounts> {
+    let skipped = 0;
+    let merged = 0;
+    const batch = new Map<string, NoncomplianceRowInput>();
+    for (const r of rows) {
+      const date = (r.issueReportedDate ?? "").trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        skipped++;
+        continue;
+      }
+      const clean: NoncomplianceRowInput = {
+        ...r,
+        issueReportedDate: date,
+        fbaShipmentId: (r.fbaShipmentId ?? "").trim().toUpperCase(),
+        fbaCartonId: (r.fbaCartonId ?? "").trim().toUpperCase(),
+        fulfillmentCenterId: (r.fulfillmentCenterId ?? "").trim().toUpperCase(),
+        sku: (r.sku ?? "").trim(),
+        problemType: (r.problemType ?? "").trim().toUpperCase(),
+        fnsku: r.fnsku ? r.fnsku.trim().toUpperCase() : null,
+        asin: r.asin ? r.asin.trim().toUpperCase() : null,
+        currency: r.currency ? r.currency.trim().toUpperCase() : null,
+        coachingLevel: r.coachingLevel ? r.coachingLevel.trim().toUpperCase() : null,
+        feeType: r.feeType ? r.feeType.trim().toUpperCase() : null,
+        alertStatus: r.alertStatus ? r.alertStatus.trim().toUpperCase() : null,
+        problemLevel: r.problemLevel ? r.problemLevel.trim().toUpperCase() : null,
+        source: r.source ?? "report",
+      };
+      const k = noncomplianceKey(clean);
+      const prev = batch.get(k);
+      batch.set(k, prev ? maxFeeRow(prev, clean) : clean);
+      if (prev) merged++;
+    }
+    const valid = [...batch.values()];
+    let inserted = 0;
+    let updated = 0;
+    for (const row of valid) {
+      const k = noncomplianceKey(row);
+      const i = this.noncompliance.findIndex(
+        (x) => x.sellerAccountId === sellerAccountId && noncomplianceKey(x) === k,
+      );
+      if (i >= 0) {
+        this.noncompliance[i] = coalesceFeeRow(this.noncompliance[i], { ...row, sellerAccountId });
+        updated++;
+      } else {
+        this.noncompliance.push({ ...row, sellerAccountId });
+        inserted++;
+      }
+    }
+    return {
+      inserted,
+      updated,
+      skipped,
+      merged,
+      groups: new Set(valid.map((r) => r.fbaShipmentId).filter((v) => v !== "")).size,
+      currencies: distinctSorted(valid.map((r) => r.currency)),
+    };
+  }
+
+  /** Luật của RPC vexim_worker_set_report_request: cùng khoảng ngày → 1 dòng, attempts++. */
+  async setReportRequest(
+    sellerAccountId: string,
+    req: ReportRequestInput,
+  ): Promise<ReportRequestRow> {
+    const type = (req.reportType ?? "").trim();
+    if (!type) throw new Error("setReportRequest: thiếu reportType");
+    const status = normalizeReportRequestStatus(req.status);
+    const k = reportRequestKey({ ...req, reportType: type });
+    const i = this.reportRequests.findIndex(
+      (x) => x.sellerAccountId === sellerAccountId && reportRequestKey(x) === k,
+    );
+    if (i >= 0) {
+      const prev = this.reportRequests[i];
+      const next: ReportRequestRow = {
+        ...prev,
+        marketplaceId: req.marketplaceId ?? prev.marketplaceId ?? null,
+        reportId: req.reportId ?? prev.reportId ?? null,
+        reportDocumentId: req.reportDocumentId ?? prev.reportDocumentId ?? null,
+        status,
+        rowsImported: req.rowsImported ?? prev.rowsImported ?? null,
+        lastError: req.lastError ?? null,
+        attempts: prev.attempts + 1,
+        requestedAt: prev.requestedAt ?? req.requestedAt ?? new Date().toISOString(),
+        completedAt: req.completedAt ?? prev.completedAt ?? null,
+        importedAt: req.importedAt ?? prev.importedAt ?? null,
+      };
+      this.reportRequests[i] = next;
+      return next;
+    }
+    const row: ReportRequestRow = {
+      ...req,
+      id: `mock-report-request-${this.reportRequests.length + 1}`,
+      sellerAccountId,
+      reportType: type,
+      status,
+      attempts: 1,
+      requestedAt: req.requestedAt ?? new Date().toISOString(),
+      rowsImported: req.rowsImported ?? null,
+      lastError: req.lastError ?? null,
+      completedAt: req.completedAt ?? null,
+      importedAt: req.importedAt ?? null,
+    };
+    this.reportRequests.push(row);
+    return row;
+  }
+
+  async listReportRequests(
+    sellerAccountId: string,
+    opts?: { reportType?: string; limit?: number },
+  ): Promise<ReportRequestRow[]> {
+    const limit = opts?.limit ?? 200;
+    return this.reportRequests
+      .filter((r) => r.sellerAccountId === sellerAccountId)
+      .filter((r) => (opts?.reportType ? r.reportType === opts.reportType : true))
+      .sort((a, b) => String(b.requestedAt ?? "").localeCompare(String(a.requestedAt ?? "")))
+      .slice(0, limit);
   }
 
   async upsertReimbursements(
