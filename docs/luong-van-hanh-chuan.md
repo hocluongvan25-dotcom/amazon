@@ -64,6 +64,12 @@ Cảnh báo (alert) ──► Tác vụ (task) ──► Các bước (steps) �
 | 6 | Ghi nhận tiền về — đối chiếu Finances API (reimbursement events) | Tài chính + hệ thống | khớp số |
 | 7 | Tổng hợp vào báo cáo khách hàng tuần (**SOP-12**) | Tài chính | đã đưa vào report |
 
+**Hệ thống hỗ trợ (đã build 12/09/2026):** màn `/finance/claims` giữ hàng đợi claim theo đúng 7 bước trên —
+worker tự đối chiếu Ledger ↔ inbound ↔ reimbursements để đánh dấu khoản nghi ngờ (bước 1–3), người dùng ghi
+mã case Amazon khi nộp (bước 4), cột “Tuổi claim” báo đỏ khi quá **48h** (bước 5), ghi số tiền về và khớp với
+report Reimbursements (bước 6). Giá trị ước tính lấy từ giá vốn VEXIM nhập (`catalog.cost_inputs`);
+thiếu giá vốn thì hệ thống để trống, **không tự đoán số**.
+
 ## NHÓM GIÁ & QUẢNG CÁO
 
 ### SOP-02 · Giữ/lấy lại Featured Offer (Buy Box) ⏱ SLA: xử lý trong 4h giờ Mỹ

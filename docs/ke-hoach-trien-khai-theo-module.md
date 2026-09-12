@@ -230,8 +230,8 @@ KPI: spend, ACOS, TACOS, đơn từ ads. Alert: `acos_over_target`, `budget_exha
 |---|---|---|---|
 | F1 | **Settlements** | Danh sách kỳ thanh toán (mỗi shop): kỳ, tổng thu, từng nhóm phí (referral/FBA/storage/ads…), tiền về. Drill vào 1 kỳ: mọi dòng tiền | 🟢 |
 | F2 | **Financial events** | Dòng chi tiết lọc theo loại (Charge/Refund/ServiceFee/Adjustment…), ngày, SKU; append-only | 🟢 |
-| F3 | **Bồi hoàn FBA (claims)** | Danh sách khoản nghi ngờ (đối chiếu tự động tồn vs thực nhận vs reimbursement) + trạng thái claim (to_claim/filed/approved) + giá trị | 🟡 |
-| F4 | **Lợi nhuận SKU** | Bảng: doanh thu, phí Amazon (từ Fees API), giá vốn (VEXIM nhập), spend ads phân bổ, **lãi gộp & %**; sort tìm SKU lỗ | 🟡 |
+| F3 | **Bồi hoàn FBA (claims)** ✅ *đã build 12/09 (0015)* | Danh sách khoản nghi ngờ (đối chiếu tự động tồn vs thực nhận vs reimbursement) + trạng thái claim (to_claim/filed/approved) + giá trị | 🟡 |
+| F4 | **Lợi nhuận SKU** ✅ *đã build 12/09 (0015)* | Bảng: doanh thu, phí Amazon (từ Fees API), giá vốn (VEXIM nhập), spend ads phân bổ, **lãi gộp & %**; sort tìm SKU lỗ | 🟡 |
 
 ### Ánh xạ API (đã kiểm chứng)
 
@@ -247,6 +247,23 @@ KPI: spend, ACOS, TACOS, đơn từ ads. Alert: `acos_over_target`, `budget_exha
 KPI: tiền về, phí, doanh thu chưa thanh toán, giá trị claim. Alert: lệch đối soát >1%. Task: SOP-09, SOP-10.
 
 **Effort:** F1–F2: 2.5 người-tuần (🟢) · F3–F4: 3 người-tuần (🟡)
+
+#### Ghi chú triển khai F3–F4 (12/09/2026)
+
+- **Máy trạng thái F3** (migration `0015`, rộng hơn spec để phủ hết SOP-09):
+  `suspected → to_claim → filed → approved → paid → closed`; `rejected → to_claim` khi nộp lại.
+  Chuyển `filed` **bắt buộc có mã case Amazon**; `approve/reject/close` **bắt buộc có ghi chú** và
+  chỉ vai trò `iam.is_finance_editor()` (trưởng phòng Tài chính) được làm; `paid` **bắt buộc có số tiền**.
+  Worker chỉ được **refresh** khoản còn `suspected` — không được ghi đè việc con người đã xử lý.
+- **Nguồn F3**: `GET_LEDGER_DETAIL_VIEW_DATA` (EventType/Reason/Disposition/Quantity) để phát hiện,
+  `GET_FBA_REIMBURSEMENTS_DATA` để khớp tiền đã về (dedupe theo `reimbursement-id|sku|reason|amount-total`).
+  Phân loại: `Receipts|VendorReturns` → `inbound_missing`; `CustomerReturns` → `lost_fc`/`damaged_fc`/`return_missing`;
+  `Adjustments` → `lost_fc`/`damaged_fc`/`fee_error`/`other` (lý do `FOUND` không tính là claim).
+- **F4**: `finance.sku_profit_daily` (PK shop+sku+ngày+tiền tệ), ghi kiểu **replace theo ngày** (không cộng dồn).
+  `gross = ProductSale + ShippingCredit + Reimbursement + Refund + PromotionRebate + phí (âm) − giá vốn`;
+  **ads_spend là cột riêng, không trừ vào lãi gộp** (Module 5 chưa đồng bộ → `NULL`, không mặc định 0).
+  Thiếu giá vốn → `cogs`/`gross_profit` = **NULL** để web hiện “—” thay vì bịa số.
+  `fee_source` ghi rõ `settled` (từ settlement) hay `fees_api` (ước tính Product Fees).
 
 ---
 

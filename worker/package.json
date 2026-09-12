@@ -7,7 +7,10 @@
   "scripts": {
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "worker:inventory-sync": "node --experimental-strip-types src/cli.ts inventory:sync",
-    "worker:help": "node --experimental-strip-types src/cli.ts --help"
+    "worker:help": "node --experimental-strip-types src/cli.ts --help",
+    "worker:listing-publish": "node --experimental-strip-types src/cli.ts listing:publish",
+    "worker:listing-schema": "node --experimental-strip-types src/cli.ts listing:schema",
+    "worker:finance-claims": "node --experimental-strip-types src/cli.ts finance:claims"
   },
   "engines": {
     "node": ">=22"

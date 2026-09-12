@@ -2,6 +2,96 @@
 
 > Cập nhật: 12/09/2026 · Thứ tự build đã chốt: **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** (21 màn Đợt 1)
 
+## Cập nhật 12/09 — Module 6 Đợt 2: F3 bồi hoàn FBA + F4 lợi nhuận SKU (migration 0015)
+
+- **Migration `0015_finance_claims_profit.sql`** (idempotent + self-check 3 bảng / 4 view / 2 trigger / 6 RPC):
+  - `finance.reimbursements` — mở rộng theo đúng cột report: `reimbursement_id`, `case_id`,
+    `amazon_order_id`, `reason`, `condition`, `amount_per_unit`, `amount_total`,
+    `quantity_reimbursed_cash|inventory|total`, `original_reimbursement_id|type` + `dedupe_key`
+    (unique theo shop) để **nhập lại report không nhân đôi**.
+  - `finance.reimbursement_claims` — khoản nghi ngờ/đang khiếu nại: `category`
+    (lost_fc/damaged_fc/inbound_missing/fee_error/return_missing/other), `source`
+    (ledger/inbound/adjustment/manual) + `source_ref`, `quantity`, `unit_cost`, `estimated_amount`
+    (**NULL khi chưa có giá vốn**), `status`, `amazon_case_id`, `reimbursed_amount`, `reimbursement_id`;
+    unique theo `(shop, source, source_ref, sku)`.
+  - `finance.reimbursement_claim_events` — lịch sử **append-only** (actor ghi trong bảng, view public
+    không lộ email — đúng luật không PII).
+  - `finance.sku_profit_daily` — PK `(shop, sku, ngày, tiền tệ)`; `cogs`/`gross_profit`/`ads_spend`
+    **nullable**, `fee_source` ∈ `settled|fees_api|unavailable` để nói rõ độ tin cậy của phí.
+  - Trigger giữ **máy trạng thái SOP-09**: `filed` phải có mã case · `approved/rejected/close` phải có
+    ghi chú **và** quyền `iam.is_finance_editor()` · `paid` phải có số tiền · worker chỉ refresh khoản
+    còn `suspected` (không ghi đè việc người đã xử lý).
+  - Web ghi qua RPC `public.vexim_update_reimbursement_claim(...)`; worker ghi qua 5 RPC
+    `vexim_worker_*` (chỉ `service_role`, đã revoke EXECUTE khỏi public/anon/authenticated).
+- **Worker (đã có test):**
+  - `reports/reimbursements.parser.ts` — bám **`GET_FBA_REIMBURSEMENTS_DATA`**: cột thật của Amazon,
+    đọc số kiểu local (95,00), bỏ BOM, khoá chống trùng `reimbursement-id|sku|reason|amount-total`.
+  - `reports/inventory-ledger.parser.ts` — bám **`GET_LEDGER_DETAIL_VIEW_DATA`** (18 tháng),
+    chuẩn hoá tiêu đề, đếm theo EventType.
+  - `domain/finance-claims.ts` — phân loại claim từ sổ cái (chỉ dòng **số âm**, lý do `FOUND` không tính),
+    gộp dòng cùng tham chiếu, ước tính = SL × giá vốn hiệu lực (**thiếu giá vốn → NULL, không đoán**),
+    tuổi claim + quá hạn 48h, tổng hợp, đối soát claim ↔ reimbursement, dựng bảng lợi nhuận SKU.
+  - `jobs/finance-claims.job.ts` + runner `worker:finance-claims -- --ledger=<file>
+    --reimbursements=<file> [--month=YYYY-MM] [--dry-run]`; chỉ ghi DB thật khi `mode = production`.
+- **Web:** `/finance/claims` (hàng đợi SOP-09: lọc theo trạng thái/nguyên nhân/shop, sắp theo mức quá hạn,
+  mở rộng xem lịch sử, nộp case/duyệt/ghi tiền về qua Server Action → RPC) và `/finance/profit`
+  (chọn tháng, gộp theo SKU, **SKU lỗ lên đầu**, cột “Nguồn phí”, ô “—” khi thiếu giá vốn).
+  Hai chip khoá ở `/finance` đã thay bằng liên kết thật; thêm 2 mục nav.
+- **Kiểm chứng local:** `supabase npm test` **TẤT CẢ PASS** (BƯỚC 1..16, BƯỚC 16 chạy 0015 lần 2 để
+  kiểm idempotent + toàn bộ vòng đời claim + F4) · `worker npm test` 275/275 · `web npm test` 45/45 ·
+  `npx tsc --noEmit` sạch · `next build` PASS.
+
+### Chờ VEXIM (Module 6 Đợt 2)
+
+- ☐ Chạy `supabase/migrations/0015_finance_claims_profit.sql` trong SQL Editor (sau `0014`).
+- ☐ Thêm schema `catalog` vào Supabase → Settings → API → *Exposed schemas* nếu muốn trang nhập giá vốn
+  đọc trực tiếp (worker/service_role không phụ thuộc bước này).
+- ☐ **Nhập giá vốn** cho các SKU đang bán (`catalog.cost_inputs`) — chưa có giá vốn thì F3 để trống
+  “giá trị ước tính” và F4 để trống lãi gộp (hệ thống cố ý không đoán).
+- ☐ Khi có credentials SP-API: chạy `npm run worker:finance-claims -- --seller=<uuid> --ledger=<file>`
+  (và `--reimbursements=<file>`) theo nhịp tuần cho SOP-09; F4 chạy lại sau mỗi kỳ settlement.
+- ⚠ Đã biết: `GET_FBA_ESTIMATED_FBA_FEES_TXT_DATA` (Fee Preview) chỉ cho **1 request/ngày/seller** và
+  `dataStartTime` phải lùi ≥72h — hiện F4 ưu tiên phí thật từ settlement, chỉ dùng ước tính khi chưa có.
+
+## Cập nhật 12/09 — L3: Trình soạn listing (Đợt 2, migration 0014)
+
+- **Migration `0014_listing_editor.sql`** (mới, idempotent + self-check):
+  - `catalog.listing_drafts` — bản nháp theo (shop, SKU): `payload`/`validation` jsonb,
+    trạng thái `draft → pending_approval → approved → publishing → published/failed`.
+  - `catalog.listing_draft_revisions` — lịch sử **append-only**: mỗi lần lưu/gửi/duyệt/
+    từ chối/publish là 1 revision + danh sách attribute thay đổi + before/after payload.
+  - `catalog.listing_publish_queue` — hàng đợi publish: `method` patch/put/feed, `status`
+    queued/blocked/sent/accepted/invalid/failed, `submission_id`, `issues`, `block_reason`.
+  - `catalog.listing_product_type_schemas` — cache JSON Schema product type để form động
+    dùng `required`/`maxLength` THẬT của Amazon.
+  - Trigger giữ **máy trạng thái + 4 mắt + cổng `validation.errorCount = 0`**; RLS theo shop;
+    không có policy DELETE (giữ lịch sử); web ghi qua RPC public (§7B), worker qua RPC §7C
+    (chỉ service_role).
+- **Hạn mức kiểm chứng tài liệu Amazon 09/2026** (`web/src/lib/listing/amazon-limits.ts`):
+  tiêu đề 75 ký tự (media 200; hiệu lực 27/07/2026), Item Highlight (`title_differentiation`)
+  125, bullet 10–255 × tối đa 5, mô tả 2.000, từ khóa backend **249 BYTE** (JP 500, IN 200),
+  9 ảnh. File ghi kèm `AMAZON_SOURCES` (URL + ngày kiểm chứng).
+- **Web:** trang `/listing/editor` (nav "Soạn listing (L3)") + `/api/listing/drafts`: lưu nháp,
+  gửi trưởng phòng duyệt, duyệt/từ chối (kèm lý do), publish (đẩy hàng đợi), xem lịch sử.
+  DEMO MODE xem/kiểm tra được nhưng KHÔNG lưu giả (thiếu Supabase → API trả 409).
+- **Worker:** `listing:publish` gọi `getListingsRestrictions` **TRƯỚC** khi gửi (blocked nếu
+  APPROVAL_REQUIRED/ASIN_NOT_FOUND/NOT_ELIGIBLE), rồi `patchListingsItem`/`putListingsItem`,
+  ghi ACCEPTED/INVALID + issues vào hàng đợi + lịch sử; `listing:schema` tải
+  `getDefinitionsProductType` vào cache. Cả hai chỉ gọi Amazon + ghi DB thật khi
+  `mode = production` và không `--dry-run`.
+- **Kiểm chứng local:** `supabase npm test` **TẤT CẢ PASS** (BƯỚC 1..15) · `worker npm test`
+  256/256 · `web npm test` 36/36 · `npx tsc --noEmit` sạch · `next build` 41/41 trang.
+
+### Chờ VEXIM (L3)
+
+- ☐ Chạy `supabase/migrations/0014_listing_editor.sql` trong SQL Editor (sau `0013`).
+- ☐ Khi có credentials SP-API: `npm run worker:listing-schema -- --product-type=<loại>` cho các
+  product type đang bán (form động mới có schema thật), rồi `npm run worker:listing-publish`.
+- ⚠ Đã biết: `op: "merge"` của Amazon chỉ hỗ trợ `fulfillment_availability.quantity` +
+  `purchasable_offer` (hiện patch theo whole-attribute); notification
+  `LISTINGS_ITEM_ISSUES_CHANGE` v1.0 đã bị Amazon ngừng (14–26/08/2026) — rà lại khi cấu hình
+  notification thật.
+
 ## Cập nhật 12/09 — migration 0011 + Module 4/6 đọc Supabase
 
 - Đã lưu **nguyên nội dung SQL VEXIM cung cấp** vào
@@ -344,6 +434,7 @@ nên không phụ thuộc bước này).
 - ✅ Tạo project Supabase (`pitmyzovjwflkyoqjbkz`) + set 14 biến môi trường trên Vercel — **xong 12/09**
 - ☐ **Chạy `0006` rồi `0007` trong SQL Editor** (dọn fixture test + tạo super_admin/alerts)
 - ☐ Chạy `0008` → `0009` → **`0010`** (wrapper RPC · shop production · hạ tầng Module 4/6/7)
+- ☐ ✅ `0011`/`0012`/`0013` đã chạy · ☐ **`0014`** (trình soạn listing L3) · ☐ **`0015`** (bồi hoàn FBA + lợi nhuận SKU)
 - ☐ **Thêm `CRON_SECRET` trên Vercel** (Production + Preview) → Redeploy
 - ☐ `AMAZON_LWA_CLIENT_ID` / `_CLIENT_SECRET` / `_REFRESH_TOKEN` khi Developer Profile được duyệt — thiếu 3 biến này thì worker chỉ chạy demo trong bộ nhớ (an toàn, không ghi DB thật)
 - ☐ 4 thông tin thật cho landing page (email/phone/địa chỉ/tên pháp lý)
