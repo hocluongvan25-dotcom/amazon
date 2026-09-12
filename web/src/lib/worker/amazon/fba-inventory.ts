@@ -65,6 +65,17 @@ export function normalizeSummary(s: InventorySummary): NormalizedInventory {
   };
 }
 
+/**
+ * Header SP-API cho getInventorySummaries.
+ *
+ * Endpoint này nằm trong nhóm "seller scope" — Amazon đọc access token ở
+ * header `x-amz-access-token`. Chỉ gửi `Authorization: Bearer` (cách cũ)
+ * khiến một số tài khoản bị 403 "Access to requested resource is denied" dù
+ * token hợp lệ. Gửi cả hai: x-amz-access-token là chuẩn, Authorization giữ
+ * để tương thích ngược với sandbox/endpoint cũ.
+ */
+const USER_AGENT = "VEXIM-Worker/1.0 (Language=TypeScript; Platform=Vercel)";
+
 export class FbaInventoryClient {
   private readonly host: string;
   private readonly lwa: LwaTokenManager;
@@ -98,6 +109,9 @@ export class FbaInventoryClient {
     const url = new URL(`${this.host}/fba/inventory/v1/summaries`);
     url.searchParams.set("granularityType", "Marketplace");
     url.searchParams.set("granularityId", params.marketplaceId);
+    // BẮT BUỘC: marketplaceIds là tham số required của getInventorySummaries
+    // (granularityId một mình không đủ — Amazon trả 400 InvalidInput khi thiếu).
+    url.searchParams.set("marketplaceIds", params.marketplaceId);
     url.searchParams.set("details", String(params.details ?? true));
     if (params.sellerSkus?.length) {
       for (const sku of params.sellerSkus) url.searchParams.append("sellerSkus", sku);
@@ -112,7 +126,15 @@ export class FbaInventoryClient {
     let lastWait = 1000;
     for (let attempt = 0; attempt < 4; attempt++) {
       const res = await fetchFn(url.toString(), {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+          // Chuẩn SP-API — Amazon đọc token ở đây.
+          "x-amz-access-token": token,
+          // Giữ lại để tương thích ngược (sandbox + các endpoint chấp nhận
+          // Bearer). Hai header cùng giá trị, không gây xung đột.
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+          "User-Agent": USER_AGENT,
+        },
       });
       if (res.status === 429) {
         const waitMs = Number(res.headers.get("retry-after") ?? Math.ceil(lastWait / 1000)) * 1000;

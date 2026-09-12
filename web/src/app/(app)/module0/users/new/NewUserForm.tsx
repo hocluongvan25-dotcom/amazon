@@ -42,8 +42,8 @@ export default function NewUserForm() {
     if (!supabase) return;
     (async () => {
       const [{ data: d }, { data: s }] = await Promise.all([
-        supabase.from("iam.departments").select("id,code,name"),
-        supabase.from("connections.seller_accounts").select("id,display_name,seller_id,marketplace,status"),
+        supabase.schema("iam").from("departments").select("id,code,name"),
+        supabase.schema("connections").from("seller_accounts").select("id,display_name,seller_id,marketplace,status"),
       ]);
       if (d) setDepts(d);
       if (s) setShops(s);

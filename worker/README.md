@@ -58,6 +58,58 @@ Biến môi trường quyết định chế độ:
 
 Host mặc định NA: `sellingpartnerapi-na.amazon.com`.
 
+## Chạy production trên Vercel (SP-API + PostgREST)
+
+### 1. Quy tắc PostgREST — đọc trước khi sửa `web/src/lib/worker/db/supabase.ts`
+
+Lỗi PGRST205/PGRST202 từng làm cron chết ngay vòng lặp đầu (12/09/2026)
+vì gọi theo kiểu `connections.seller_accounts`:
+
+| Quy tắc | Đúng | Sai |
+|---|---|---|
+| Đường dẫn không có tiền tố schema | `/rest/v1/seller_accounts` | `/rest/v1/connections.seller_accounts` → **PGRST205** |
+| Chọn schema bằng header | `Accept-Profile: connections` (GET) · `Content-Profile: connections` (POST/PATCH/DELETE) | prefix vào path |
+| RPC | `/rest/v1/rpc/active_production_shops` (wrapper trong schema `public`) | `/rest/v1/rpc/connections.active_production_shops` → **PGRST202** |
+
+RPC bọc trong `public` bởi **migration `0008_public_rpc_wrappers.sql`**
+(`public.active_production_shops`, `public.units_sold_per_day`) vì schema
+`connections` / `inventory` có thể chưa nằm trong "Exposed schemas" của project.
+
+### 2. Shop production phải có trong DB thì cron mới chạy
+
+`runInventorySyncAll()` chỉ lặp qua các shop thoả
+`status = 'active' AND data_source = 'production'`. Shop thật được đăng ký bởi
+**migration `0009_seed_production_shops.sql`**:
+
+```
+seller_id   = AQMVYI4HJTI4C
+marketplace = ATVPDKIKX0DER (US) + A2EUQ1WTGCTBG2 (CA)
+```
+
+Thiếu migration này → cron trả `shopsProcessed: 0` kèm log
+"mode=production nhưng KHÔNG có shop nào thoả …".
+
+### 3. FBA Inventory client (`web/src/lib/worker/amazon/fba-inventory.ts`)
+
+`getInventorySummaries` bắt buộc:
+
+- header **`x-amz-access-token`** (SP-API đọc token ở đây; `Authorization: Bearer`
+  vẫn gửi kèm để tương thích ngược)
+- query **`marketplaceIds`** (`granularityId` một mình không đủ → 400 InvalidInput)
+
+### 4. Tra seller_id: `GET /api/amazon/whoami`
+
+```bash
+curl -H "Authorization: Bearer $CRON_SECRET" https://<domain>/api/amazon/whoami
+```
+
+- Ưu tiên marketplace **US (ATVPDKIKX0DER)** khi shop tham gia nhiều marketplace
+- Inventory trống (0 SKU) → mượn **ASIN dự phòng** (`AMAZON_WHOAMI_FALLBACK_ASIN`,
+  mặc định `B08N5WRWNW`) để vẫn đọc được `SellerId` từ
+  `feesEstimate.FeesEstimateIdentifier.SellerId`
+- Response trả `productionShop.matchesRefreshToken` — `false` nghĩa là
+  `AMAZON_LWA_REFRESH_TOKEN` trên Vercel đang thuộc shop khác
+
 ## Trạng thái
 
 - [x] Tier 1 (mock): client LWA + FBA, notification handler, MYI parser, metrics, sync job — 16/16 test

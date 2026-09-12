@@ -52,7 +52,31 @@ export type InventoryWhoami = {
 export type FeesWhoami = {
   sellerId: string | null;
   status: string | null;
+  /** ASIN thật sự dùng để gọi feesEstimate (từ inventory hoặc fallback) */
+  asin: string | null;
+  /** true = inventory trống/0 SKU, phải mượn ASIN dự phòng */
+  usedFallbackAsin: boolean;
 };
+
+/**
+ * Marketplace mặc định của shop production VEXIM.
+ * Shop bán cả US + CA, nhưng Amazon trả danh sách marketplaceParticipations
+ * theo thứ tự bất định → phải ƯU TIÊN US thay vì lấy phần tử đầu tiên, nếu
+ * không sellerId/marketplace chốt cho DB có thể rơi vào CA (A2EUQ1WTGCTBG2).
+ */
+export const US_MARKETPLACE_ID = "ATVPDKIKX0DER";
+
+/**
+ * ASIN dự phòng khi inventory trống.
+ *
+ * feesEstimate là cách duy nhất Amazon lộ SellerId, mà nó cần một ASIN.
+ * Shop mới chưa có tồn kho FBA → bước inventory trả 0 summary → trước đây
+ * bước fees bị skip và whoami không bao giờ trả sellerId (rơi đúng vào tình
+ * huống cần khai shop production lần đầu). Một ASIN bất kỳ tồn tại trên
+ * marketplace là đủ: ta chỉ cần SellerId trong payload trả về, không cần
+ * đúng SKU của mình.
+ */
+export const DEFAULT_FALLBACK_ASIN = "B08N5WRWNW";
 
 export type WhoamiResult = {
   ok: boolean;
@@ -61,6 +85,9 @@ export type WhoamiResult = {
   marketplace: MarketplaceInfo | null;
   inventory: InventoryWhoami | null;
   sellerId: string | null;
+  /** ASIN đã dùng cho feesEstimate (inventory hoặc fallback) */
+  asin: string | null;
+  usedFallbackAsin: boolean;
   steps: {
     marketplaces: WhoamiStep<MarketplaceInfo[]>;
     inventory: WhoamiStep<InventoryWhoami>;
@@ -126,10 +153,17 @@ export function parseMarketplaces(data: unknown): MarketplaceInfo[] {
   return out;
 }
 
+/**
+ * Chọn marketplace để chốt: ƯU TIÊN US (ATVPDKIKX0DER) nếu đang hoạt động,
+ * rồi mới đến marketplace active đầu tiên còn lại.
+ * Thứ tự Amazon trả về không ổn định — không ưu tiên thì lúc ra US lúc ra CA.
+ */
 export function pickActiveMarketplace(
   list: MarketplaceInfo[],
+  preferredId: string = US_MARKETPLACE_ID,
 ): MarketplaceInfo | null {
-  return list.find((m) => !m.isSuspended) ?? null;
+  const active = list.filter((m) => !m.isSuspended);
+  return active.find((m) => m.id === preferredId) ?? active[0] ?? null;
 }
 
 export function parseInventory(data: unknown): InventoryWhoami {
@@ -188,23 +222,55 @@ function skipped<T>(reason: string): WhoamiStep<T> {
   return { ok: false, skipped: true, skipReason: reason };
 }
 
+/**
+ * Sinh SQL khai shop production — một dòng cho MỖI marketplace đang hoạt động
+ * (shop VEXIM bán cả US + CA, thiếu một bên là mất nửa dữ liệu đồng bộ).
+ * Idempotent nhờ unique (seller_id, marketplace) + on conflict.
+ */
 function sqlHintFor(
   sellerId: string | null,
-  mp: MarketplaceInfo | null,
+  marketplaces: MarketplaceInfo[],
 ): string | null {
-  if (!sellerId || !mp) return null;
+  if (!sellerId) return null;
+  const active = marketplaces.filter((m) => !m.isSuspended);
+  if (active.length === 0) return null;
+
+  const rows = active
+    .map((m, i) => {
+      const label = `P${i + 1} · ${m.countryCode || m.id}`;
+      return (
+        `  ((select id from iam.organizations where slug = 'vexim'), ` +
+        `'${sellerId}', '${m.id}', '${label}', 'active', 'production')`
+      );
+    })
+    .join(",\n");
+
   return (
-    `-- Khai vào connections.seller_accounts:\n` +
-    `--   seller_id   = '${sellerId}'\n` +
-    `--   marketplace = '${mp.id}'  -- ${mp.name}${mp.countryCode ? ` (${mp.countryCode})` : ""}`
+    `-- Khai shop production vào connections.seller_accounts (idempotent):\n` +
+    `insert into connections.seller_accounts\n` +
+    `  (org_id, seller_id, marketplace, display_name, status, data_source)\n` +
+    `values\n${rows}\n` +
+    `on conflict (seller_id, marketplace) do update\n` +
+    `  set status = 'active', data_source = 'production';\n` +
+    `-- (hoặc chỉ cần chạy migration supabase/migrations/0009_seed_production_shops.sql)`
   );
 }
 
 export async function discoverSellerIdentity(opts: {
   spapi: SpApiFn;
   region: string;
+  /** ASIN dự phòng khi inventory trống — null/undefined = tắt fallback */
+  fallbackAsin?: string | null;
+  /** Marketplace được ưu tiên (mặc định ATVPDKIKX0DER · US) */
+  preferredMarketplaceId?: string;
 }): Promise<WhoamiResult> {
   const { spapi, region } = opts;
+  const preferredMarketplaceId = opts.preferredMarketplaceId ?? US_MARKETPLACE_ID;
+  // fallbackAsin truyền tường minh (undefined = dùng mặc định, null = tắt)
+  const fallbackAsin =
+    opts.fallbackAsin === undefined
+      ? (process.env.AMAZON_WHOAMI_FALLBACK_ASIN ?? DEFAULT_FALLBACK_ASIN)
+      : opts.fallbackAsin;
 
   const steps: WhoamiResult["steps"] = {
     marketplaces: skipped("chưa chạy"),
@@ -243,7 +309,8 @@ export async function discoverSellerIdentity(opts: {
   }
 
   const marketplaces = steps.marketplaces.data ?? [];
-  const marketplace = pickActiveMarketplace(marketplaces);
+  // Ưu tiên US — shop production VEXIM bán US + CA, thứ tự trả về không ổn định.
+  const marketplace = pickActiveMarketplace(marketplaces, preferredMarketplaceId);
 
   // --- 2. inventory summaries ---
   if (!marketplace) {
@@ -275,21 +342,32 @@ export async function discoverSellerIdentity(opts: {
 
   const inventory = steps.inventory.data ?? null;
   const sampleAsin = inventory?.sampleAsin ?? null;
+  // ASIN fallback CHỈ khi bước inventory chạy OK mà trống (0 SKU) — shop mới
+  // chưa có hàng FBA. Nếu bước inventory LỖI (401/403/5xx) thì không mượn:
+  // cùng token đó gọi fees cũng lỗi, chỉ tốn thêm một request vô ích.
+  const inventoryEmpty = steps.inventory.ok === true && !sampleAsin;
+  const usedFallbackAsin = inventoryEmpty && !!fallbackAsin;
+  const asin = (sampleAsin ?? (inventoryEmpty ? fallbackAsin : null)) || null;
+  const fallbackNote = usedFallbackAsin
+    ? ` (dùng ASIN dự phòng ${fallbackAsin ?? ""} vì inventory trống)`
+    : "";
 
   // --- 3. feesEstimate → SellerId ---
   if (!marketplace) {
     steps.feesEstimate = skipped(
       "Không có marketplace đang hoạt động (bước 1 lỗi).",
     );
-  } else if (!sampleAsin) {
+  } else if (!asin) {
     steps.feesEstimate = skipped(
-      "Không có ASIN mẫu từ inventory (bước 2 lỗi hoặc shop chưa có SKU).",
+      steps.inventory.ok
+        ? "Inventory trống (0 SKU) và fallback ASIN bị tắt (fallbackAsin=null)."
+        : "Không có ASIN mẫu: bước inventory lỗi (fallback chỉ dùng khi inventory trống, không dùng khi lỗi).",
     );
   } else {
     try {
       const r = await spapi(
         "POST",
-        `/products/fees/v0/items/${encodeURIComponent(sampleAsin)}/feesEstimate`,
+        `/products/fees/v0/items/${encodeURIComponent(asin)}/feesEstimate`,
         {
           body: {
             FeesEstimateRequest: {
@@ -306,28 +384,41 @@ export async function discoverSellerIdentity(opts: {
           },
         },
       );
+      // Gắn kèm ASIN đã dùng để ai đọc log biết vì sao ra SellerId này.
+      const data = (e: { sellerId: string | null; status: string | null }): FeesWhoami => ({
+        sellerId: e.sellerId,
+        status: e.status,
+        asin,
+        usedFallbackAsin,
+      });
+
       if (r.status >= 400) {
         // Vẫn thử đọc SellerId — Amazon đôi khi trả 4xx kèm identifier.
         const extracted = extractSellerId(r.data);
         if (extracted.sellerId) {
           steps.feesEstimate = {
             ok: true,
-            data: extracted,
-            error: httpError(r.status, r.raw),
+            data: data(extracted),
+            error: httpError(r.status, r.raw) + fallbackNote,
           };
         } else {
-          steps.feesEstimate = { ok: false, error: httpError(r.status, r.raw) };
+          steps.feesEstimate = {
+            ok: false,
+            data: data(extracted),
+            error: httpError(r.status, r.raw) + fallbackNote,
+          };
         }
       } else {
         const extracted = extractSellerId(r.data);
         if (extracted.sellerId) {
-          steps.feesEstimate = { ok: true, data: extracted };
+          steps.feesEstimate = { ok: true, data: data(extracted) };
         } else {
           steps.feesEstimate = {
             ok: false,
-            data: extracted,
+            data: data(extracted),
             error:
-              "feesEstimate không chứa FeesEstimateIdentifier.SellerId.",
+              "feesEstimate không chứa FeesEstimateIdentifier.SellerId." +
+              fallbackNote,
           };
         }
       }
@@ -349,7 +440,9 @@ export async function discoverSellerIdentity(opts: {
     marketplace,
     inventory,
     sellerId,
+    asin,
+    usedFallbackAsin,
     steps,
-    sqlHint: sqlHintFor(sellerId, marketplace),
+    sqlHint: sqlHintFor(sellerId, marketplaces),
   };
 }
