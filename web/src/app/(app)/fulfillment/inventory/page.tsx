@@ -1,4 +1,5 @@
 import { Chip, NoAccess, PageHeader, Panel, tableCls } from "@/components/ui";
+import { LiveInventoryList } from "@/components/inventory/LiveInventory";
 import { requireSession } from "@/lib/auth/session";
 import { inventoryRows } from "@/lib/data/mock";
 import type { PersonaKey } from "@/lib/roles";
@@ -38,6 +39,13 @@ export default async function InventoryPage({
 
   const { f } = await searchParams;
   const filter = f ?? "all";
+
+  // Supabase mode → đọc từ vexim_inventory_latest
+  if (session.mode === "supabase") {
+    return <LiveInventoryList filter={filter} />;
+  }
+
+  // Demo mode → mock data
   const rows = inventoryRows.filter((r) => {
     if (filter === "low") return r.status === "low" || r.status === "out";
     if (filter === "out") return r.status === "out";
@@ -54,6 +62,7 @@ export default async function InventoryPage({
 
   return (
     <>
+      <div className="mb-3 text-sm font-bold text-amber">DEMO · Dữ liệu minh họa</div>
       <PageHeader
         title="Tồn kho theo SKU"
         sub={`${inventoryRows.length} SKU · cập nhật 45 phút trước (getInventorySummaries)`}
