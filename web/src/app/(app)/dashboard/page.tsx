@@ -8,6 +8,7 @@ import {
   Panel,
   tableCls,
 } from "@/components/ui";
+import { LiveDashboard } from "@/components/dashboard/LiveDashboard";
 import { requireSession } from "@/lib/auth/session";
 import { ceoKpis, redShops, revenue14d } from "@/lib/data/mock";
 import type { PersonaKey } from "@/lib/roles";
@@ -17,9 +18,11 @@ const ALLOWED: PersonaKey[] = ["ceo"];
 export default async function DashboardPage() {
   const session = await requireSession();
   if (!ALLOWED.includes(session.persona)) return <NoAccess />;
+  if (session.mode === "supabase") return <LiveDashboard />;
 
   return (
     <>
+      <div className="mb-3 text-sm font-bold text-amber">DEMO · Dữ liệu minh họa</div>
       <PageHeader
         title="Tổng quan"
         sub="Hôm qua · 14 shop · cập nhật 06:00"
