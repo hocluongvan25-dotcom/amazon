@@ -122,6 +122,25 @@ Endpoint chẩn đoán `GET /api/whoami` (whitelist, không redirect `/login`):
 trả cookie **tên** (không value), cờ env (không key), `auth.getUser()`,
 `iam.my_profile`, và header `x-vexim-middleware` để biết middleware có chạy.
 
+`GET /api/amazon/whoami` (cũng whitelist; khoá `Authorization: Bearer <CRON_SECRET>`):
+tra **seller_id + marketplace** của chính refresh_token (self-authorization) —
+3 bước, lỗi từng bước không làm hỏng bước khác:
+
+1. `GET /sellers/v1/marketplaceParticipations`
+2. `GET /fba/inventory/v1/summaries` (xác nhận role Inventory, đếm SKU, ASIN mẫu)
+3. `POST /products/fees/v0/items/{Asin}/feesEstimate` → `FeesEstimateIdentifier.SellerId`
+
+Amazon không có endpoint whoami chính thức; seller ID chỉ lộ ở feesEstimate
+(kể cả khi Status = ClientError). Không trả access token.
+
+Cách gọi (sau khi merge / trên preview của PR, **không** phải domain production
+nếu PR chưa merge):
+
+```
+curl -sS -H "Authorization: Bearer $CRON_SECRET" \
+  https://<host>/api/amazon/whoami
+```
+
 ## Trạng thái tổng thể
 
 | Luồng việc | Trạng thái |
