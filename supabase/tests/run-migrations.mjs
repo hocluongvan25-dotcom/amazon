@@ -2759,6 +2759,853 @@ await cmp(
   3,
 );
 
+// Toàn bộ phần 0020 nằm TRONG KHỐI {} riêng: biến fixture (t1, cv, bu, over…)
+// không đụng tên biến của các BƯỚC trước ở phạm vi module.
+{
+// ============================================================================
+console.log("\n=== BƯỚC 21: 0020 — Module 0 OAuth multi-tenant · Module 5 PPC (đọc/phân tích) ===");
+// ============================================================================
+ok(
+  await ex(rd("migrations/0020_module0_oauth_module5_ppc_read.sql"), "0020_module0_oauth_module5_ppc_read.sql"),
+  "0020 chạy sạch (DO-block tự soát: RLS · index unique · token không lộ · RPC · view · hợp đồng cột)",
+);
+
+// ---- 0. Hợp đồng cột: web đọc bằng select cố định → chốt tại đây --------------
+ok(
+  (await colsOf("vexim_connections")) ===
+    "seller_account_id,shop,seller_id,marketplace,shop_status,data_source,service,connected," +
+    "token_status,token_source,scope,client_id,selling_partner_id,ads_account_id,authorized_at," +
+    "reauthorize_at,reminder_days,reminder_sent_at,last_refresh_at,last_used_at,last_error," +
+    "days_to_reauth,reauth_state,needs_connect",
+  "0020: vexim_connections đúng hợp đồng cột (2 service/shop, KHÔNG có cột token)",
+);
+ok(
+  (await colsOf("vexim_oauth_events")) ===
+    "id,seller_account_id,shop,service,event,status,detail,created_at",
+  "0020: vexim_oauth_events đúng hợp đồng cột (audit luồng OAuth)",
+);
+ok(
+  (await colsOf("vexim_ads_profiles")) ===
+    "seller_account_id,shop,ads_profile_id,marketplace,country_code,currency,timezone,account_id," +
+    "account_type,account_name,daily_budget,is_default,source,first_seen_at,last_synced_at," +
+    "campaigns_known,last_metrics_day",
+  "0020: vexim_ads_profiles đúng hợp đồng cột (profileId = scope của mọi call Ads)",
+);
+ok(
+  (await colsOf("vexim_ads_campaigns")).startsWith(
+    "seller_account_id,shop,ads_profile_id,campaign_id,campaign_name,campaign_type,state," +
+    "targeting_type,cost_type,daily_budget,budget_type,currency,start_date,end_date,portfolio_id," +
+    "last_metrics_day,metrics_last_day,days_with_data,spend_yesterday,impressions_yesterday," +
+    "clicks_yesterday,spend7,sales7,ad_orders7,ad_units7,impressions7,clicks7,acos7,roas7,ctr7,cpc7," +
+    "acos_prev7,acos_trend_pts,budget_used_pct,budget_usage_day,budget_usage_spend," +
+    "budget_usage_budget,usage_captured_at,exhausted_at_estimate,budget_exhausted," +
+    "over_acos_target,acos_target,first_seen_at,last_synced_at,source"),
+  "0020: vexim_ads_campaigns đúng hợp đồng cột (A1: cấu hình + 7 ngày + cờ cảnh báo)",
+);
+ok(
+  (await colsOf("vexim_ads_kpis")) ===
+    "seller_account_id,shop,shop_status,currency,metrics_day,spend_yesterday,clicks_yesterday," +
+    "spend7,ad_sales7,ad_orders7,clicks7,impressions7,acos7,roas7,ctr7,cpc7,total_sales7," +
+    "total_orders7,tacos7,tacos_unknown,campaigns_enabled,campaigns_over_target," +
+    "campaigns_exhausted,budget_daily_total,last_metrics_day,last_imported_at,hours_since_import,is_stale",
+  "0020: vexim_ads_kpis đúng hợp đồng cột (KPI PPC + TACOS theo shop × currency)",
+);
+ok(
+  (await colsOf("vexim_ads_search_terms")) ===
+    "seller_account_id,shop,search_term,is_placement_without_keyword,campaign_id,campaign_name," +
+    "ad_group_name,keyword_text,match_type,keyword_type,currency,impressions,clicks,spend,sales7," +
+    "ad_orders7,ctr,cpc,acos7,days_with_data,first_day,last_day,bid,ad_keyword_status," +
+    "wasted_spend_signal",
+  "0020: vexim_ads_search_terms đúng hợp đồng cột (A3)",
+);
+ok(
+  (await colsOf("vexim_ads_targeting")) ===
+    "seller_account_id,shop,day,campaign_id,campaign_name,ad_group_id,ad_group_name,target_label," +
+    "keyword_id,keyword_text,match_type,keyword_type,is_product_targeting,targeting_expression,bid," +
+    "currency,impressions,clicks,spend,sales7d,ad_orders7d,units_sold7d,acos7d,roas7d,report_id," +
+    "imported_at",
+  "0020: vexim_ads_targeting đúng hợp đồng cột (A2)",
+);
+ok(
+  (await colsOf("vexim_ads_budget_usage")) ===
+    "seller_account_id,shop,day,campaign_id,campaign_name,campaign_state,ads_profile_id,budget_type," +
+    "currency,budget,spend,percentage_used,delivered_clicks,delivered_impressions,last_captured_at," +
+    "source,exhausted_at_estimate,snapshots_over_100pct,budget_exhausted,exhausted_note",
+  "0020: vexim_ads_budget_usage đúng hợp đồng cột (giờ cạn = ƯỚC LƯỢNG, có nhãn)",
+);
+ok(
+  (await colsOf("vexim_ads_report_requests")) ===
+    "id,seller_account_id,shop,ads_profile_id,report_type_id,ad_product,group_by,time_unit," +
+    "date_start,date_end,ads_report_id,status,failure_reason,rows_imported,attempts,last_error," +
+    "requested_at,completed_at,imported_at,age_minutes,is_stale",
+  "0020: vexim_ads_report_requests đúng hợp đồng cột (không phơi download_url)",
+);
+ok(
+  (await colsOf("vexim_ads_campaign_daily")) ===
+    "seller_account_id,shop,day,campaign_id,campaign_name,campaign_type,currency,impressions," +
+    "clicks,spend,sales7d,ad_orders7d,units_sold7d,acos7d,roas7d,ctr,cpc,budget_amount," +
+    "campaign_status,ads_profile_id,report_id,imported_at",
+  "0020: vexim_ads_campaign_daily đúng hợp đồng cột (chuỗi ngày cho biểu đồ)",
+);
+
+// ---- 1. Metadata: web KHÔNG ghi được, token KHÔNG lộ -------------------------
+await cmp(
+  "0020: bảng Ads mới chỉ cho web ĐỌC (không policy ghi nào)",
+  `select count(*) n from pg_policies where schemaname='ads'
+     and tablename in ('targeting_metrics_daily','advertised_product_daily','budget_usage','report_requests')
+     and cmd <> 'SELECT'`,
+  0,
+);
+await cmp(
+  "0020: 1 shop giữ được 2 token (SP-API + Ads) — unique theo (shop, service)",
+  `select count(*) n from pg_indexes where indexname='uq_oauth_tokens_shop_service'
+     and indexdef like '%UNIQUE%' and indexdef like '%service%'`,
+  1,
+);
+await cmp(
+  "0020: alert khử trùng theo entity_key (1 alert MỞ / luật / đối tượng)",
+  `select count(*) n from pg_indexes where indexname='uq_alerts_open_entity'
+     and indexdef like '%UNIQUE%' and indexdef like '%open%'`,
+  1,
+);
+await cmp(
+  "0020: không view public nào phơi cột token",
+  `select count(*) n from information_schema.columns where table_schema='public'
+     and (column_name ilike '%refresh_token%' or column_name ilike '%access_token%'
+          or column_name ilike '%encrypted%' or column_name='download_url')`,
+  0,
+);
+await cmp(
+  "0020: ngưỡng budget_exhausted đã có số (100%) để RPC tự nổ alert",
+  `select count(*) n from ops.alert_rules
+     where rule_code='budget_exhausted' and threshold=100 and comparator='gte'`,
+  1,
+);
+
+// ---- 2. Fixture: 1 user được gán shop + 1 người lạ ---------------------------
+await ex("begin");
+await ex("reset role;");
+const oUser     = "d2000000-0000-4000-8000-000000000001";
+const oStranger = "d2000000-0000-4000-8000-000000000002";
+ok(
+  await ex(`insert into auth.users(id,email) values
+     ('${oUser}','local-e-ads@example.test'),
+     ('${oStranger}','local-e-stranger@example.test');
+   insert into iam.user_profiles(id,display_name,email,vexim_employee) values
+     ('${oUser}','Vận hành Ads','local-e-ads@example.test',true),
+     ('${oStranger}','Người lạ','local-e-stranger@example.test',true);
+   insert into iam.assignments(user_id,seller_account_id,module,can_write,created_at) values
+     ('${oUser}','${cShop}','ads',false, now() - interval '1 day');
+   insert into iam.role_assignments(user_id,role) values ('${oUser}','operator');
+   update connections.seller_accounts set data_source='production' where id='${cShop}';
+   delete from ads.ad_metrics_daily      where seller_account_id='${cShop}';
+   delete from ads.campaigns             where seller_account_id='${cShop}';
+   delete from ads.budget_usage          where seller_account_id='${cShop}';
+   delete from ads.search_terms          where seller_account_id='${cShop}';
+   delete from ads.ad_profiles           where seller_account_id='${cShop}';
+   delete from ads.report_requests       where seller_account_id='${cShop}';
+   delete from connections.oauth_tokens  where seller_account_id='${cShop}'`),
+  "0020 fixture: user vận hành Ads + người lạ + shop production + dọn dữ liệu Ads cũ (số đếm xác định)",
+);
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role service_role;");
+
+// ---- 3. MODULE 0 — token: CHẶN plaintext, nhận bản đã mã hoá -----------------
+const ENC = (tag) => `enc:v1:${Buffer.from(`demo-iv|${tag}`).toString("base64")}`;
+const iso = (daysAgo) => new Date(Date.now() - daysAgo * 86400000).toISOString();
+const upToken = (o) =>
+  one(`select * from public.vexim_oauth_upsert_token('${JSON.stringify(o)}'::jsonb)`);
+
+ok(
+  await mustBlock(`select * from public.vexim_oauth_upsert_token(
+     '{"sellerAccountId":"${cShop}","service":"spapi","encryptedRefreshToken":"Atzr|PLAINTEXT"}'::jsonb)`),
+  "0020 CHẶN: refresh token PLAINTEXT (Atzr…) không được lưu — bắt buộc tiền tố enc:v1:",
+);
+ok(
+  await mustBlock(`select * from public.vexim_oauth_upsert_token(
+     '{"sellerAccountId":"${cShop}","service":"spapi"}'::jsonb)`),
+  "0020 CHẶN: thiếu encryptedRefreshToken → từ chối (không lưu token rỗng)",
+);
+
+const t1 = await upToken({
+  sellerAccountId: cShop, service: "spapi", encryptedRefreshToken: ENC("spapi-340d"),
+  authorizedAt: iso(340), expiresAt: iso(-25), clientId: "amzn1.application-oa2-client.demo",
+  scope: "sellingpartnerapi::all", sellingPartnerId: "A2XYZUSDEMO", tokenSource: "oauth",
+  authorizedBy: oUser,
+});
+ok(
+  t1?.service === "spapi" && t1?.status === "active" && Number(t1?.days_to_reauth) >= 24
+    && Number(t1?.days_to_reauth) <= 26,
+  `0020: token SP-API lưu được, hạn re-authorize = authorized + 365 ngày (còn ${t1?.days_to_reauth} ngày)`,
+);
+const t1row = await one(`select encrypted_refresh_token, authorized_at, reauthorize_at, reminder_days,
+     rotate_reminder_sent, token_source, selling_partner_id
+     from connections.oauth_tokens where seller_account_id='${cShop}' and service='spapi'`);
+ok(
+  String(t1row?.encrypted_refresh_token).startsWith("enc:v1:")
+    && Number(t1row?.reminder_days) === 30 && t1row?.rotate_reminder_sent === false
+    && t1row?.token_source === "oauth",
+  `0020: token lưu DẠNG MÃ HOÁ + reminder 30 ngày (giống email Amazon gửi chủ shop) — ${JSON.stringify(t1row)}`,
+);
+ok(
+  (await one(`select (reauthorize_at - authorized_at) as span,
+       ((reauthorize_at - authorized_at) = interval '365 days') as exact365
+       from connections.oauth_tokens where seller_account_id='${cShop}' and service='spapi'`)).exact365 === true,
+  "0020: reauthorize_at - authorized_at = ĐÚNG 365 ngày (chu kỳ Amazon)",
+);
+
+const t2 = await upToken({
+  sellerAccountId: cShop, service: "ads", encryptedRefreshToken: ENC("ads-350d"),
+  authorizedAt: iso(350), clientId: "amzn1.application-oa2-client.ads",
+  scope: "ads::campaign_management", adsAccountId: "1234567890", tokenSource: "env",
+});
+ok(t2?.service === "ads" && Number(t2?.days_to_reauth) <= 16,
+   `0020: token Ads là DÒNG RIÊNG của cùng shop (còn ${t2?.days_to_reauth} ngày → sắp đỏ)`);
+await cmp(
+  "0020: 1 shop = 2 token (SP-API + Ads), không đè nhau",
+  `select count(*) n from connections.oauth_tokens where seller_account_id='${cShop}'`,
+  2,
+);
+
+// re-authorize lại → hạn lùi 365 ngày, alert cũ tự đóng
+const t3 = await upToken({
+  sellerAccountId: cShop, service: "spapi", encryptedRefreshToken: ENC("spapi-fresh"),
+  authorizedAt: iso(0), clientId: "amzn1.application-oa2-client.demo",
+  scope: "sellingpartnerapi::all", tokenSource: "oauth",
+});
+await cmp(
+  "0020: upsert lại = UPDATE đúng dòng (không nhân bản token)",
+  `select count(*) n from connections.oauth_tokens where seller_account_id='${cShop}'`,
+  2,
+);
+ok(Number(t3?.days_to_reauth) >= 364,
+   `0020: vừa re-authorize → hạn mới còn ${t3?.days_to_reauth} ngày (hết cảnh báo)`);
+
+// ---- 4. MODULE 0 — audit event + state chống CSRF/replay --------------------
+await one(`select public.vexim_oauth_record_event(
+   '{"sellerAccountId":"${cShop}","service":"ads","event":"token_refresh","status":"ok",
+     "detail":"LWA refresh 200, expires_in 3600"}'::jsonb)`);
+await one(`select public.vexim_oauth_record_event(
+   '{"sellerAccountId":"${cShop}","service":"ads","event":"report_throttled","status":"error",
+     "detail":"429 QuotaExceeded, Retry-After 30 — KHÔNG retry dồn"}'::jsonb)`);
+await cmp(
+  "0020: audit luồng OAuth ghi vào connections.oauth_events",
+  `select count(*) n from connections.oauth_events where seller_account_id='${cShop}'`,
+  2,
+);
+const stRes = await one(`select public.vexim_oauth_set_state(
+   '{"state":"state-demo-0020","service":"ads","sellerAccountId":"${cShop}",
+     "redirectUri":"/ppc","scope":"ads::campaign_management","sellerHint":"A2XYZUSDEMO"}'::jsonb) s`);
+ok(stRes?.s === "state-demo-0020", `0020: state ghi nhận cho lượt authorize (${stRes?.s})`);
+const cs1 = await one(`select * from public.vexim_oauth_consume_state('state-demo-0020','ok')`);
+ok(
+  cs1?.service === "ads" && cs1?.seller_account_id === cShop && cs1?.redirect_uri === "/ppc"
+    && cs1?.expired === false && cs1?.already_used === false,
+  `0020: consume state lần 1 → đúng shop + redirect — ${JSON.stringify(cs1)}`,
+);
+const cs2 = await one(`select * from public.vexim_oauth_consume_state('state-demo-0020','ok')`);
+ok(cs2?.already_used === true,
+   "0020: state dùng LẦN 2 → already_used=true (chống replay/CSRF: 1 code chỉ đổi 1 lần)");
+
+// ---- 5. MODULE 0 — quét re-authorize 365 ngày + dedupe alert -----------------
+const scan1 = await rows19(`select * from public.vexim_oauth_reauth_scan(30)`);
+const scanAds = scan1.find((r) => r.shop_id === cShop && r.token_service === "ads");
+ok(
+  scanAds && scanAds.token_service === "ads" && scanAds.alert_severity === "amber"
+    && scanAds.next_action === "send_reauth_link" && scanAds.alert_id,
+  `0020: quét re-auth thấy token Ads còn ~15 ngày → amber + gửi link — ${JSON.stringify(scanAds)}`,
+);
+const scanSpapi = scan1.filter((r) => r.shop_id === cShop && r.token_service === "spapi")[0];
+ok(
+  scanSpapi?.alert_severity === null && scanSpapi?.next_action === "none",
+  `0020: token SP-API vừa re-authorize → không cảnh báo (${scanSpapi?.days_to_reauth} ngày)`,
+);
+await cmp(
+  "0020: alert reauth_required nổ đúng 1 cái cho shop",
+  `select count(*) n from ops.alerts a join ops.alert_rules r on r.id=a.rule_id
+    where a.seller_account_id='${cShop}' and r.rule_code='reauth_required' and a.status='open'`,
+  1,
+);
+const scan2 = await rows19(`select * from public.vexim_oauth_reauth_scan(30)`);
+ok(
+  scan2.filter((r) => r.shop_id === cShop && r.token_service === "ads")[0]?.alert_id
+    === scanAds?.alert_id,
+  "0020: quét LẦN 2 → cùng alert_id (dedupe, không spam chuông)",
+);
+await cmp(
+  "0020: quét 2 lần vẫn 1 alert mở (entity_key = token:<service>)",
+  `select count(*) n from ops.alerts a join ops.alert_rules r on r.id=a.rule_id
+    where a.seller_account_id='${cShop}' and r.rule_code='reauth_required' and a.status='open'`,
+  1,
+);
+ok(
+  (await one(`select reminder_sent_at is not null as sent, rotate_reminder_sent
+     from connections.oauth_tokens where seller_account_id='${cShop}' and service='ads'`)).sent === true,
+  "0020: đã đánh dấu reminder_sent_at (không gửi nhắc lại mỗi ngày)",
+);
+
+// quá hạn → token chuyển expired để worker KHÔNG gọi API bằng token chết
+await upToken({
+  sellerAccountId: cShop, service: "ads", encryptedRefreshToken: ENC("ads-400d"),
+  authorizedAt: iso(400), tokenSource: "oauth",
+});
+const scan3 = await rows19(`select * from public.vexim_oauth_reauth_scan(30,'ads')`);
+const over = scan3.find((r) => r.shop_id === cShop);
+ok(
+  over && over.alert_severity === "red" && over.next_action === "reauthorize_now"
+    && Number(over.days_to_reauth) < 0,
+  `0020: quá hạn 365 ngày → ĐỎ + reauthorize_now (${over?.days_to_reauth} ngày)`,
+);
+const dead = await one(`select status, last_error from connections.oauth_tokens
+   where seller_account_id='${cShop}' and service='ads'`);
+ok(
+  dead?.status === "expired" && /quá hạn/.test(String(dead?.last_error ?? "")),
+  `0020: token quá hạn tự chuyển EXPIRED — worker dừng gọi API bằng token chết (${dead?.last_error})`,
+);
+
+// ---- 6. MODULE 5 — profiles (GET /v2/profiles, bản NESTED thật của Amazon) ----
+const prof = await one(`select * from public.vexim_worker_upsert_ads_profiles('${cShop}', '[
+  {"profileId":"1234567890","countryCode":"US","currencyCode":"USD","timezone":"America/Los_Angeles",
+   "marketplaceStringId":"ATVPDKIKX0DER","accountId":"amzn1.account.ABC",
+   "accountInfo":{"id":"A2XYZUSDEMO","type":"seller","name":"VEXIM Demo US"},
+   "dailyBudget":{"currency":"USD","amount":500},"isDefault":true},
+  {"profileId":"9876543210","countryCode":"CA","currencyCode":"CAD","timezone":"America/Toronto",
+   "accountInfo":{"id":"A2XYZCADEMO","type":"seller","name":"VEXIM Demo CA"},"isDefault":false},
+  {"profileId":"5555555555","countryCode":"US","currencyCode":"USD",
+   "accountInfo":{"id":"VENDOR-DEMO","type":"vendor","name":"VEXIM Vendor"}},
+  {"countryCode":"US","accountInfo":{"id":"no-profile","type":"seller"}}
+]'::jsonb)`);
+ok(
+  Number(prof?.inserted) === 3 && Number(prof?.updated) === 0 && Number(prof?.skipped) === 1
+    && Number(prof?.profiles) === 3 && Number(prof?.merged) === 0,
+  `0020 profiles: 3 profile (bỏ 1 dòng không có profileId) — ${JSON.stringify(prof)}`,
+);
+const profRow = await one(`select account_id, account_type, account_name, daily_budget, currency,
+     is_default, marketplace from public.vexim_ads_profiles
+     where seller_account_id='${cShop}' and ads_profile_id='1234567890'`);
+ok(
+  profRow?.account_type === "seller" && profRow?.account_name === "VEXIM Demo US"
+    && profRow?.account_id === "A2XYZUSDEMO" && Number(profRow?.daily_budget) === 500
+    && profRow?.is_default === true,
+  `0020 profiles: đọc được accountInfo{} + dailyBudget{} NESTED của Amazon — ${JSON.stringify(profRow)}`,
+);
+const profVendor = await one(`select account_type from public.vexim_ads_profiles
+   where seller_account_id='${cShop}' and ads_profile_id='5555555555'`);
+ok(profVendor?.account_type === "vendor",
+   "0020 profiles: profile VENDOR vẫn lưu + gắn nhãn (worker tự chọn profile seller, không xoá dữ liệu)");
+const profAgain = await one(`select * from public.vexim_worker_upsert_ads_profiles('${cShop}', '[
+  {"profileId":"1234567890","countryCode":"US","currencyCode":"USD",
+   "accountInfo":{"id":"A2XYZUSDEMO","type":"seller","name":"VEXIM Demo US (đổi tên)"},"isDefault":true}
+]'::jsonb)`);
+ok(Number(profAgain?.inserted) === 0 && Number(profAgain?.updated) === 1,
+   `0020 profiles: nhập lại = UPDATE — ${JSON.stringify(profAgain)}`);
+
+// ---- 7. MODULE 5 — campaigns (POST /sp/campaigns/list v3, budget NESTED) -----
+const camp = await one(`select * from public.vexim_worker_upsert_ads_campaigns('${cShop}', '[
+  {"campaignId":"C1","name":"SP - Mat ong 500ml","state":"ENABLED","costType":"CPC",
+   "targetingType":"MANUAL","startDate":"20260801","adsProfileId":"1234567890",
+   "budget":{"budget":25.00,"currencyCode":"USD","budgetType":"DAILY"}},
+  {"campaignId":"C2","name":"SP - ROAS tot","state":"ENABLED","costType":"CPC",
+   "targetingType":"AUTO","startDate":"20260715","adsProfileId":"1234567890",
+   "budget":{"budget":40,"currencyCode":"USD","budgetType":"DAILY"}},
+  {"campaignId":"C3","name":"SP - CAD","state":"PAUSED","adsProfileId":"9876543210",
+   "budget":{"budget":15,"currencyCode":"CAD","budgetType":"DAILY"}},
+  {"name":"thieu campaignId","state":"ENABLED"}
+]'::jsonb)`);
+ok(
+  Number(camp?.inserted) === 3 && Number(camp?.skipped) === 1 && Number(camp?.campaigns) === 3
+    && Number(camp?.merged) === 0,
+  `0020 campaigns: 3 campaign (bỏ 1 dòng không campaignId) — ${JSON.stringify(camp)}`,
+);
+const c1 = await one(`select daily_budget, budget_currency, budget_type, start_date, state, targeting_type
+   from ads.campaigns where seller_account_id='${cShop}' and campaign_id='C1'`);
+ok(
+  Number(c1?.daily_budget) === 25 && c1?.budget_currency === "USD" && c1?.budget_type === "DAILY"
+    && d10(c1?.start_date) === "2026-08-01",
+  `0020 campaigns: budget{} NESTED + startDate "20260801" (yyyyMMdd) đọc đúng — ${JSON.stringify({ ...c1, start_date: d10(c1?.start_date) })}`,
+);
+await one(`select * from public.vexim_worker_upsert_ads_campaigns('${cShop}', '[
+  {"campaignId":"C3","name":"SP - CAD","state":"PAUSED","adsProfileId":"9876543210",
+   "budget":{"budget":0,"currencyCode":"CAD","budgetType":"DAILY"}}]'::jsonb)`);
+ok(
+  Number((await one(`select daily_budget from ads.campaigns
+     where seller_account_id='${cShop}' and campaign_id='C3'`)).daily_budget) === 0,
+  "0020 campaigns: ngân sách về 0 được GHI ĐÈ (0 là thông tin thật, không phải 'thiếu dữ liệu')",
+);
+
+// ---- 8. MODULE 5 — metrics ngày (Reporting v3, spCampaigns) ------------------
+const M_DAYS = ["2026-09-05","2026-09-06","2026-09-07","2026-09-08","2026-09-09","2026-09-10"];
+const metricRows = [
+  // C1 lỗ (ACOS 50%): Amazon KHÔNG trả ctr/cpc/acos → DB phải tự tính
+  ...M_DAYS.map((d) => ({ date: d, campaignId: "C1", campaignName: "SP - Mat ong 500ml",
+    impressions: 1000, clicks: 10, cost: 10, sales7d: 20, purchases7d: 2,
+    unitsSoldClicks7d: 2, currencyCode: "USD", campaignStatus: "enabled", reportId: "rep-c1" })),
+  { date: "2026-09-11", campaignId: "C1", campaignName: "SP - Mat ong 500ml", impressions: 1200,
+    clicks: 12, cost: 12, sales7d: 25, purchases7d: 3, unitsSoldClicks7d: 3, currencyCode: "USD",
+    campaignStatus: "enabled", campaignBudgetAmount: "25.00", reportId: "rep-c1b" },
+  // trùng ngày (report chồng khoảng) → KHÔNG được cộng dồn tiền
+  { date: "2026-09-11", campaignId: "C1", impressions: 1200, clicks: 12, cost: 12, sales7d: 25,
+    purchases7d: 3, currencyCode: "USD", reportId: "rep-c1c" },
+  // C2 lãi (ACOS ~7%)
+  ...M_DAYS.map((d) => ({ date: d, campaignId: "C2", campaignName: "SP - ROAS tot", impressions: 2000,
+    clicks: 20, cost: 5, sales7d: 70, purchases7d: 5, currency: "USD" })),
+  { date: "2026-09-11", campaignId: "C2", impressions: 2000, clicks: 20, cost: 5, sales7d: 70,
+    purchases7d: 5, currency: "USD" },
+  // C3 = CAD → KHÔNG cộng chung với USD
+  { date: "2026-09-11", campaignId: "C3", impressions: 100, clicks: 4, cost: 8, sales7d: 40,
+    purchases7d: 1, currencyCode: "CAD" },
+  // rác: thiếu ngày / thiếu campaignId
+  { campaignId: "C1", cost: 99, currencyCode: "USD" },
+  { date: "2026-09-11", cost: 99, currencyCode: "USD" },
+];
+const m1 = await one(`select * from public.vexim_worker_upsert_ads_metrics('${cShop}', '${JSON.stringify(metricRows)}'::jsonb)`);
+ok(
+  Number(m1?.inserted) === 15 && Number(m1?.updated) === 0 && Number(m1?.skipped) === 2
+    && Number(m1?.merged) === 1 && Number(m1?.days) === 7 && m1?.currencies === "CAD,USD",
+  `0020 metrics: 15 dòng mới · 1 cặp trùng ngày GỘP bằng max (không cộng dồn tiền) · bỏ 2 rác · tiền tệ CAD,USD — ${JSON.stringify(m1)}`,
+);
+const dup = await one(`select * from public.vexim_worker_upsert_ads_metrics('${cShop}', '${JSON.stringify(metricRows)}'::jsonb)`);
+ok(Number(dup?.inserted) === 0 && Number(dup?.updated) === 15 && Number(dup?.skipped) === 2,
+   `0020 metrics: nhập LẠI cùng lô → 15 update / 0 insert (không nhân đôi tiền) — ${JSON.stringify(dup)}`);
+await cmp(
+  "0020 metrics: 2 lần nhập vẫn 15 dòng, ngày 09-11 của C1 không bị cộng dồn",
+  `select count(*) n from ads.ad_metrics_daily where seller_account_id='${cShop}'`,
+  15,
+);
+const d11 = await one(`select spend, sales7d, orders, clicks, impressions, ctr, cpc, acos7d, roas7d,
+     budget_amount, currency from ads.ad_metrics_daily
+     where seller_account_id='${cShop}' and campaign_id='C1' and day='2026-09-11'`);
+ok(
+  Number(d11?.spend) === 12 && Number(d11?.sales7d) === 25 && Number(d11?.orders) === 3
+    && Number(d11?.ctr) === 1 && Number(d11?.cpc) === 1 && Number(d11?.acos7d) === 48
+    && Number(d11?.roas7d) === 2.0833 && Number(d11?.budget_amount) === 25,
+  `0020 metrics: Amazon không trả ctr/cpc/acos/roas → DB TỰ TÍNH (ctr 1% · cpc 1 · ACOS 48% · ROAS 2.08) — ${JSON.stringify(d11)}`,
+);
+
+// ---- 9. A1 — view campaign: cửa sổ 7 ngày + cờ vượt ngưỡng + ngân sách -------
+const cv = await rows19(`select campaign_id, currency, state, daily_budget, spend_yesterday, spend7,
+     sales7, acos7, roas7, ctr7, cpc7, ad_orders7, days_with_data, over_acos_target, acos_target,
+     budget_used_pct, budget_exhausted, last_metrics_day
+     from public.vexim_ads_campaigns where seller_account_id='${cShop}' order by campaign_id`);
+ok(cv.length === 3, `0020 view campaign: 3 dòng (nhận ${cv.length})`);
+const cvOf = (id) => cv.find((r) => r.campaign_id === id);
+ok(
+  Number(cvOf("C1")?.spend7) === 72 && Number(cvOf("C1")?.sales7) === 145
+    && Number(cvOf("C1")?.acos7) === 49.66 && Number(cvOf("C1")?.roas7) === 2.01
+    && Number(cvOf("C1")?.days_with_data) === 7 && Number(cvOf("C1")?.spend_yesterday) === 12,
+  `0020 view campaign: C1 gộp 7 ngày spend 72 / sales 145 → ACOS 49.66% · ROAS 2.01 — ${JSON.stringify(cvOf("C1"))}`,
+);
+ok(
+  cvOf("C1")?.over_acos_target === true && Number(cvOf("C1")?.acos_target) === 25
+    && cvOf("C2")?.over_acos_target === false,
+  "0020 view campaign: C1 vượt ngưỡng ACOS 25% (cờ đỏ cho UI) · C2 thì không",
+);
+ok(
+  Number(cvOf("C1")?.ctr7) === 1 && Number(cvOf("C1")?.cpc7) === 1
+    && Number(cvOf("C2")?.acos7) === 7.14,
+  `0020 view campaign: ctr7/cpc7 gộp từ tổng (không trung bình của trung bình) · C2 ACOS 7.14% — ${JSON.stringify(cvOf("C2"))}`,
+);
+ok(
+  cvOf("C3")?.currency === "CAD" && Number(cvOf("C3")?.spend7) === 8
+    && Number(cvOf("C1")?.spend7) === 72,
+  "0020 view campaign: CAD và USD là 2 DÒNG RIÊNG — không cộng tiền khác tiền tệ",
+);
+
+// ---- 10. Budget usage: % đã dùng + GIỜ CẠN (ước lượng) ----------------------
+const bu = await one(`select * from public.vexim_worker_upsert_ads_budget_usage('${cShop}', '[
+  {"date":"2026-09-11","campaignId":"C1","campaignName":"SP - Mat ong 500ml","budget":25,
+   "spend":12.5,"percentageUsed":50,"currency":"USD","deliveredClicks":12,
+   "capturedAt":"2026-09-11T10:05:00Z","adsProfileId":"1234567890"},
+  {"date":"2026-09-11","campaignId":"C1","budget":25,"spend":25,"percentageUsed":100,
+   "currency":"USD","capturedAt":"2026-09-11T14:05:00Z"},
+  {"date":"2026-09-11","campaignId":"C1","budget":25,"spend":25,"percentageUsed":100,
+   "currency":"USD","capturedAt":"2026-09-11T14:35:00Z"},
+  {"date":"2026-09-11","campaignId":"C2","budget":40,"spend":5,"percentageUsed":12.5,
+   "currency":"USD","capturedAt":"2026-09-11T14:05:00Z"},
+  {"date":"khong hop le","campaignId":"C9","percentageUsed":10}
+]'::jsonb)`);
+ok(
+  Number(bu?.rows_written) === 3 && Number(bu?.skipped) === 1 && Number(bu?.merged) === 1
+    && Number(bu?.exhausted) === 1,
+  `0020 budget: 3 lần chụp ghi được (2 lần cùng GIỜ gộp còn 1) · bỏ 1 rác · 1 campaign đã cạn — ${JSON.stringify(bu)}`,
+);
+await cmp(
+  "0020 budget: 2 lần chụp CÙNG GIỜ → 1 dòng (khoá theo giờ, bảng không phình)",
+  `select count(*) n from ads.budget_usage where seller_account_id='${cShop}' and campaign_id='C1'`,
+  2,
+);
+const bv = await one(`select campaign_id, percentage_used, budget, spend, budget_exhausted,
+     snapshots_over_100pct, exhausted_note,
+     to_char(exhausted_at_estimate at time zone 'UTC','YYYY-MM-DD HH24') as exhausted_hour
+     from public.vexim_ads_budget_usage
+     where seller_account_id='${cShop}' and campaign_id='C1'`);
+ok(
+  bv?.budget_exhausted === true && bv?.exhausted_hour === "2026-09-11 14"
+    && Number(bv?.snapshots_over_100pct) === 1 && Number(bv?.percentage_used) === 100,
+  `0020 budget view: C1 cạn lúc ~14h (ƯỚC LƯỢNG từ lần chụp đầu ≥100%) — ${JSON.stringify(bv)}`,
+);
+ok(String(bv?.exhausted_note).includes("Ước lượng"),
+   `0020 budget view: có nhãn nói rõ đây là ước lượng ("${bv?.exhausted_note}")`);
+ok(
+  Number(cvOf("C1")?.budget_used_pct) === 50
+    || Number((await one(`select budget_used_pct from public.vexim_ads_campaigns
+         where seller_account_id='${cShop}' and campaign_id='C1'`)).budget_used_pct) === 100,
+  "0020 view campaign: budget_used_pct lấy từ Budget Usage (lần chụp mới nhất)",
+);
+
+// ---- 11. Alert ACOS / BUDGET tự nổ + tự đóng khi hết vi phạm ----------------
+const al1 = await rows19(`select * from public.vexim_ads_raise_alerts('${cShop}','2026-09-11')`);
+const alAcos = al1.find((r) => r.rule_code === "acos_over_target");
+const alBudget = al1.find((r) => r.rule_code === "budget_exhausted");
+ok(
+  alAcos?.severity === "amber" && alAcos?.entity_key === "campaign:C1"
+    && Number(alAcos?.metric) === 49.66 && Number(alAcos?.threshold) === 25 && alAcos?.alert_id,
+  `0020 alert: ACOS 49.66% > 25% → nổ amber cho campaign C1 — ${JSON.stringify(alAcos)}`,
+);
+ok(
+  alBudget?.severity === "amber" && alBudget?.entity_key === "budget:C1" && alBudget?.alert_id,
+  `0020 alert: cạn ngân sách → nổ amber — ${JSON.stringify(alBudget)}`,
+);
+ok(
+  !al1.some((r) => r.entity_key === "campaign:C2"),
+  "0020 alert: C2 (ACOS 7.14%) KHÔNG bị cảnh báo — ngưỡng đọc từ ops.alert_rules",
+);
+await cmp(
+  "0020 alert: đúng 2 alert PPC mở cho shop",
+  `select count(*) n from ops.alerts a join ops.alert_rules r on r.id=a.rule_id
+    where a.seller_account_id='${cShop}' and a.status='open'
+      and r.rule_code in ('acos_over_target','budget_exhausted')`,
+  2,
+);
+const al2 = await rows19(`select * from public.vexim_ads_raise_alerts('${cShop}','2026-09-11')`);
+ok(
+  al2.find((r) => r.rule_code === "acos_over_target")?.alert_id === alAcos?.alert_id,
+  "0020 alert: chạy LẠI → cùng alert_id (dedupe theo entity_key, không spam)",
+);
+
+// C1 được tối ưu: sales tăng → ACOS về 4.97% → alert phải TỰ ĐÓNG
+const goodRows = [
+  ...M_DAYS.map((d) => ({ date: d, campaignId: "C1", impressions: 1000, clicks: 10, cost: 10,
+    sales7d: 200, purchases7d: 20, currencyCode: "USD" })),
+  { date: "2026-09-11", campaignId: "C1", impressions: 1200, clicks: 12, cost: 12, sales7d: 250,
+    purchases7d: 25, currencyCode: "USD" },
+];
+await one(`select * from public.vexim_worker_upsert_ads_metrics('${cShop}', '${JSON.stringify(goodRows)}'::jsonb)`);
+const al3 = await rows19(`select * from public.vexim_ads_raise_alerts('${cShop}','2026-09-11')`);
+ok(
+  al3.find((r) => r.rule_code === "acos_over_target")?.next_action === "resolved",
+  `0020 alert: ACOS về 4.97% (< 25%) → TỰ ĐÓNG alert — ${JSON.stringify(al3.find((r) => r.rule_code === "acos_over_target"))}`,
+);
+await cmp(
+  "0020 alert: alert ACOS chuyển resolved (chuông hết reo)",
+  `select count(*) n from ops.alerts a join ops.alert_rules r on r.id=a.rule_id
+    where a.seller_account_id='${cShop}' and r.rule_code='acos_over_target' and a.status='resolved'`,
+  1,
+);
+ok(
+  (await one(`select over_acos_target from public.vexim_ads_campaigns
+     where seller_account_id='${cShop}' and campaign_id='C1'`)).over_acos_target === false,
+  "0020 view campaign: cờ over_acos_target tắt theo dữ liệu mới",
+);
+
+// ---- 12. A3 — search term (giữ term "*", gộp 7 ngày, tín hiệu đốt tiền) -----
+const stRows = [
+  { date: "2026-09-11", searchTerm: "mat ong 500ml", campaignId: "C1", adGroupId: "AG1",
+    keywordId: "K1", keywordText: "mat ong", matchType: "BROAD", keywordType: "BROAD",
+    impressions: 100, clicks: 4, cost: 4, sales7d: 40, purchases7d: 2, keywordBid: 1.0,
+    currencyCode: "USD", campaignName: "SP - Mat ong 500ml", adGroupName: "Ad group 1" },
+  { date: "2026-09-10", searchTerm: "mat ong 500ml", campaignId: "C1", adGroupId: "AG1",
+    keywordId: "K1", matchType: "BROAD", impressions: 50, clicks: 2, cost: 2, sales7d: 20,
+    purchases7d: 1, currencyCode: "USD" },
+  { date: "2026-09-11", searchTerm: "sua rua mat re tien", campaignId: "C1", adGroupId: "AG1",
+    keywordId: "K2", matchType: "BROAD", impressions: 80, clicks: 5, cost: 7.5, sales7d: 0,
+    purchases7d: 0, currencyCode: "USD" },
+  { date: "2026-09-11", searchTerm: "*", campaignId: "C1", adGroupId: "AG1", impressions: 30,
+    clicks: 1, cost: 1, sales7d: 10, purchases7d: 1, currencyCode: "USD" },
+  { date: "2026-09-11", campaignId: "C1", clicks: 1, cost: 0.5 },
+];
+const st = await one(`select * from public.vexim_worker_upsert_ads_search_terms('${cShop}', '${JSON.stringify(stRows)}'::jsonb)`);
+ok(
+  Number(st?.rows_written) === 4 && Number(st?.skipped) === 1 && Number(st?.terms) === 3
+    && Number(st?.merged) === 0,
+  `0020 search term: 4 dòng · 3 term · bỏ 1 dòng thiếu term — ${JSON.stringify(st)}`,
+);
+const stv = await rows19(`select search_term, is_placement_without_keyword, clicks, spend, sales7,
+     acos7, days_with_data, wasted_spend_signal
+     from public.vexim_ads_search_terms where seller_account_id='${cShop}' order by spend desc`);
+const stOf = (t) => stv.find((r) => r.search_term === t);
+ok(
+  Number(stOf("mat ong 500ml")?.clicks) === 6 && Number(stOf("mat ong 500ml")?.spend) === 6
+    && Number(stOf("mat ong 500ml")?.sales7) === 60 && Number(stOf("mat ong 500ml")?.acos7) === 10
+    && Number(stOf("mat ong 500ml")?.days_with_data) === 2
+    && stOf("mat ong 500ml")?.wasted_spend_signal === false,
+  `0020 search term view: gộp 2 ngày (6 click · 6$ · sales 60$ · ACOS 10%) — ${JSON.stringify(stOf("mat ong 500ml"))}`,
+);
+ok(
+  stOf("sua rua mat re tien")?.wasted_spend_signal === true
+    && Number(stOf("sua rua mat re tien")?.clicks) === 5
+    && Number(stOf("sua rua mat re tien")?.sales7) === 0,
+  `0020 search term view: 5 click · 0 đơn → cờ "đốt tiền" cho gợi ý negative (Phần 2 mới có luồng duyệt) — ${JSON.stringify(stOf("sua rua mat re tien"))}`,
+);
+ok(
+  stOf("*")?.is_placement_without_keyword === true && Number(stOf("*")?.spend) === 1,
+  '0020 search term view: term "*" = placement không gắn từ khoá → GIỮ LẠI (bỏ là thiếu spend)',
+);
+
+// ---- 13. A2 — targeting (keyword vs target ASIN/category) -------------------
+const tg = await one(`select * from public.vexim_worker_upsert_ads_targeting('${cShop}', '[
+  {"date":"2026-09-11","campaignId":"C1","adGroupId":"AG1","adGroupName":"Ad group 1",
+   "keywordId":"K1","keywordText":"mat ong","matchType":"BROAD","keywordType":"BROAD",
+   "impressions":100,"clicks":4,"cost":4,"sales7d":40,"purchases7d":2,"keywordBid":1.0,
+   "currencyCode":"USD","adsProfileId":"1234567890","reportId":"rep-tg"},
+  {"date":"2026-09-11","campaignId":"C1","adGroupId":"AG1",
+   "targetingExpression":"b0demoasin9","keywordType":"TARGETING_EXPRESSION_PREDEFINED",
+   "impressions":50,"clicks":2,"cost":2,"sales7d":0,"purchases7d":0,"currencyCode":"USD"},
+  {"date":"2026-09-11","campaignId":"C1","adGroupId":"AG1","impressions":10,"clicks":1,"cost":1}
+]'::jsonb)`);
+ok(Number(tg?.rows_written) === 2 && Number(tg?.skipped) === 1 && Number(tg?.merged) === 0,
+   `0020 targeting: 2 dòng (keyword + target ASIN) · bỏ 1 dòng không khoá được — ${JSON.stringify(tg)}`);
+const tgv = await rows19(`select target_label, keyword_text, is_product_targeting, clicks, spend, acos7d
+   from public.vexim_ads_targeting where seller_account_id='${cShop}' order by target_label`);
+ok(
+  tgv.find((r) => r.target_label === "b0demoasin9")?.is_product_targeting === true
+    && tgv.find((r) => r.target_label === "mat ong")?.is_product_targeting === false,
+  `0020 targeting view: phân biệt keyword với target ASIN/category — ${JSON.stringify(tgv)}`,
+);
+
+// ---- 14. F4 — lấp ads_spend THẬT (cột riêng, KHÔNG trừ vào lãi gộp) ----------
+await one(`select * from public.vexim_worker_upsert_profit('${cShop}', '[
+  {"sku":"ADS-SKU-1","day":"2026-09-11","currency":"USD","units":5,"revenue":250,
+   "amazonFees":40,"cogs":100,"grossProfit":110,"feeSource":"settled"}]'::jsonb)`);
+await ex("reset role;");
+ok(
+  await ex(`insert into catalog.listings(seller_account_id,sku,asin,title,status,currency)
+     values ('${cShop}','ADS-SKU-2','B0ADSDEMO02','Demo ASIN 0020','active','USD')
+     on conflict (seller_account_id,sku) do update set asin=excluded.asin`),
+  "0020 fixture: listing ADS-SKU-2 ↔ B0ADSDEMO02 (để test suy SKU qua ASIN)",
+);
+await ex("set role service_role;");
+const adv = await one(`select * from public.vexim_worker_upsert_ads_advertised('${cShop}', '[
+  {"date":"2026-09-11","campaignId":"C1","adGroupId":"AG1","advertisedAsin":"B0ADSDEMO01",
+   "advertisedSku":"ADS-SKU-1","impressions":100,"clicks":5,"cost":6.50,"sales7d":60,
+   "purchases7d":3,"currencyCode":"USD","adsProfileId":"1234567890","reportId":"rep-adv"},
+  {"date":"2026-09-11","campaignId":"C1","adGroupId":"AG1","advertisedAsin":"B0ADSDEMO02",
+   "cost":3.25,"currencyCode":"USD"},
+  {"date":"2026-09-11","campaignId":"C1","adGroupId":"AG1","advertisedAsin":"B0CHUACO",
+   "cost":2.00,"currencyCode":"USD"},
+  {"date":"2026-09-11","campaignId":"C1","adGroupId":"AG1","cost":9.99,"currencyCode":"USD"}
+]'::jsonb)`);
+ok(
+  Number(adv?.rows_written) === 3 && Number(adv?.skipped) === 1 && Number(adv?.days) === 1
+    && Number(adv?.merged) === 0,
+  `0020 advertised product: 3 dòng · bỏ 1 dòng không ASIN không SKU — ${JSON.stringify(adv)}`,
+);
+const fill = await one(`select * from public.vexim_worker_fill_profit_ads_spend('${cShop}','2026-09-01','2026-09-30')`);
+ok(
+  Number(fill?.rows_updated) === 1 && Number(fill?.days) === 1 && Number(fill?.skus) === 2
+    && Number(fill?.unmatched) === 1 && fill?.currencies === "USD",
+  `0020 F4: lấp ads_spend 1 dòng · suy được 2 SKU (1 qua advertisedSku, 1 qua ASIN) · 1 dòng CHƯA khớp (báo ra, không bỏ qua) — ${JSON.stringify(fill)}`,
+);
+const f4 = await one(`select ads_spend, gross_profit, revenue from finance.sku_profit_daily
+   where seller_account_id='${cShop}' and sku='ADS-SKU-1' and day='2026-09-11'`);
+ok(
+  Number(f4?.ads_spend) === 6.5 && Number(f4?.gross_profit) === 110,
+  `0020 F4: ads_spend=6.5 là CỘT RIÊNG — gross_profit vẫn 110 (không trừ ads vào lãi gộp) — ${JSON.stringify(f4)}`,
+);
+await cmp(
+  "0020 F4: SKU chưa có dòng lợi nhuận thì KHÔNG bịa (không insert hộ)",
+  `select count(*) n from finance.sku_profit_daily where seller_account_id='${cShop}'`,
+  1,
+);
+
+// ---- 15. Report Ads bất đồng bộ: ghi trạng thái → cron sau POLL tiếp --------
+const rr1 = await one(`select * from public.vexim_worker_set_ads_report_request('${cShop}',
+  '{"reportTypeId":"spCampaigns","adProduct":"SPONSORED_PRODUCTS","groupBy":"campaign",
+    "timeUnit":"DAILY","dateStart":"2026-09-05","dateEnd":"2026-09-11","adsProfileId":"1234567890",
+    "adsReportId":"amzn-rid-1","status":"PROCESSING","requestedAt":"2026-09-11T20:00:00Z"}'::jsonb)`);
+ok(rr1?.status === "processing" && rr1?.ads_report_id === "amzn-rid-1",
+   `0020 report Ads: yêu cầu report → ghi trạng thái PROCESSING — ${JSON.stringify(rr1)}`);
+const pend = await one(`select public.vexim_worker_pending_ads_reports('${cShop}') items`);
+ok(
+  Array.isArray(pend?.items) && pend.items.length === 1
+    && pend.items[0].ads_report_id === "amzn-rid-1" && pend.items[0].report_type_id === "spCampaigns",
+  `0020 report Ads: cron lần sau tìm đúng report đang chờ để POLL tiếp (không xin report mới) — ${JSON.stringify(pend?.items)}`,
+);
+const rr2 = await one(`select * from public.vexim_worker_set_ads_report_request('${cShop}',
+  '{"reportTypeId":"spCampaigns","groupBy":"campaign","timeUnit":"DAILY","dateStart":"2026-09-05",
+    "dateEnd":"2026-09-11","adsProfileId":"1234567890","adsReportId":"amzn-rid-1",
+    "status":"COMPLETED","downloadUrl":"https://advertising.amazon.com/download?token=SECRET",
+    "rowsImported":15,"completedAt":"2026-09-11T20:05:00Z"}'::jsonb)`);
+ok(rr2?.status === "completed", `0020 report Ads: poll thấy COMPLETED → cập nhật cùng dòng — ${JSON.stringify(rr2)}`);
+await cmp(
+  "0020 report Ads: cùng khoá (shop×profile×loại×groupBy×timeUnit×khoảng ngày) = 1 dòng",
+  `select count(*) n from ads.report_requests where seller_account_id='${cShop}'`,
+  1,
+);
+const rrv = await one(`select status, attempts, rows_imported, is_stale,
+     (select count(*) from information_schema.columns c
+       where c.table_schema='public' and c.table_name='vexim_ads_report_requests'
+         and c.column_name='download_url') as url_exposed
+     from public.vexim_ads_report_requests where seller_account_id='${cShop}'`);
+ok(
+  rrv?.status === "completed" && Number(rrv?.attempts) === 2 && Number(rrv?.rows_imported) === 15
+    && Number(rrv?.url_exposed) === 0,
+  `0020 report Ads view: 2 lần chạm · 15 dòng nhập · KHÔNG phơi download_url (URL có token) — ${JSON.stringify(rrv)}`,
+);
+await cmp(
+  "0020 report Ads: hết report chờ → cron sau không poll thừa",
+  `select jsonb_array_length(public.vexim_worker_pending_ads_reports('${cShop}')) n`,
+  0,
+);
+
+// ---- 16. KPI + TACOS: chưa có doanh thu tổng → NULL, không bịa 0% -----------
+const kpi0 = await rows19(`select currency, spend_yesterday, spend7, ad_sales7, acos7, roas7, ctr7,
+     cpc7, total_sales7, tacos7, tacos_unknown, campaigns_enabled, campaigns_over_target,
+     campaigns_exhausted, budget_daily_total, is_stale, metrics_day
+     from public.vexim_ads_kpis where seller_account_id='${cShop}' order by currency`);
+ok(kpi0.length === 2, `0020 KPI: 2 dòng = 2 tiền tệ (CAD, USD) — nhận ${kpi0.length}`);
+const kOf = (rows, c) => rows.find((r) => r.currency === c);
+ok(
+  kOf(kpi0, "USD")?.tacos_unknown === true && kOf(kpi0, "USD")?.tacos7 === null,
+  `0020 KPI: chưa đồng bộ doanh thu tổng → TACOS NULL + cờ tacos_unknown (KHÔNG bịa 0%) — ${JSON.stringify(kOf(kpi0, "USD"))}`,
+);
+ok(
+  Number(kOf(kpi0, "USD")?.spend_yesterday) === 17 && Number(kOf(kpi0, "USD")?.spend7) === 107
+    && Number(kOf(kpi0, "USD")?.ad_sales7) === 1940 && Number(kOf(kpi0, "USD")?.acos7) === 5.52
+    && Number(kOf(kpi0, "USD")?.roas7) === 18.13 && Number(kOf(kpi0, "USD")?.campaigns_enabled) === 2
+    && Number(kOf(kpi0, "USD")?.campaigns_exhausted) === 1
+    && Number(kOf(kpi0, "USD")?.budget_daily_total) === 65,
+  `0020 KPI USD: spend hôm qua 17 · 7 ngày 107 · sales ads 1940 · ACOS 5.52% · ROAS 18.13 — ${JSON.stringify(kOf(kpi0, "USD"))}`,
+);
+ok(
+  Number(kOf(kpi0, "CAD")?.spend7) === 8 && Number(kOf(kpi0, "CAD")?.acos7) === 20
+    && kOf(kpi0, "CAD")?.is_stale === false,
+  `0020 KPI CAD: tách riêng (spend 8 · ACOS 20%) — ${JSON.stringify(kOf(kpi0, "CAD"))}`,
+);
+await ex(`insert into sales.order_daily(seller_account_id,day,orders_count,units,sales_amount,currency)
+   select '${cShop}', d, 6, 8, 142.86, 'USD'
+   from generate_series(date '2026-09-05', date '2026-09-11', interval '1 day') d
+   on conflict (seller_account_id, day) do update
+     set sales_amount = excluded.sales_amount, orders_count = excluded.orders_count`);
+const kpi1 = await one(`select total_sales7, tacos7, tacos_unknown from public.vexim_ads_kpis
+   where seller_account_id='${cShop}' and currency='USD'`);
+ok(
+  Number(kpi1?.total_sales7) === 1000.02 && Number(kpi1?.tacos7) === 10.7 && kpi1?.tacos_unknown === false,
+  `0020 TACOS: có doanh thu tổng 1000.02 USD → TACOS = 107/1000.02 = 10.7% (đúng định nghĩa TACOS) — ${JSON.stringify(kpi1)}`,
+);
+
+// ---- 17. RLS: user được gán shop đọc được, người lạ 0 dòng, token KHÔNG đọc được
+await ex("reset role;");
+await ex(`select set_config('request.jwt.claim.sub','${oUser}',false);`);
+await ex("set role authenticated;");
+await cmp(
+  "0020 RLS: user vận hành Ads thấy KPI của shop mình",
+  `select count(*) n from public.vexim_ads_kpis where seller_account_id='${cShop}'`,
+  2,
+);
+await cmp(
+  "0020 RLS: user vận hành Ads thấy campaign + search term + targeting",
+  `select (select count(*) from public.vexim_ads_campaigns where seller_account_id='${cShop}')
+        + (select count(*) from public.vexim_ads_search_terms where seller_account_id='${cShop}')
+        + (select count(*) from public.vexim_ads_targeting where seller_account_id='${cShop}') n`,
+  8,
+);
+const conn = await rows19(`select service, connected, token_status, token_source, days_to_reauth,
+     reauth_state, needs_connect from public.vexim_connections
+     where seller_account_id='${cShop}' order by service`);
+ok(
+  conn.length === 2 && conn.every((r) => !("encrypted_refresh_token" in r))
+    && conn.find((r) => r.service === "ads")?.connected === true
+    && conn.find((r) => r.service === "ads")?.token_status === "expired"
+    && conn.find((r) => r.service === "ads")?.reauth_state === "expired"
+    && conn.find((r) => r.service === "spapi")?.reauth_state === "ok",
+  `0020 RLS: view kết nối trả 2 service + trạng thái re-auth, KHÔNG lộ cột token — ${JSON.stringify(conn)}`,
+);
+await cmp(
+  "0020 RLS: authenticated thấy 0 token (bảng KHÔNG có policy SELECT cho client)",
+  `select count(*) n from connections.oauth_tokens`,
+  0,
+);
+await cmp(
+  "0020 RLS: authenticated thấy 0 oauth_states",
+  `select count(*) n from connections.oauth_states`,
+  0,
+);
+ok(
+  await mustBlock(`insert into connections.oauth_tokens(seller_account_id,service,encrypted_refresh_token,expires_at)
+     values ('${cShop}','spapi','enc:v1:x', now() + interval '365 days')`),
+  "0020 CHẶN: authenticated không ghi được oauth_tokens",
+);
+ok(
+  await mustBlock(`select * from public.vexim_oauth_upsert_token('{}'::jsonb)`),
+  "0020 CHẶN: RPC lưu token chỉ dành cho service_role",
+);
+ok(
+  await mustBlock(`select * from public.vexim_worker_upsert_ads_metrics('${cShop}','[]'::jsonb)`),
+  "0020 CHẶN: RPC nhập metrics Ads chỉ dành cho service_role",
+);
+ok(
+  await mustBlock(`select * from public.vexim_ads_raise_alerts('${cShop}',null)`),
+  "0020 CHẶN: RPC nổ alert PPC chỉ dành cho service_role",
+);
+ok(
+  await mustBlock(`select * from public.vexim_worker_fill_profit_ads_spend('${cShop}',null,null)`),
+  "0020 CHẶN: RPC lấp ads_spend vào F4 chỉ dành cho service_role",
+);
+ok(
+  await mustBlock(`insert into ads.ad_metrics_daily(seller_account_id,day,campaign_id)
+     values ('${cShop}','2026-09-11','C1')`),
+  "0020 CHẶN: authenticated không ghi thẳng bảng metrics Ads",
+);
+
+await ex("reset role;");
+await ex(`select set_config('request.jwt.claim.sub','${oStranger}',false);`);
+await ex("set role authenticated;");
+await cmp(
+  "0020 RLS: người lạ không thấy KPI PPC của shop",
+  `select count(*) n from public.vexim_ads_kpis where seller_account_id='${cShop}'`,
+  0,
+);
+await cmp(
+  "0020 RLS: người lạ không thấy campaign / search term / trạng thái report Ads",
+  `select (select count(*) from public.vexim_ads_campaigns where seller_account_id='${cShop}')
+        + (select count(*) from public.vexim_ads_search_terms where seller_account_id='${cShop}')
+        + (select count(*) from public.vexim_ads_report_requests where seller_account_id='${cShop}') n`,
+  0,
+);
+await cmp(
+  "0020 RLS: người lạ không thấy kết nối OAuth của shop",
+  `select count(*) n from public.vexim_connections where seller_account_id='${cShop}'`,
+  0,
+);
+await ex("rollback;");
+await ex("reset role;");
+
+// ---- 18. idempotent ----------------------------------------------------------
+ok(
+  await ex(rd("migrations/0020_module0_oauth_module5_ppc_read.sql"), "0020 lần 2"),
+  "0020 idempotent (chạy lại không lỗi, không đổi hợp đồng)",
+);
+ok(
+  (await colsOf("vexim_ads_kpis")).endsWith("hours_since_import,is_stale"),
+  "0020 lần 2: hợp đồng cột view KPI giữ nguyên",
+);
+await cmp(
+  "0020 lần 2: index unique không bị tạo trùng",
+  `select count(*) n from pg_indexes where indexname in
+     ('uq_oauth_tokens_shop_service','uq_search_terms_key','uq_budget_usage_hour',
+      'uq_ads_report_requests_key','uq_alerts_open_entity')`,
+  5,
+);
+await cmp(
+  "0020 lần 2: alert rule re-auth vẫn đúng ngưỡng (30 ngày nhắc, 365 ngày hạn)",
+  `select count(*) n from ops.alert_rules
+     where rule_code='reauth_required' and threshold=30 and is_active`,
+  1,
+);
+}
+
 console.log(`\n${"=".repeat(70)}`);
 console.log(fails === 0 ? "TẤT CẢ PASS" : `${fails} MỤC FAIL`);
 console.log("=".repeat(70));
