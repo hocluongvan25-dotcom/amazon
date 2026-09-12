@@ -5,14 +5,16 @@ import type { Session } from "@/lib/auth/session";
 
 export default function AppShell({
   session,
+  bellSlot,
   children,
 }: {
   session: Session;
+  bellSlot: ReactNode;
   children: ReactNode;
 }) {
   return (
     <div className="min-h-screen">
-      <Topbar session={session} />
+      <Topbar session={session} bellSlot={bellSlot} />
       <div className="mx-auto grid max-w-[1440px] grid-cols-1 lg:grid-cols-[242px_1fr]">
         <div className="hidden lg:block">
           <Sidebar persona={session.persona} />

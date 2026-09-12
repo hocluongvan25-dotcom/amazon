@@ -1,0 +1,14 @@
+node_modules/
+.next/
+out/
+.env.local
+.env*.local
+*.tsbuildinfo
+.DS_Store
+npm-debug.log*
+.vercel
+*.log
+supabase/.temp/
+
+# Local test / one-off scripts
+web/scripts/

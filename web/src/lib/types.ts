@@ -222,6 +222,214 @@ export type InboundRow = {
   reconcileTone: "up" | "down" | "flat" | "warn";
 };
 
+/* ---------- Chuông thông báo & Profile & Quản trị user ---------- */
+
+export type NotificationItem = {
+  id: string;
+  tone: AlertSeverity;
+  icon: string;
+  title: string;
+  detail: string;
+  time: string; // tương đối: "5 phút trước"
+  href?: string; // link điều hướng khi click
+  read: boolean;
+  category: "alert" | "approval" | "system";
+};
+
+export type Profile = {
+  name: string;
+  email: string;
+  role: string;
+  department: string;
+  phone: string;
+  avatarInitials: string;
+  joinedAt: string;
+  lastLogin: string;
+  mfaEnabled: boolean;
+};
+
+export type Department =
+  | "Vận hành & Health"
+  | "Listing & Nội dung"
+  | "Quảng cáo (PPC)"
+  | "Kho vận & FBA"
+  | "Đơn hàng & CSKH"
+  | "Tài chính & Đối soát"
+  | "Điều phối";
+
+export type AppRole =
+  | "super_admin"
+  | "org_admin"
+  | "dept_lead"
+  | "operator"
+  | "analyst"
+  | "client_viewer";
+
+export const ROLE_LABEL: Record<AppRole, string> = {
+  super_admin: "Super Admin",
+  org_admin: "Org Admin",
+  dept_lead: "Dept Lead",
+  operator: "Operator",
+  analyst: "Analyst / Viewer",
+  client_viewer: "Client Viewer",
+};
+
+/* ---------- Module 6 — Tài chính & Đối soát (F1–F4) ---------- */
+
+export type SettlementStatus = "deposited" | "processing" | "open";
+
+export type SettlementRow = {
+  id: string; // settlementId từ Amazon (vd 120400000000000)
+  shop: string;
+  depositDate: string;
+  startDate: string;
+  endDate: string;
+  status: SettlementStatus;
+  sales: number; // tổng bán hàng (product charges + shipping + gift wrap)
+  refunds: number; // tiền hoàn lại cho buyer
+  amazonFeesTotal: number; // referral + FBA + storage + other fees (âm)
+  advertisingFees: number; // PPC spend (âm)
+  otherCharges: number; // adjustments, reimbursements
+  transferAmount: number; // số tiền chuyển về tài khoản ngân hàng
+  currency: string;
+  accountDeposit: string; // thông tin tài khoản nhận cuối
+};
+
+export type SettlementEventGroup = {
+  label: string; // Product sales / Shipping credits / FBA fees / ...
+  amount: number;
+  tone: "up" | "down" | "flat";
+  children?: { label: string; amount: number }[];
+};
+
+export type SettlementDetailMock = {
+  id: string;
+  shop: string;
+  depositDate: string;
+  startDate: string;
+  endDate: string;
+  transferAmount: number;
+  accountDeposit: string;
+  currency: string;
+  groups: SettlementEventGroup[];
+  skuBreakdown: {
+    sku: string;
+    quantity: number;
+    productSales: number;
+    amazonFees: number;
+    net: number;
+  }[];
+};
+
+export type FinancialEventType =
+  | "ProductSale"
+  | "ShippingCredit"
+  | "Refund"
+  | "ReferralFee"
+  | "FBAFee"
+  | "StorageFee"
+  | "AdvertisingFee"
+  | "Reimbursement"
+  | "Adjustment"
+  | "ServiceFee"
+  | "Subscription"
+  | "Reserve";
+
+export type FinancialEventRow = {
+  id: string;
+  postedAt: string;
+  shop: string;
+  type: FinancialEventType;
+  typeLabel: string;
+  description: string;
+  orderId?: string;
+  sku?: string;
+  amount: number; // dương = tiền vào, âm = tiền ra
+  settlementId?: string;
+};
+
+/* ---------- Module 2 — Giá & Featured Offer (P1–P4) ---------- */
+
+export type BoxStatus = "holding" | "at_risk" | "lost" | "no_box";
+
+export type PricingRow = {
+  sku: string;
+  asin: string;
+  shop: string;
+  title: string;
+  ourPrice: number; // USD
+  currency: string; // "USD"
+  foep: number | null; // Featured Offer Expected Price
+  foepDelta: number | null; // ourPrice - foep (dương = đang cao hơn FOEP → nguy cơ mất box)
+  referencePrice: number | null; // giá tham chiếu thấp nhất của đối thủ (landed)
+  floorPrice: number; // giá sàn = vốn + referral fee + FBA fee + biên tối thiểu
+  currentMargin: number; // % biên hiện tại (ourPrice - floorCost) / ourPrice
+  marginTone: "red" | "amber" | "green"; // <0 đỏ · <biên tối thiểu vàng
+  boxStatus: BoxStatus;
+  competitorCount: number;
+  velocity30d: number; // đơn/ngày — để ước tính tổn thất khi mất box
+  lastPriceChange: string;
+  owner: string;
+};
+
+export type CompetitorOffer = {
+  sellerId: string;
+  sellerLabel: string; // e.g., "Amazon.com", "XYZ-Seller", "Chúng tôi"
+  isMe: boolean;
+  fulfillment: "FBA" | "FBM" | "AMZ";
+  price: number;
+  shipping: number;
+  landedPrice: number;
+  rating: number | null;
+  feedbackCount: number | null;
+  isFeatured: boolean;
+  condition: string;
+};
+
+export type PriceHistoryPoint = {
+  date: string; // "09/09"
+  myPrice: number;
+  buyBoxPrice: number;
+  lowestCompetitor: number;
+};
+
+export type FeeBreakdown = {
+  cogs: number; // giá vốn
+  referralFeeRate: number; // % referral fee (thường 15%)
+  referralFeeAmount: number;
+  fbaFee: number; // FBA fulfillment fee
+  otherFees: number; // closing fee, storage, ...
+  minMarginRate: number; // % biên tối thiểu (cấu hình theo shop/SKU)
+  minMarginAmount: number;
+  floorPrice: number; // giá sàn
+};
+
+export type PricingDetailMock = {
+  sku: string;
+  asin: string;
+  shop: string;
+  history: PriceHistoryPoint[];
+  offers: CompetitorOffer[];
+  fees: FeeBreakdown;
+  alerts: { tone: AlertSeverity; text: string }[];
+};
+
+export type PriceApprovalItem = {
+  id: string;
+  sku: string;
+  asin: string;
+  shop: string;
+  oldPrice: number;
+  newPrice: number;
+  deltaPct: number;
+  reason: string; // lý do: "auto-follow-foep" / "manual" / "raise-to-floor"
+  source: "auto" | "manual";
+  requestedBy: string;
+  requestedAt: string;
+  minMarginAfter: number; // % biên sau khi áp — để kiểm tra dưới sàn
+  belowFloor: boolean;
+};
+
 /* ---------- Module 1 — Listing (L1/L2/L4) ---------- */
 
 export type ListingStatus = "ACTIVE" | "INACTIVE" | "STRANDED" | "SUPPRESSED";

@@ -470,3 +470,640 @@ export const listingQueueFull: ListingQueueItem[] = [
   { sku: "KCH-118-BK", asin: "B0C4K52E", shop: "C2", cause: "Inactive — hết hàng từ 12/09, listing tự đóng", causeCode: "OUT_OF_STOCK", suggestion: "Chờ lô inbound KCH-118 nhận hàng — listing tự active lại khi có tồn", owner: "Tuấn", slaLabel: "theo inbound", revenuePerDay: "$11/ngày", priority: "gray", priorityLabel: "Thấp" },
   { sku: "AQR-12-SET", asin: "B0D1Q88B", shop: "C2", cause: "Stranded — ASIN bị gộp khỏi catalog sau dọn danh mục", causeCode: "CATALOG_ITEM_REMOVED", suggestion: "Tạo lại offer trên ASIN mới hoặc chuyển removal (phối Kho vận — SOP-03 bước 6)", owner: "—", slaLabel: "chưa gán", revenuePerDay: "$3/ngày", priority: "amber", priorityLabel: "Vừa" },
 ];
+
+/* ---------- Module 2 — Giá & Featured Offer (P1–P3) ---------- */
+import type { PriceApprovalItem, PricingDetailMock, PricingRow } from "@/lib/types";
+
+export const pricingKpis: KpiCardData[] = [
+  { label: "SKU đang giữ Buy Box", value: "918 / 1,240", sub: "74% · ▼ 2 điểm so với hôm qua", tone: "down" },
+  { label: "SKU mất box", value: "47", sub: "23 SKU có đối thủ hạ giá >$0.50", tone: "down" },
+  { label: "SKU sắp mất box (<=FOEP)", value: "32", sub: "cần theo dõi trong 2h tới", tone: "warn" },
+  { label: "SKU dưới giá sàn", value: "6", sub: "biên âm · cần xử lý ngay", tone: "down" },
+];
+
+export const pricingAlerts: { tone: AlertSeverity; text: string }[] = [
+  { tone: "red", text: "6 SKU dưới giá sàn (biên âm) — XMO-950-BLK biên −2.1% sau khi đối thủ hạ giá" },
+  { tone: "amber", text: "47 SKU mất Buy Box — ước tính rò rỉ ~$420/ngày doanh thu đối thủ ăn" },
+  { tone: "amber", text: "Job getFeaturedOfferExpectedPriceBatch cho Shop C2 bị lỗi lần 3 (03:10)" },
+  { tone: "green", text: "12 đề xuất áp giá chờ duyệt · 8 đề xuất ≤2% (operator tự duyệt)" },
+];
+
+/** P1 — bảng giá & Featured Offer (dữ liệu khớp listingList về SKU/ASIN/shop) */
+export const pricingRows: PricingRow[] = [
+  {
+    sku: "XMO-950-BLK", asin: "B0C7T31F", shop: "A1",
+    title: "XMO 950 Hardside Spinner Đen 28\"",
+    ourPrice: 129.99, currency: "USD",
+    foep: 127.49, foepDelta: 2.50,
+    referencePrice: 125.99,
+    floorPrice: 102.40,
+    currentMargin: 21.2, marginTone: "green",
+    boxStatus: "at_risk",
+    competitorCount: 4, velocity30d: 96,
+    lastPriceChange: "05/09 17:40", owner: "Minh",
+  },
+  {
+    sku: "XMO-950-BLU", asin: "B0C7T31G", shop: "A1",
+    title: "XMO 950 Hardside Spinner Xanh 28\"",
+    ourPrice: 129.99, currency: "USD",
+    foep: 129.99, foepDelta: 0,
+    referencePrice: 132.50,
+    floorPrice: 102.40,
+    currentMargin: 21.2, marginTone: "green",
+    boxStatus: "holding",
+    competitorCount: 3, velocity30d: 57,
+    lastPriceChange: "28/08 10:00", owner: "Minh",
+  },
+  {
+    sku: "VPN-220", asin: "B0B2X77K", shop: "A1",
+    title: "VPNova 220 Máy xay sinh tố 1.5L",
+    ourPrice: 59.90, currency: "USD",
+    foep: null, foepDelta: null, // listing stranded → không có offer
+    referencePrice: null,
+    floorPrice: 48.20,
+    currentMargin: 19.5, marginTone: "green",
+    boxStatus: "no_box",
+    competitorCount: 0, velocity30d: 71,
+    lastPriceChange: "15/08 16:30", owner: "Minh",
+  },
+  {
+    sku: "VPN-220-PRO", asin: "B0B2X77L", shop: "A1",
+    title: "VPNova 220 Pro Máy xay 2L",
+    ourPrice: 89.00, currency: "USD",
+    foep: 86.95, foepDelta: 2.05,
+    referencePrice: 84.99,
+    floorPrice: 72.10,
+    currentMargin: 19.0, marginTone: "green",
+    boxStatus: "lost",
+    competitorCount: 5, velocity30d: 41,
+    lastPriceChange: "01/09 09:20", owner: "Minh",
+  },
+  {
+    sku: "KCH-118-W", asin: "B0C4K52D", shop: "C2",
+    title: "KChef 118 Nồi chiên không dầu 5.5L Trắng",
+    ourPrice: 79.99, currency: "USD",
+    foep: 79.99, foepDelta: 0,
+    referencePrice: 81.50,
+    floorPrice: 56.30,
+    currentMargin: 29.6, marginTone: "green",
+    boxStatus: "holding",
+    competitorCount: 6, velocity30d: 38,
+    lastPriceChange: "30/08 14:10", owner: "Lan",
+  },
+  {
+    sku: "KCH-118-BK", asin: "B0C4K52E", shop: "C2",
+    title: "KChef 118 Nồi chiên không dầu 5.5L Đen",
+    ourPrice: 79.99, currency: "USD",
+    foep: null, foepDelta: null,
+    referencePrice: null,
+    floorPrice: 56.30,
+    currentMargin: 29.6, marginTone: "green",
+    boxStatus: "no_box",
+    competitorCount: 0, velocity30d: 11,
+    lastPriceChange: "—", owner: "Tuấn",
+  },
+  {
+    sku: "DRF-300", asin: "B0A9F14M", shop: "A2",
+    title: "DriftLine 300 Ghế camping gấp",
+    ourPrice: 45.50, currency: "USD",
+    foep: 43.99, foepDelta: 1.51,
+    referencePrice: 42.00,
+    floorPrice: 31.80,
+    currentMargin: 30.1, marginTone: "green",
+    boxStatus: "at_risk",
+    competitorCount: 8, velocity30d: 12,
+    lastPriceChange: "09/09 08:00", owner: "Tuấn",
+  },
+  {
+    sku: "DRF-300-XL", asin: "B0A9F14N", shop: "A2",
+    title: "DriftLine 300 XL Ghế camping",
+    ourPrice: 59.00, currency: "USD",
+    foep: 59.00, foepDelta: 0,
+    referencePrice: 61.99,
+    floorPrice: 40.20,
+    currentMargin: 31.9, marginTone: "green",
+    boxStatus: "holding",
+    competitorCount: 4, velocity30d: 23,
+    lastPriceChange: "25/08 11:00", owner: "Tuấn",
+  },
+  {
+    sku: "AQR-12-TOW", asin: "B0D1Q88A", shop: "C2",
+    title: "Aqura 12 Khăn tắm microfiber",
+    ourPrice: 19.99, currency: "USD",
+    foep: 18.95, foepDelta: 1.04,
+    referencePrice: 17.99,
+    floorPrice: 13.40,
+    currentMargin: 33.0, marginTone: "green",
+    boxStatus: "lost",
+    competitorCount: 12, velocity30d: 16,
+    lastPriceChange: "07/09 16:45", owner: "Minh",
+  },
+  {
+    sku: "AQR-12-SET", asin: "B0D1Q88B", shop: "C2",
+    title: "Aqura 12 Bộ 4 khăn microfiber",
+    ourPrice: 34.99, currency: "USD",
+    foep: null, foepDelta: null,
+    referencePrice: null,
+    floorPrice: 24.50,
+    currentMargin: 30.0, marginTone: "green",
+    boxStatus: "no_box",
+    competitorCount: 0, velocity30d: 3,
+    lastPriceChange: "—", owner: "—",
+  },
+  // 2 SKU demo dưới giá sàn (biên âm)
+  {
+    sku: "XMO-951-ACC", asin: "B0D88C001", shop: "A1",
+    title: "XMO 951 Phụ kiện khóa TSA + cover",
+    ourPrice: 24.99, currency: "USD",
+    foep: 24.49, foepDelta: 0.50,
+    referencePrice: 23.99,
+    floorPrice: 25.60,
+    currentMargin: -2.4, marginTone: "red",
+    boxStatus: "at_risk",
+    competitorCount: 7, velocity30d: 22,
+    lastPriceChange: "10/09 11:00", owner: "Minh",
+  },
+  {
+    sku: "VPN-FILT-3", asin: "B0B77K099", shop: "A1",
+    title: "VPNova Lọc thay thế bộ 3",
+    ourPrice: 12.99, currency: "USD",
+    foep: 12.99, foepDelta: 0,
+    referencePrice: 13.50,
+    floorPrice: 13.20,
+    currentMargin: -1.6, marginTone: "red",
+    boxStatus: "holding",
+    competitorCount: 3, velocity30d: 34,
+    lastPriceChange: "08/09 09:30", owner: "Minh",
+  },
+];
+
+/** P2 — chi tiết giá 1 SKU (dùng XMO-950-BLK mặc định) */
+export const pricingDetails: Record<string, PricingDetailMock> = {
+  "XMO-950-BLK": {
+    sku: "XMO-950-BLK", asin: "B0C7T31F", shop: "Shop A1 · US",
+    history: [
+      { date: "11/09", myPrice: 129.99, buyBoxPrice: 127.49, lowestCompetitor: 125.99 },
+      { date: "10/09", myPrice: 129.99, buyBoxPrice: 129.99, lowestCompetitor: 128.50 },
+      { date: "09/09", myPrice: 129.99, buyBoxPrice: 129.99, lowestCompetitor: 130.00 },
+      { date: "08/09", myPrice: 129.99, buyBoxPrice: 129.99, lowestCompetitor: 132.00 },
+      { date: "07/09", myPrice: 134.99, buyBoxPrice: 134.99, lowestCompetitor: 134.99 },
+      { date: "06/09", myPrice: 134.99, buyBoxPrice: 134.99, lowestCompetitor: 135.00 },
+      { date: "05/09", myPrice: 134.99, buyBoxPrice: 132.99, lowestCompetitor: 132.99 },
+      { date: "04/09", myPrice: 134.99, buyBoxPrice: 134.99, lowestCompetitor: 136.00 },
+      { date: "03/09", myPrice: 134.99, buyBoxPrice: 134.99, lowestCompetitor: 139.99 },
+      { date: "02/09", myPrice: 134.99, buyBoxPrice: 134.99, lowestCompetitor: 139.99 },
+      { date: "01/09", myPrice: 134.99, buyBoxPrice: 134.99, lowestCompetitor: 139.99 },
+      { date: "31/08", myPrice: 134.99, buyBoxPrice: 134.99, lowestCompetitor: 139.99 },
+      { date: "30/08", myPrice: 134.99, buyBoxPrice: 134.99, lowestCompetitor: 139.99 },
+      { date: "29/08", myPrice: 139.99, buyBoxPrice: 139.99, lowestCompetitor: 142.00 },
+      { date: "28/08", myPrice: 139.99, buyBoxPrice: 139.99, lowestCompetitor: 144.99 },
+      { date: "27/08", myPrice: 139.99, buyBoxPrice: 139.99, lowestCompetitor: 144.99 },
+      { date: "26/08", myPrice: 139.99, buyBoxPrice: 139.99, lowestCompetitor: 144.99 },
+      { date: "25/08", myPrice: 139.99, buyBoxPrice: 139.99, lowestCompetitor: 144.99 },
+      { date: "24/08", myPrice: 139.99, buyBoxPrice: 139.99, lowestCompetitor: 144.99 },
+      { date: "23/08", myPrice: 139.99, buyBoxPrice: 139.99, lowestCompetitor: 144.99 },
+      { date: "22/08", myPrice: 139.99, buyBoxPrice: 139.99, lowestCompetitor: 144.99 },
+      { date: "21/08", myPrice: 139.99, buyBoxPrice: 139.99, lowestCompetitor: 144.99 },
+      { date: "20/08", myPrice: 139.99, buyBoxPrice: 139.99, lowestCompetitor: 144.99 },
+      { date: "19/08", myPrice: 139.99, buyBoxPrice: 139.99, lowestCompetitor: 144.99 },
+      { date: "18/08", myPrice: 139.99, buyBoxPrice: 139.99, lowestCompetitor: 144.99 },
+      { date: "17/08", myPrice: 139.99, buyBoxPrice: 139.99, lowestCompetitor: 144.99 },
+      { date: "16/08", myPrice: 139.99, buyBoxPrice: 139.99, lowestCompetitor: 144.99 },
+      { date: "15/08", myPrice: 139.99, buyBoxPrice: 139.99, lowestCompetitor: 144.99 },
+      { date: "14/08", myPrice: 139.99, buyBoxPrice: 139.99, lowestCompetitor: 144.99 },
+      { date: "13/08", myPrice: 139.99, buyBoxPrice: 139.99, lowestCompetitor: 144.99 },
+    ],
+    offers: [
+      { sellerId: "ME", sellerLabel: "VEXIM (chúng tôi)", isMe: true, fulfillment: "FBA", price: 129.99, shipping: 0, landedPrice: 129.99, rating: null, feedbackCount: null, isFeatured: false, condition: "New" },
+      { sellerId: "AMZ", sellerLabel: "Amazon.com", isMe: false, fulfillment: "AMZ", price: 127.49, shipping: 0, landedPrice: 127.49, rating: null, feedbackCount: null, isFeatured: true, condition: "New" },
+      { sellerId: "S1", sellerLabel: "TravelHouse Direct", isMe: false, fulfillment: "FBA", price: 125.99, shipping: 0, landedPrice: 125.99, rating: 4.6, feedbackCount: 8420, isFeatured: false, condition: "New" },
+      { sellerId: "S2", sellerLabel: "LuggageWorld", isMe: false, fulfillment: "FBM", price: 124.00, shipping: 4.95, landedPrice: 128.95, rating: 4.2, feedbackCount: 1203, isFeatured: false, condition: "New" },
+      { sellerId: "S3", sellerLabel: "BagDeals LLC", isMe: false, fulfillment: "FBA", price: 128.99, shipping: 0, landedPrice: 128.99, rating: 3.9, feedbackCount: 420, isFeatured: false, condition: "New — hộp hư nhẹ" },
+    ],
+    fees: {
+      cogs: 62.50,
+      referralFeeRate: 15,
+      referralFeeAmount: 19.50,
+      fbaFee: 15.40,
+      otherFees: 0,
+      minMarginRate: 10,
+      minMarginAmount: 12.99,
+      floorPrice: 102.40, // 62.50 + 19.50 + 15.40 + ~5 (làm tròn biên tối thiểu 10%)
+    },
+    alerts: [
+      { tone: "amber", text: "Đang cao hơn FOEP $2.50 — Amazon.com vừa vào box lúc 02:15 hôm nay" },
+      { tone: "green", text: "Giá hiện tại trên giá sàn $27.59 (biên 21.2%)" },
+      { tone: "amber", text: "Đối thủ TravelHouse Direct đang ở $125.99 (FBA) — thấp nhất bảng" },
+    ],
+  },
+  "VPN-220-PRO": {
+    sku: "VPN-220-PRO", asin: "B0B2X77L", shop: "Shop A1 · US",
+    history: [
+      { date: "11/09", myPrice: 89.00, buyBoxPrice: 84.99, lowestCompetitor: 84.99 },
+      { date: "10/09", myPrice: 89.00, buyBoxPrice: 85.99, lowestCompetitor: 85.99 },
+      { date: "09/09", myPrice: 89.00, buyBoxPrice: 87.50, lowestCompetitor: 86.00 },
+      { date: "08/09", myPrice: 89.00, buyBoxPrice: 89.00, lowestCompetitor: 89.00 },
+      { date: "07/09", myPrice: 89.00, buyBoxPrice: 89.00, lowestCompetitor: 89.00 },
+      { date: "06/09", myPrice: 89.00, buyBoxPrice: 89.00, lowestCompetitor: 89.00 },
+      { date: "05/09", myPrice: 89.00, buyBoxPrice: 89.00, lowestCompetitor: 89.99 },
+    ],
+    offers: [
+      { sellerId: "ME", sellerLabel: "VEXIM (chúng tôi)", isMe: true, fulfillment: "FBA", price: 89.00, shipping: 0, landedPrice: 89.00, rating: null, feedbackCount: null, isFeatured: false, condition: "New" },
+      { sellerId: "S1", sellerLabel: "KitchenPro Deals", isMe: false, fulfillment: "FBA", price: 84.99, shipping: 0, landedPrice: 84.99, rating: 4.8, feedbackCount: 15204, isFeatured: true, condition: "New" },
+      { sellerId: "S2", sellerLabel: "HomeGoods US", isMe: false, fulfillment: "FBA", price: 86.95, shipping: 0, landedPrice: 86.95, rating: 4.5, feedbackCount: 3200, isFeatured: false, condition: "New" },
+    ],
+    fees: {
+      cogs: 45.00, referralFeeRate: 15, referralFeeAmount: 13.35, fbaFee: 10.20, otherFees: 0, minMarginRate: 10, minMarginAmount: 8.90, floorPrice: 72.10,
+    },
+    alerts: [
+      { tone: "red", text: "Mất box từ 09/09 sau khi KitchenPro Deals hạ từ $89 → $84.99" },
+      { tone: "green", text: "Giá sàn $72.10 — còn biên điều chỉnh để giành lại box (xuống $84.99 → biên 15.1%)" },
+    ],
+  },
+};
+
+/** P3 — hàng chờ duyệt giá */
+export const priceApprovalQueue: PriceApprovalItem[] = [
+  {
+    id: "APR-001", sku: "XMO-950-BLK", asin: "B0C7T31F", shop: "A1",
+    oldPrice: 129.99, newPrice: 127.49, deltaPct: -1.9,
+    reason: "Theo FOEP để giữ box (Amazon.com đang ở $127.49)",
+    source: "auto", requestedBy: "Hệ thống (rule: giữ box)", requestedAt: "11/09 06:00",
+    minMarginAfter: 19.7, belowFloor: false,
+  },
+  {
+    id: "APR-002", sku: "VPN-220-PRO", asin: "B0B2X77L", shop: "A1",
+    oldPrice: 89.00, newPrice: 84.99, deltaPct: -4.5,
+    reason: "Giành lại Buy Box từ KitchenPro Deals ($84.99) — đã mất box 2 ngày",
+    source: "manual", requestedBy: "Minh (Vận hành)", requestedAt: "11/09 08:32",
+    minMarginAfter: 15.1, belowFloor: false,
+  },
+  {
+    id: "APR-003", sku: "AQR-12-TOW", asin: "B0D1Q88A", shop: "C2",
+    oldPrice: 19.99, newPrice: 18.49, deltaPct: -7.5,
+    reason: "Đối thủ BeddingsCo hạ $17.99 — thử theo FOEP để giành lại box",
+    source: "auto", requestedBy: "Hệ thống (rule: mất box > 24h)", requestedAt: "11/09 04:15",
+    minMarginAfter: 27.5, belowFloor: false,
+  },
+  {
+    id: "APR-004", sku: "XMO-951-ACC", asin: "B0D88C001", shop: "A1",
+    oldPrice: 24.99, newPrice: 26.49, deltaPct: 6.0,
+    reason: "Nâng về trên giá sàn (đang biên âm −2.4% do phí FBA tăng)",
+    source: "manual", requestedBy: "Minh (Vận hành)", requestedAt: "11/09 09:05",
+    minMarginAfter: 3.4, belowFloor: false,
+  },
+  {
+    id: "APR-005", sku: "DRF-300", asin: "B0A9F14M", shop: "A2",
+    oldPrice: 45.50, newPrice: 44.99, deltaPct: -1.1,
+    reason: "Theo FOEP $43.99 — giảm nhẹ để ở ngưỡng an toàn",
+    source: "auto", requestedBy: "Hệ thống (rule: at-risk)", requestedAt: "11/09 07:00",
+    minMarginAfter: 29.3, belowFloor: false,
+  },
+  {
+    id: "APR-006", sku: "VPN-FILT-3", asin: "B0B77K099", shop: "A1",
+    oldPrice: 12.99, newPrice: 13.99, deltaPct: 7.7,
+    reason: "Giá vốn + phí tăng — dưới sàn $13.20, cần nâng",
+    source: "manual", requestedBy: "Trưởng phòng", requestedAt: "11/09 08:10",
+    minMarginAfter: 5.6, belowFloor: false,
+  },
+  {
+    id: "APR-007", sku: "KCH-118-W", asin: "B0C4K52D", shop: "C2",
+    oldPrice: 79.99, newPrice: 78.99, deltaPct: -1.3,
+    reason: "Đối thủ HomeEase vào $79.50 — giữ vị trí box",
+    source: "auto", requestedBy: "Hệ thống", requestedAt: "11/09 05:30",
+    minMarginAfter: 28.7, belowFloor: false,
+  },
+  {
+    id: "APR-008", sku: "XMO-950-BLU", asin: "B0C7T31G", shop: "A1",
+    oldPrice: 129.99, newPrice: 128.99, deltaPct: -0.8,
+    reason: "Match đối thủ TopBag $129.00",
+    source: "auto", requestedBy: "Hệ thống", requestedAt: "11/09 07:45",
+    minMarginAfter: 20.6, belowFloor: false,
+  },
+];
+
+/* ---------- Module 6 — Tài chính & Đối soát (F1–F2) ---------- */
+import type {
+  FinancialEventRow,
+  FinancialEventType,
+  SettlementDetailMock,
+  SettlementRow,
+} from "@/lib/types";
+
+/** F1 — Danh sách kỳ settlement (mỗi shop, 2 kỳ gần nhất để demo) */
+export const settlementList: SettlementRow[] = [
+  {
+    id: "12948510001", shop: "A1",
+    depositDate: "09/09/2026", startDate: "27/08/2026", endDate: "09/09/2026",
+    status: "deposited",
+    sales: 62_840.50, refunds: -3_120.30,
+    amazonFeesTotal: -9_340.10,
+    advertisingFees: -4_860.20,
+    otherCharges: 430.10,
+    transferAmount: 42_950.00,
+    currency: "USD",
+    accountDeposit: "VEXIM LLC · Chk ****4218",
+  },
+  {
+    id: "12948508001", shop: "C2",
+    depositDate: "09/09/2026", startDate: "27/08/2026", endDate: "09/09/2026",
+    status: "deposited",
+    sales: 18_240.90, refunds: -720.40,
+    amazonFeesTotal: -2_810.50,
+    advertisingFees: -1_310.10,
+    otherCharges: 120.00,
+    transferAmount: 13_520.00,
+    currency: "USD",
+    accountDeposit: "VEXIM LLC · Chk ****4218",
+  },
+  {
+    id: "12948507001", shop: "A2",
+    depositDate: "06/09/2026", startDate: "24/08/2026", endDate: "06/09/2026",
+    status: "deposited",
+    sales: 6_820.40, refunds: -210.00,
+    amazonFeesTotal: -1_050.20,
+    advertisingFees: -410.30,
+    otherCharges: -80.00,
+    transferAmount: 5_070.00,
+    currency: "USD",
+    accountDeposit: "VEXIM LLC · Chk ****4218",
+  },
+  {
+    id: "OPEN-A1", shop: "A1",
+    depositDate: "—", startDate: "10/09/2026", endDate: "đang mở",
+    status: "open",
+    sales: 4_820.40, refunds: -180.20,
+    amazonFeesTotal: -720.80,
+    advertisingFees: -380.40,
+    otherCharges: 0,
+    transferAmount: 0,
+    currency: "USD",
+    accountDeposit: "chưa đóng kỳ",
+  },
+  {
+    id: "12948498001", shop: "A1",
+    depositDate: "26/08/2026", startDate: "13/08/2026", endDate: "26/08/2026",
+    status: "deposited",
+    sales: 58_120.00, refunds: -2_840.00,
+    amazonFeesTotal: -8_710.00,
+    advertisingFees: -4_420.00,
+    otherCharges: 210.00,
+    transferAmount: 39_360.00,
+    currency: "USD",
+    accountDeposit: "VEXIM LLC · Chk ****4218",
+  },
+  {
+    id: "12948497001", shop: "C2",
+    depositDate: "26/08/2026", startDate: "13/08/2026", endDate: "26/08/2026",
+    status: "deposited",
+    sales: 15_980.00, refunds: -540.00,
+    amazonFeesTotal: -2_470.00,
+    advertisingFees: -1_180.00,
+    otherCharges: 80.00,
+    transferAmount: 11_870.00,
+    currency: "USD",
+    accountDeposit: "VEXIM LLC · Chk ****4218",
+  },
+  {
+    id: "12948496001", shop: "A2",
+    depositDate: "23/08/2026", startDate: "10/08/2026", endDate: "23/08/2026",
+    status: "deposited",
+    sales: 6_120.00, refunds: -240.00,
+    amazonFeesTotal: -950.00,
+    advertisingFees: -360.00,
+    otherCharges: 0,
+    transferAmount: 4_570.00,
+    currency: "USD",
+    accountDeposit: "VEXIM LLC · Chk ****4218",
+  },
+];
+
+/** F1 — Chi tiết 1 kỳ settlement (A1 kỳ gần nhất) */
+export const settlementDetails: Record<string, SettlementDetailMock> = {
+  "12948510001": {
+    id: "12948510001", shop: "Shop A1 · US",
+    depositDate: "09/09/2026", startDate: "27/08/2026", endDate: "09/09/2026",
+    transferAmount: 42_950.00,
+    accountDeposit: "VEXIM LLC · Checking ****4218 (Bank of America)",
+    currency: "USD",
+    groups: [
+      {
+        label: "Product sales (chưa gồm ship/gift wrap)",
+        amount: 58_240.20, tone: "up",
+        children: [
+          { label: "Amazon.com (AFN — FBA)", amount: 56_840.20 },
+          { label: "Amazon.com (MFN — tự ship)", amount: 1_400.00 },
+        ],
+      },
+      { label: "Shipping credits", amount: 1_240.30, tone: "up" },
+      { label: "Gift wrap credits", amount: 42.00, tone: "up" },
+      { label: "Promotional rebates", amount: -682.00, tone: "down" },
+      { label: "Refunds (chưa gồm phí hoàn lại)", amount: -3_120.30, tone: "down" },
+      {
+        label: "Amazon Fees",
+        amount: -9_340.10, tone: "down",
+        children: [
+          { label: "Referral fee (15%)", amount: -6_120.40 },
+          { label: "FBA fulfillment fee", amount: -2_540.80 },
+          { label: "Variable closing fee", amount: -18.90 },
+          { label: "Monthly storage fee", amount: -540.00 },
+          { label: "High-volume listing fee", amount: -120.00 },
+        ],
+      },
+      { label: "Advertising (SP/SD/SB)", amount: -4_860.20, tone: "down" },
+      { label: "FBA Inventory Reimbursement", amount: 324.00, tone: "up" },
+      { label: "Adjustments (SAFE-T / customer tax)", amount: 106.10, tone: "flat" },
+      { label: "Reserve held (previous reserve release)", amount: 0, tone: "flat" },
+    ],
+    skuBreakdown: [
+      { sku: "XMO-950-BLK", quantity: 112, productSales: 14_558.88, amazonFees: -3_640.20, net: 8_240.00 },
+      { sku: "XMO-950-BLU", quantity: 78, productSales: 10_139.22, amazonFees: -2_538.00, net: 5_760.00 },
+      { sku: "VPN-220", quantity: 142, productSales: 8_505.80, amazonFees: -2_129.00, net: 4_810.00 },
+      { sku: "VPN-220-PRO", quantity: 52, productSales: 4_628.00, amazonFees: -1_158.00, net: 2_620.00 },
+      { sku: "XMO-951-ACC", quantity: 210, productSales: 5_247.90, amazonFees: -1_314.00, net: 2_980.00 },
+      { sku: "VPN-FILT-3", quantity: 340, productSales: 4_416.60, amazonFees: -1_106.00, net: 2_510.00 },
+    ],
+  },
+};
+
+/** F2 — Dòng tài chính chi tiết (financial events) */
+const eventTypeLabels: Record<FinancialEventType, string> = {
+  ProductSale: "Product sale",
+  ShippingCredit: "Shipping credit",
+  Refund: "Refund",
+  ReferralFee: "Referral fee",
+  FBAFee: "FBA fulfillment fee",
+  StorageFee: "Storage fee",
+  AdvertisingFee: "Ad spend",
+  Reimbursement: "FBA reimbursement",
+  Adjustment: "Adjustment",
+  ServiceFee: "Service fee",
+  Subscription: "Pro subscription",
+  Reserve: "Reserve hold/release",
+};
+
+export const financialEvents: FinancialEventRow[] = [
+  { id: "FE-1", postedAt: "09/09 18:42", shop: "A1", type: "ProductSale", typeLabel: eventTypeLabels.ProductSale, description: "Order 113-5541209-1140233 · XMO-950-BLK ×1", orderId: "113-5541209-1140233", sku: "XMO-950-BLK", amount: 29.99, settlementId: "OPEN-A1" },
+  { id: "FE-2", postedAt: "09/09 18:42", shop: "A1", type: "ReferralFee", typeLabel: eventTypeLabels.ReferralFee, description: "Order 113-5541209-1140233", orderId: "113-5541209-1140233", sku: "XMO-950-BLK", amount: -4.50, settlementId: "OPEN-A1" },
+  { id: "FE-3", postedAt: "09/09 18:42", shop: "A1", type: "FBAFee", typeLabel: eventTypeLabels.FBAFee, description: "Order 113-5541209-1140233", orderId: "113-5541209-1140233", sku: "XMO-950-BLK", amount: -5.20, settlementId: "OPEN-A1" },
+  { id: "FE-4", postedAt: "09/09 17:50", shop: "A1", type: "ProductSale", typeLabel: eventTypeLabels.ProductSale, description: "Order 111-8890123-9987110 · XMO-950-BLK ×2", orderId: "111-8890123-9987110", sku: "XMO-950-BLK", amount: 59.98, settlementId: "OPEN-A1" },
+  { id: "FE-5", postedAt: "09/09 17:50", shop: "A1", type: "ReferralFee", typeLabel: eventTypeLabels.ReferralFee, description: "Order 111-8890123-9987110", orderId: "111-8890123-9987110", amount: -9.00, settlementId: "OPEN-A1" },
+  { id: "FE-6", postedAt: "09/09 14:02", shop: "C2", type: "ProductSale", typeLabel: eventTypeLabels.ProductSale, description: "Order 112-7710455-2205641 · KCH-118-W ×1", orderId: "112-7710455-2205641", sku: "KCH-118-W", amount: 79.99, settlementId: "OPEN-C2" },
+  { id: "FE-7", postedAt: "09/09 14:02", shop: "C2", type: "ReferralFee", typeLabel: eventTypeLabels.ReferralFee, description: "Order 112-7710455-2205641", orderId: "112-7710455-2205641", amount: -12.00, settlementId: "OPEN-C2" },
+  { id: "FE-8", postedAt: "09/09 12:30", shop: "A1", type: "AdvertisingFee", typeLabel: eventTypeLabels.AdvertisingFee, description: "Daily Sponsored Products accrual (09/09)", amount: -312.40 },
+  { id: "FE-9", postedAt: "09/09 11:15", shop: "A1", type: "Reimbursement", typeLabel: eventTypeLabels.Reimbursement, description: "FBA reimbursement claim CR-1023 · 18 units XMO-950-BLK lost at FC ONT8", sku: "XMO-950-BLK", amount: 324.00 },
+  { id: "FE-10", postedAt: "09/09 09:01", shop: "A1", type: "Refund", typeLabel: eventTypeLabels.Refund, description: "Return 113-2201455-8890012 · XMO-950-BLK ×1", orderId: "113-2201455-8890012", sku: "XMO-950-BLK", amount: -29.99 },
+  { id: "FE-11", postedAt: "09/09 06:00", shop: "A1", type: "AdvertisingFee", typeLabel: eventTypeLabels.AdvertisingFee, description: "Daily Sponsored Brands + Display accrual (08/09)", amount: -120.10 },
+  { id: "FE-12", postedAt: "08/09 22:10", shop: "A2", type: "ProductSale", typeLabel: eventTypeLabels.ProductSale, description: "Order 112-3309881-4471205 · DRF-300 ×1", orderId: "112-3309881-4471205", sku: "DRF-300", amount: 34.99, settlementId: "12948507001" },
+  { id: "FE-13", postedAt: "08/09 18:05", shop: "A1", type: "Adjustment", typeLabel: eventTypeLabels.Adjustment, description: "SAFE-T claim reimbursement FBM order 110-9901122-3344556", orderId: "110-9901122-3344556", amount: 18.20 },
+  { id: "FE-14", postedAt: "08/09 13:45", shop: "A1", type: "StorageFee", typeLabel: eventTypeLabels.StorageFee, description: "Monthly storage fee — August 2026", amount: -540.00, settlementId: "12948510001" },
+  { id: "FE-15", postedAt: "08/09 03:00", shop: "A1", type: "ServiceFee", typeLabel: eventTypeLabels.ServiceFee, description: "High-volume listing fee (per ASIN >100k listings, pro-rated)", amount: -120.00, settlementId: "12948510001" },
+  { id: "FE-16", postedAt: "06/09 00:00", shop: "A1", type: "Subscription", typeLabel: eventTypeLabels.Subscription, description: "Professional selling plan subscription — monthly", amount: -39.99 },
+];
+
+export const eventTypeFilters: { id: FinancialEventType | "all"; label: string }[] = [
+  { id: "all", label: "Tất cả" },
+  { id: "ProductSale", label: "Product sales" },
+  { id: "Refund", label: "Refunds" },
+  { id: "ReferralFee", label: "Referral fees" },
+  { id: "FBAFee", label: "FBA fees" },
+  { id: "AdvertisingFee", label: "Ad spend" },
+  { id: "Reimbursement", label: "Reimbursements" },
+  { id: "StorageFee", label: "Storage fees" },
+  { id: "Adjustment", label: "Adjustments" },
+];
+
+/* ---------- Notifications chuông (theo persona) ---------- */
+import type { Department, NotificationItem, Profile, AppRole } from "@/lib/types";
+import { ROLE_LABEL } from "@/lib/types";
+
+/**
+ * Chuông thông báo — trả về theo persona đang đăng nhập.
+ * Ở DEMO MODE số `bell` trong PERSONAS khớp với số phần tử mảng.
+ * Khi có Supabase: query bảng `notifications` (realtime qua presence channel).
+ */
+export const notificationsByPersona: Record<string, NotificationItem[]> = {
+  ceo: [
+    {
+      id: "N1", tone: "red", icon: "💲", title: "6 SKU dưới giá sàn",
+      detail: "XMO-951-ACC đang biên âm −2.4% sau khi đối thủ hạ giá",
+      time: "12 phút trước", href: "/pricing?margin=below_floor", read: false, category: "alert",
+    },
+    {
+      id: "N2", tone: "red", icon: "📦", title: "3 SKU sắp hết hàng (cover 5–8 ngày)",
+      detail: "Shop A1 · XMO-950-BLK, VPN-220, XMO-950-WHT — ~$410/ngày nếu đứt",
+      time: "28 phút trước", href: "/fulfillment/inventory", read: false, category: "alert",
+    },
+    {
+      id: "N3", tone: "red", icon: "🛡️", title: "Account Health vàng — 1 vi phạm IP chưa khiếu nại",
+      detail: "Shop C2 · case CS-10238741 · rủi ro khóa shop",
+      time: "1 giờ trước", href: "/health/violations", read: false, category: "alert",
+    },
+    {
+      id: "N4", tone: "amber", icon: "✅", title: "12 đề xuất áp giá chờ duyệt",
+      detail: "8 đề xuất ≤2% operator tự duyệt · 4 đề xuất cần trưởng phòng",
+      time: "2 giờ trước", href: "/pricing/approve", read: false, category: "approval",
+    },
+    {
+      id: "N5", tone: "amber", icon: "💬", title: "4 đơn FBM chờ xác nhận",
+      detail: "Còn 3 giờ trước hạn ship",
+      time: "3 giờ trước", href: "/orders/fbm", read: false, category: "alert",
+    },
+    {
+      id: "N6", tone: "amber", icon: "📈", title: "2 campaign hết budget trước 18h hôm qua",
+      detail: "Đang mất cơ hội đơn — kiểm tra PPC",
+      time: "8 giờ trước", href: "/ppc", read: true, category: "alert",
+    },
+    {
+      id: "N7", tone: "green", icon: "🏦", title: "Kỳ settlement $42,950 đã chuyển",
+      detail: "Shop A1 · kỳ 27/08–09/09 · về tài khoản ****4218",
+      time: "hôm qua", href: "/finance/settlements", read: true, category: "system",
+    },
+  ],
+  lead_fulfill: [
+    {
+      id: "F1", tone: "red", icon: "📦", title: "3 SKU sắp hết hàng",
+      detail: "XMO-950-BLK cover 5 ngày",
+      time: "28 phút trước", href: "/fulfillment/inventory", read: false, category: "alert",
+    },
+    {
+      id: "F2", tone: "amber", icon: "🚚", title: "Lô FBA15G…9DLP đang nhận tại FC LAX9",
+      detail: "ETA 1 ngày",
+      time: "1 giờ trước", href: "/fulfillment/inbound", read: false, category: "system",
+    },
+  ],
+  op_ppc: [
+    { id: "P1", tone: "amber", icon: "📈", title: "2 campaign hết budget sớm", detail: "XMO-950 Exact ACOS 34% 3 ngày liên tiếp", time: "1 giờ trước", href: "/ppc", read: false, category: "alert" },
+  ],
+  client: [],
+};
+
+/* ---------- Trang cá nhân ---------- */
+export const profileByPersona: Record<string, Profile> = {
+  ceo: {
+    name: "Nguyễn Hải Anh", email: "haianh@vexim.vn", role: ROLE_LABEL.super_admin,
+    department: "Điều phối", phone: "+84 912 345 678", avatarInitials: "NA",
+    joinedAt: "01/03/2024", lastLogin: "11/09/2026 13:40", mfaEnabled: true,
+  },
+  lead_fulfill: {
+    name: "Trần Mỹ Linh", email: "mylinh@vexim.vn", role: ROLE_LABEL.dept_lead,
+    department: "Kho vận & FBA", phone: "+84 988 765 432", avatarInitials: "MT",
+    joinedAt: "15/05/2024", lastLogin: "11/09/2026 08:15", mfaEnabled: true,
+  },
+  op_ppc: {
+    name: "Lê Tuấn", email: "tuan@vexim.vn", role: ROLE_LABEL.operator,
+    department: "Quảng cáo (PPC)", phone: "+84 904 111 222", avatarInitials: "TQ",
+    joinedAt: "02/01/2025", lastLogin: "11/09/2026 09:02", mfaEnabled: false,
+  },
+  client: {
+    name: "Đại diện Doanh nghiệp A", email: "contact@khacha-a.vn", role: ROLE_LABEL.client_viewer,
+    department: "—", phone: "—", avatarInitials: "DA",
+    joinedAt: "10/08/2026", lastLogin: "09/09/2026 16:30", mfaEnabled: false,
+  },
+};
+
+/* ---------- Tạo user mới (danh mục) ---------- */
+export const DEPARTMENTS: Department[] = [
+  "Điều phối",
+  "Vận hành & Health",
+  "Listing & Nội dung",
+  "Quảng cáo (PPC)",
+  "Kho vận & FBA",
+  "Đơn hàng & CSKH",
+  "Tài chính & Đối soát",
+];
+
+export const APP_ROLES: { id: AppRole; label: string; level: number; desc: string; canAssignTo: AppRole[] }[] = [
+  {
+    id: "super_admin", label: ROLE_LABEL.super_admin, level: 100,
+    desc: "Toàn quyền hệ thống VEXIM — thấy mọi shop, mọi module, mọi hành động. Chỉ dành cho 1–2 người sáng lập/CTO.",
+    canAssignTo: ["super_admin", "org_admin", "dept_lead", "operator", "analyst", "client_viewer"],
+  },
+  {
+    id: "org_admin", label: ROLE_LABEL.org_admin, level: 80,
+    desc: "Admin một doanh nghiệp/khách hàng (nhóm shop). Quản lý nhân viên, shop, xem toàn bộ dữ liệu của org đó.",
+    canAssignTo: ["dept_lead", "operator", "analyst", "client_viewer"],
+  },
+  {
+    id: "dept_lead", label: ROLE_LABEL.dept_lead, level: 50,
+    desc: "Trưởng phòng — duyệt thao tác rủi ro (đổi giá >2%, ngân sách ads…), quản lý nhân viên trong phòng.",
+    canAssignTo: ["operator", "analyst"],
+  },
+  {
+    id: "operator", label: ROLE_LABEL.operator, level: 30,
+    desc: "Nhân viên vận hành — đọc + ghi trên shop/module được gán.",
+    canAssignTo: [],
+  },
+  {
+    id: "analyst", label: ROLE_LABEL.analyst, level: 20,
+    desc: "Chỉ đọc, xuất báo cáo. Không thao tác ghi.",
+    canAssignTo: [],
+  },
+  {
+    id: "client_viewer", label: ROLE_LABEL.client_viewer, level: 10,
+    desc: "Khách hàng (client) — chỉ đọc shop của mình, không thấy nội bộ VEXIM.",
+    canAssignTo: [],
+  },
+];
+
+export const SHOPS = ["A1 · US", "A2 · MX", "B1 · DE", "C2 · US", "D1 · US", "E3 · CA"];

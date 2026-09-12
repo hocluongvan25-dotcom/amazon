@@ -25,6 +25,33 @@ export default async function FinancePage() {
         sub="Kỳ settlement gần nhất · đối soát 2h sáng"
         desc="Nguồn: Finances API + report Settlement / Ledger · lợi nhuận tính với giá vốn nội bộ VEXIM nhập."
       />
+      <div className="mb-4 flex flex-wrap gap-2">
+        {[
+          ["/finance", "📊 Tổng quan tài chính"],
+          ["/finance/settlements", "🏦 Kỳ settlement (F1)"],
+          ["/finance/events", "📒 Dòng tài chính (F2)"],
+        ].map(([href, label]) => (
+          <a
+            key={href}
+            href={href}
+            className="rounded-full border border-line bg-card px-4 py-1.5 text-[12.5px] font-bold text-muted transition hover:border-accent hover:bg-accent-soft hover:text-accent-ink"
+          >
+            {label}
+          </a>
+        ))}
+        <span
+          title="F3–F4 thuộc Đợt 2 (cấp độ 🟡) — đang khóa"
+          className="cursor-not-allowed rounded-full border border-dashed border-line px-4 py-1.5 text-[12.5px] font-bold text-soft"
+        >
+          🧾 Bồi hoàn FBA (F3 · Đợt 2)
+        </span>
+        <span
+          title="F3–F4 thuộc Đợt 2 (cấp độ 🟡) — đang khóa"
+          className="cursor-not-allowed rounded-full border border-dashed border-line px-4 py-1.5 text-[12.5px] font-bold text-soft"
+        >
+          💹 Lợi nhuận SKU (F4 · Đợt 2)
+        </span>
+      </div>
       <KpiGrid>
         {financeKpis.map((k) => (
           <KpiCard key={k.label} {...k} />

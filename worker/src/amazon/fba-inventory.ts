@@ -35,6 +35,7 @@ export type InventorySummary = {
 export type GetInventorySummariesResponse = {
   granularity: { granularityType: string; granularityId: string };
   inventorySummaries: InventorySummary[];
+  pagination?: { nextToken?: string };
 };
 
 /** Dạng chuẩn hóa worker dùng chung (snapshot / daily / metrics) */
@@ -79,6 +80,18 @@ export class FbaInventoryClient {
     marketplaceId: string;
     sellerSkus?: string[];
     details?: boolean;
+    startDateTime?: string;
+  }): Promise<GetInventorySummariesResponse> {
+    return this._getInventorySummariesPaginated(params);
+  }
+
+  async _getInventorySummariesPaginated(params: {
+    marketplaceId: string;
+    sellerSkus?: string[];
+    details?: boolean;
+    startDateTime?: string;
+    nextToken?: string;
+    acc?: InventorySummary[];
   }): Promise<GetInventorySummariesResponse> {
     const fetchFn = this.fetchFn;
     const token = await this.lwa.getAccessToken();
@@ -89,22 +102,43 @@ export class FbaInventoryClient {
     if (params.sellerSkus?.length) {
       for (const sku of params.sellerSkus) url.searchParams.append("sellerSkus", sku);
     }
+    if (params.startDateTime) {
+      url.searchParams.set("startDateTime", params.startDateTime);
+    }
+    if (params.nextToken) url.searchParams.set("nextToken", params.nextToken);
+    // Amazon recommends page size 50
+    url.searchParams.set("pageSize", "50");
 
-    // retry đơn giản theo Retry-After (token bucket của Amazon)
-    for (let attempt = 0; attempt < 3; attempt++) {
+    let lastWait = 1000;
+    for (let attempt = 0; attempt < 4; attempt++) {
       const res = await fetchFn(url.toString(), {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.status === 429) {
-        const waitMs = Number(res.headers.get("retry-after") ?? 1) * 1000;
+        const waitMs = Number(res.headers.get("retry-after") ?? Math.ceil(lastWait / 1000)) * 1000;
         await new Promise((r) => setTimeout(r, waitMs));
+        lastWait = waitMs * 2;
+        continue;
+      }
+      if (res.status >= 500) {
+        await new Promise((r) => setTimeout(r, lastWait));
+        lastWait *= 2;
         continue;
       }
       if (!res.ok) {
         throw new Error(`getInventorySummaries HTTP ${res.status}: ${await res.text()}`);
       }
-      return (await res.json()) as GetInventorySummariesResponse;
+      const json = (await res.json()) as GetInventorySummariesResponse & { pagination?: { nextToken?: string } };
+      const all = [...(params.acc ?? []), ...(json.inventorySummaries ?? [])];
+      if (json.pagination?.nextToken) {
+        return this._getInventorySummariesPaginated({
+          ...params,
+          nextToken: json.pagination.nextToken,
+          acc: all,
+        });
+      }
+      return { granularity: json.granularity, inventorySummaries: all };
     }
-    throw new Error("getInventorySummaries: vượt số lần retry (429)");
+    throw new Error("getInventorySummaries: vượt số lần retry (429/5xx)");
   }
 }

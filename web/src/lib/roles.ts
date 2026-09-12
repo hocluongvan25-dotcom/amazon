@@ -79,6 +79,7 @@ export const NAV: { group: string; items: NavItem[] }[] = [
     items: [
       { href: "/health", label: "Vận hành & Health", icon: "🛡️", count: 5, personas: ["ceo"] },
       { href: "/listing", label: "Listing & Nội dung", icon: "🏷️", count: 7, personas: ["ceo"] },
+      { href: "/pricing", label: "Giá & Buy Box", icon: "💲", count: 12, personas: ["ceo"] },
       { href: "/ppc", label: "Quảng cáo (PPC)", icon: "📈", count: 3, personas: ["ceo", "op_ppc"] },
       { href: "/fulfillment", label: "Kho vận & FBA", icon: "📦", count: 5, personas: ["ceo", "lead_fulfill"] },
       { href: "/orders", label: "Đơn hàng & CSKH", icon: "💬", count: 4, personas: ["ceo"] },
@@ -99,6 +100,12 @@ export const NAV: { group: string; items: NavItem[] }[] = [
       { href: "/module0/api-usage", label: "Mức dùng API", icon: "🧮", personas: ["ceo"] },
       { href: "/module0/audit-log", label: "Nhật ký thao tác", icon: "🧾", personas: ["ceo"] },
       { href: "/module0/users", label: "Người dùng & quyền", icon: "👥", personas: ["ceo"] },
+    ],
+  },
+  {
+    group: "Tài khoản",
+    items: [
+      { href: "/profile", label: "Trang cá nhân", icon: "👤", personas: ["ceo", "lead_fulfill", "op_ppc", "client"] },
     ],
   },
 ];

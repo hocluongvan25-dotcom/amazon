@@ -7,9 +7,14 @@ import { NextResponse, type NextRequest } from "next/server";
  * Việc phân quyền chi tiết (RLS) thực hiện ở tầng database + server layout.
  */
 const PUBLIC_PATHS = ["/login"];
+// Cron + webhook API paths không đi qua auth giao diện (tự kiểm tra signature/CRON_SECRET)
+const BYPASS_AUTH_PATHS = ["/api/cron/", "/api/webhooks/"];
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+  if (BYPASS_AUTH_PATHS.some((p) => pathname.startsWith(p))) {
+    return NextResponse.next();
+  }
   if (PUBLIC_PATHS.some((p) => pathname.startsWith(p))) {
     return NextResponse.next();
   }
