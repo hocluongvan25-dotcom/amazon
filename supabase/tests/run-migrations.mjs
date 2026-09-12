@@ -25,6 +25,7 @@ import { btree_gist } from "@electric-sql/pglite/contrib/btree_gist";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { screens } from "../../web/src/lib/data/operations-model.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const rd = (p) => readFileSync(join(ROOT, p), "utf8");
@@ -411,6 +412,48 @@ await cmp(
   "select count(*) n from information_schema.views where table_schema='public' and table_name in ('vexim_shop_health','vexim_health_issues','vexim_order_daily','vexim_fbm_queue')",
   4,
 );
+
+// 0011 supplied by the operator; local in-memory DB only.
+console.log("\n=== BƯỚC 10: 0011 public web views + RLS ===");
+ok(await ex(rd("migrations/0011_web_public_views.sql"), "0011"), "0011 migration");
+ok(await ex(rd("migrations/0011_web_public_views.sql"), "0011 lần 2"), "0011 idempotent");
+await cmp("0011: 8 views security_invoker", `select count(*) n from pg_class c join pg_namespace n on n.oid=c.relnamespace
+ where n.nspname='public' and c.relname in ('vexim_orders','vexim_order_items','vexim_returns','vexim_fbm_queue','vexim_settlements','vexim_financial_events','vexim_inventory_latest','vexim_inbound_shipments')
+ and 'security_invoker=true'=any(c.reloptions)`, 8);
+await cmp("0011: no PII or raw in web views", `select count(*) n from information_schema.columns where table_schema='public' and table_name like 'vexim_%' and column_name in ('raw','buyer_name','buyer_email','ship_address_1','recipient_name','ship_city','ship_postal_code')`, 0);
+
+await ex("begin");
+const otherShop = (await one(`select id from connections.seller_accounts where id <> '${usShop}' limit 1`)).id;
+const limitedUser = 'eeee0000-0000-4000-8000-000000000011';
+ok(await ex(`insert into auth.users(id,email) values ('${limitedUser}','local-only-0011@example.test');
+ insert into iam.user_profiles(id,display_name,email) values ('${limitedUser}','Local view test','local-only-0011@example.test');
+ insert into iam.assignments(user_id,seller_account_id,module) values ('${limitedUser}','${usShop}','orders');`), "0011 local restricted user");
+for (const shop of [usShop, otherShop]) {
+  ok(await ex(`insert into sales.orders(seller_account_id,amazon_order_id,status,channel,purchase_date,latest_ship_date,order_total)
+    values ('${shop}','LOCAL-0011','Unshipped','MFN','2026-09-10','2026-09-13',30);
+    insert into sales.order_items(order_id,sku,quantity,item_price)
+    select id,'SKU-SMALL',1,10 from sales.orders where seller_account_id='${shop}' and amazon_order_id='LOCAL-0011';
+    insert into sales.order_items(order_id,sku,quantity,item_price)
+    select id,'SKU-MAIN',2,20 from sales.orders where seller_account_id='${shop}' and amazon_order_id='LOCAL-0011';
+    insert into sales.returns_refunds(seller_account_id,amazon_order_id,return_date,reason) values ('${shop}','LOCAL-0011','2026-09-12','DEFECTIVE');
+    insert into finance.settlements(seller_account_id,settlement_id,period_start,period_end,total_amount)
+    values ('${shop}','LOCAL-SETTLEMENT','2026-09-01','2026-09-12',30);
+    insert into finance.financial_events(seller_account_id,settlement_id,event_type,event_date,amount)
+    values ('${shop}','LOCAL-SETTLEMENT','ProductSale','2026-09-12',30);`), "0011 fixtures for shop " + shop);
+}
+await ex(`set local role authenticated; select set_config('request.jwt.claim.sub','${limitedUser}',true);`);
+for (const view of ['vexim_orders','vexim_order_items','vexim_returns','vexim_fbm_queue','vexim_settlements','vexim_financial_events']) {
+  await cmp(`0011 RLS ${view}: forbidden shop hidden`, `select count(*) n from public.${view} where seller_account_id='${otherShop}'`, 0);
+  const n = view === 'vexim_order_items' ? 2 : 1;
+  await cmp(`0011 RLS ${view}: assigned shop visible`, `select count(*) n from public.${view} where seller_account_id='${usShop}'`, n);
+}
+const orderProjection = await one("select main_sku,latest_ship_date from public.vexim_orders where amazon_order_id='LOCAL-0011'");
+ok(orderProjection?.main_sku === 'SKU-MAIN' && orderProjection?.latest_ship_date, "0011 lateral main SKU + real deadline");
+await cmp("0011 settlement events join by external ID AND shop", `select count(*) n from public.vexim_financial_events e join public.vexim_settlements s on s.settlement_id=e.settlement_id and s.seller_account_id=e.seller_account_id where s.settlement_id='LOCAL-SETTLEMENT'`, 1);
+for (const [screen, spec] of Object.entries(screens)) {
+  ok(await ex(`select ${spec.select} from public.${spec.view} order by id limit 1`), `0011 web projection ${screen} readable as authenticated`);
+}
+await ex("reset role; rollback;");
 
 console.log(`\n${"=".repeat(70)}`);
 console.log(fails === 0 ? "TẤT CẢ PASS" : `${fails} MỤC FAIL`);

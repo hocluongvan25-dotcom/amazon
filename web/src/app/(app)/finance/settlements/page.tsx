@@ -1,3 +1,4 @@
+import { LiveOperations } from "@/components/operations/LiveOperations";
 import { Chip, NoAccess, PageHeader, Panel, tableCls } from "@/components/ui";
 import { requireSession } from "@/lib/auth/session";
 import { settlementList } from "@/lib/data/mock";
@@ -33,6 +34,7 @@ export default async function SettlementsPage({
 }) {
   const session = await requireSession();
   if (!ALLOWED.includes(session.persona)) return <NoAccess />;
+  if (session.mode === "supabase") return <LiveOperations screen="settlements" />;
 
   const sp = await searchParams;
   const filterShop = sp.shop ?? "all";
@@ -64,6 +66,7 @@ export default async function SettlementsPage({
 
   return (
     <>
+      <div className="mb-3 text-sm font-bold text-amber">DEMO · Dữ liệu minh họa</div>
       <PageHeader
         title="Kỳ thanh toán (Settlements)"
         sub={`${settlementList.length} kỳ · ${shops.length} shop · đối soát khi có kỳ mới từ report GET_V2_SETTLEMENT_REPORT_DATA_FLAT_FILE`}

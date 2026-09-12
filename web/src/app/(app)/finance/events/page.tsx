@@ -1,3 +1,4 @@
+import { LiveOperations } from "@/components/operations/LiveOperations";
 import { Chip, NoAccess, PageHeader, Panel, tableCls } from "@/components/ui";
 import { requireSession } from "@/lib/auth/session";
 import { eventTypeFilters, financialEvents } from "@/lib/data/mock";
@@ -40,6 +41,7 @@ export default async function EventsPage({
 }) {
   const session = await requireSession();
   if (!ALLOWED.includes(session.persona)) return <NoAccess />;
+  if (session.mode === "supabase") return <LiveOperations screen="events" />;
 
   const sp = await searchParams;
   const fType = (sp.type ?? "all") as FinancialEventType | "all";
@@ -63,6 +65,7 @@ export default async function EventsPage({
 
   return (
     <>
+      <div className="mb-3 text-sm font-bold text-amber">DEMO · Dữ liệu minh họa</div>
       <PageHeader
         title="Dòng tài chính"
         sub={`${financialEvents.length} sự kiện trên ${shops.length} shop · append-only`}

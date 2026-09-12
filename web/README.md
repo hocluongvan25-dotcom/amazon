@@ -56,3 +56,15 @@ src/
 2. Map persona từ `iam.role_assignments` (supabase mode)
 3. Màn hình Module 7 (Health) → Module 4 (Orders) theo thứ tự đã chốt
 4. Typed clients SP-API từ Swagger models (Tier 1) + sandbox
+
+## Module 4/6 — Supabase read mode (migration 0011)
+
+Các route Orders và Finance dùng cookie session + anon key để đọc public views.
+Không dùng service role hay fallback mock khi DB trống/lỗi. Bản demo chỉ dùng khi
+session mode là demo. Mã `id` của trang chi tiết là UUID nội bộ từ link danh sách,
+không phải mã đơn/kỳ Amazon. Đơn vị tiền tệ không quy đổi; countdown FBM tại lúc tải.
+
+Kiểm tra: `npm test`, `npm run typecheck`, `npm run build`; kiểm tra SQL/RLS và
+projection UI: `cd ../supabase && npm test` (Node 22.22+, PGlite local trong bộ nhớ).
+Chưa chạy test trình duyệt/production tự động. Checklist live trong
+`docs/tien-do-trien-khai.md`.

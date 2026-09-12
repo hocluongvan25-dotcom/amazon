@@ -1,3 +1,4 @@
+import { LiveHealth } from "@/components/health/LiveHealth";
 import { Chip, NoAccess, PageHeader, Panel, tableCls } from "@/components/ui";
 import { requireSession } from "@/lib/auth/session";
 import { healthViolations } from "@/lib/data/mock";
@@ -15,13 +16,14 @@ const sevTone: Record<string, "red" | "amber" | "gray"> = {
 export default async function HealthViolationsPage() {
   const session = await requireSession();
   if (!ALLOWED.includes(session.persona)) return <NoAccess />;
+  if (session.mode === "supabase") return <LiveHealth violations />;
 
   return (
     <>
       <PageHeader
         title="Chi tiết vấn đề tài khoản"
-        sub="4 vấn đề mở · 2 shop bị ảnh hưởng"
-        desc="Nguồn: GET_V1_SELLER_PERFORMANCE_REPORT (Selling Partner Insights) + ACCOUNT_STATUS_CHANGED. Mỗi vấn đề xử lý theo SOP-08."
+        sub="DEMO · 4 vấn đề minh họa"
+        desc="Nguồn: GET_V2_SELLER_PERFORMANCE_REPORT (Selling Partner Insights) + ACCOUNT_STATUS_CHANGED. Mỗi vấn đề xử lý theo SOP-08."
       />
       <Panel title="Vấn đề đang mở" hint="xếp theo mức nghiêm trọng">
         <table className={tableCls.table}>

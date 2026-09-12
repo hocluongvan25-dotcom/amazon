@@ -1,3 +1,4 @@
+import { LiveOperations } from "@/components/operations/LiveOperations";
 import { Chip, NoAccess, PageHeader, Panel, tableCls } from "@/components/ui";
 import { requireSession } from "@/lib/auth/session";
 import { orderDetails, ordersList } from "@/lib/data/mock";
@@ -12,6 +13,7 @@ export default async function OrderDetailPage({
 }) {
   const session = await requireSession();
   if (!ALLOWED.includes(session.persona)) return <NoAccess />;
+  if (session.mode === "supabase") return <LiveOperations screen="orders" detail id={(await searchParams).id} />;
 
   const { id } = await searchParams;
   const detail = id ? orderDetails[id] : undefined;
@@ -19,6 +21,7 @@ export default async function OrderDetailPage({
 
   return (
     <>
+      <div className="mb-3 text-sm font-bold text-amber">DEMO · Dữ liệu minh họa</div>
       <PageHeader
         title={`Đơn ${id ?? ""}`}
         sub={detail ? `${detail.date} · ${detail.channel} · ${detail.shop}` : (fallback ? `${fallback.date} · ${fallback.channel === "AFN" ? "AFN (FBA)" : "MFN (FBM)"} · Shop ${fallback.shop}` : "Không tìm thấy đơn")}
