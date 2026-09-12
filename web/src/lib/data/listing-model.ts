@@ -43,6 +43,14 @@ export type ListingRaw = {
   enforcement_actions?: unknown;
   last_source?: string | null;
   last_synced_at?: string | null;
+  /* ↓ migration 0017 — doanh số 30 ngày + người phụ trách (nối CUỐI view) */
+  units_30d?: number | null;
+  orders_30d?: number | null;
+  revenue_30d?: number | null;
+  revenue_currency?: string | null;
+  velocity_30d?: number | null;
+  last_order_at?: string | null;
+  owner?: string | null;
 };
 
 /** vexim_listing_queue — cùng shape nhưng chỉ dòng có vấn đề */
@@ -52,12 +60,30 @@ export type ListingQueueRaw = ListingRaw;
 /* Select strings                                                      */
 /* ------------------------------------------------------------------ */
 
+/** 7 cột 0017 nối CUỐI cả hai view — harness BƯỚC 18 soát đúng thứ tự này. */
+export const LISTING_SALES_COLUMNS = [
+  "units_30d",
+  "orders_30d",
+  "revenue_30d",
+  "revenue_currency",
+  "velocity_30d",
+  "last_order_at",
+  "owner",
+] as const;
+
+const SALES_TAIL = LISTING_SALES_COLUMNS.join(",");
+
+/**
+ * PostgREST select theo TÊN: thiếu/sai 1 cột là PGRST204 và SẬP CẢ TRANG L1.
+ */
 export const LISTINGS_SELECT =
-  "id,seller_account_id,shop,sku,asin,title,status,price,currency,updated_at,error_count,warning_count,issues,buy_box_won,buy_box_price,competitor_price,offer_captured_at,product_type,buyable,discoverable,quantity,stranded_reason,enforcement_actions,last_source,last_synced_at";
+  "id,seller_account_id,shop,sku,asin,title,status,price,currency,updated_at,error_count,warning_count,issues,buy_box_won,buy_box_price,competitor_price,offer_captured_at,product_type,buyable,discoverable,quantity,stranded_reason,enforcement_actions,last_source,last_synced_at," +
+  SALES_TAIL;
 
 /** vexim_listing_queue KHÔNG có cột offer → select riêng, tránh lỗi PGRST204. */
 export const LISTING_QUEUE_SELECT =
-  "id,seller_account_id,shop,sku,asin,title,status,price,currency,updated_at,error_count,warning_count,issues,quantity,stranded_reason,enforcement_actions,product_type,last_source,last_synced_at,buyable,discoverable";
+  "id,seller_account_id,shop,sku,asin,title,status,price,currency,updated_at,error_count,warning_count,issues,quantity,stranded_reason,enforcement_actions,product_type,last_source,last_synced_at,buyable,discoverable," +
+  SALES_TAIL;
 
 /**
  * Màu + nhãn trạng thái — MỘT bản dùng chung cho demo và live, để thêm trạng thái
@@ -179,6 +205,35 @@ export function formatPrice(price: number | null, currency: string | null): stri
   return `$${price.toFixed(2)}`;
 }
 
+/**
+ * Doanh thu 30 ngày → chuỗi hiển thị.
+ * `currency = null` = đơn của shop lẫn nhiều tiền tệ: view KHÔNG cộng gộp và ta
+ * cũng không tự quy đổi (không có tỷ giá thật) → báo rõ thay vì in một số sai.
+ */
+export function formatRevenue30d(amount: number | null, currency: string | null): string {
+  if (amount === null) return "—";
+  const n = amount.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  if (currency === null) return `${n} ⚠ lẫn tiền tệ`;
+  return currency === "USD" ? `$${n}` : `${n} ${currency}`;
+}
+
+/** Doanh thu/ngày (L4 xếp ưu tiên theo "đang mất bao nhiêu tiền mỗi ngày"). */
+export function formatRevenuePerDay(amount30d: number | null, currency: string | null): string {
+  if (amount30d === null) return "—";
+  return `${formatRevenue30d(Math.round((amount30d / 30) * 100) / 100, currency)}/ngày`;
+}
+
+/**
+ * Sort theo doanh thu: SKU CHƯA CÓ ĐƠN xếp cuối, không chen lên đầu như thể
+ * doanh thu thấp nhất (cùng luật với sort biên của P1).
+ */
+export function revenueSortValue(r: { revenue30d: number | null }): number {
+  return r.revenue30d ?? Number.NEGATIVE_INFINITY;
+}
+
 function timeAgo(updatedAt: string): string {
   const now = new Date();
   const updated = new Date(updatedAt);
@@ -207,8 +262,13 @@ export function mapListingRow(raw: ListingRaw): ListingListRow {
     // Đếm từ mảng issue khi có chi tiết (view 0016 đã ưu tiên mảng), fallback bộ đếm
     issueErrors: issues.length > 0 ? issues.filter((i) => i.severity === "ERROR").length : Number(raw.error_count ?? 0),
     issueWarnings: issues.length > 0 ? issues.filter((i) => i.severity === "WARNING").length : Number(raw.warning_count ?? 0),
-    owner: "—", // iam.assignments chưa join — chờ RBAC full
-    revenue30d: 0, // chưa có trong listings view — chờ Orders join
+    // iam.module_owner(shop, 'listings') — tên nhân viên VEXIM, không email/không uuid
+    owner: raw.owner ?? "—",
+    // 0017: NULL = chưa có đơn nào trong 30 ngày (không suy ra 0)
+    revenue30d: raw.revenue_30d ?? null,
+    revenueCurrency: raw.revenue_currency ?? null,
+    units30d: raw.units_30d ?? null,
+    lastOrderAt: raw.last_order_at ?? null,
     updated: timeAgo(raw.updated_at),
     issues,
     productType: raw.product_type ?? null,
@@ -277,9 +337,11 @@ export function mapListingQueueItem(raw: ListingQueueRaw): ListingQueueItem {
     cause,
     causeCode,
     suggestion,
-    owner: "—",
+    owner: raw.owner ?? "—",
     slaLabel: strandedReason ? "24h — có hàng kẹt FC" : "chưa gán",
-    revenuePerDay: "—",
+    // 0017: doanh thu/ngày thật từ Orders — L4 biết listing nào đang mất tiền nhiều nhất
+    revenue30d: raw.revenue_30d ?? null,
+    revenuePerDay: formatRevenuePerDay(raw.revenue_30d ?? null, raw.revenue_currency ?? null),
     priority,
     priorityLabel,
   };

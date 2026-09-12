@@ -6,6 +6,8 @@ import { readListings, readListingQueue } from "@/lib/data/listing";
 import {
   computeListingKpis,
   formatPrice,
+  formatRevenue30d,
+  revenueSortValue,
   LISTING_SOURCE_VI,
   LISTING_STATUS_TONE,
   LISTING_STATUS_VI,
@@ -15,11 +17,29 @@ import {
   normalizeIssues,
   type ListingRaw,
 } from "@/lib/data/listing-model";
-import type { ListingListRow, ListingStatus } from "@/lib/types";
+import type { ListingListRow, ListingQueueItem, ListingStatus } from "@/lib/types";
 
 // Trạng thái: dùng bản chung của listing-model (0016 thêm REMOVED/CLOSED/DELETED/UNKNOWN)
 const statusTone = LISTING_STATUS_TONE;
 const statusLabel = LISTING_STATUS_VI;
+
+/**
+ * 0017: xếp hàng đợi theo TIỀN ĐANG MẤT — cùng mức ưu tiên thì listing có doanh thu
+ * 30 ngày cao hơn lên trước; SKU chưa có đơn (NULL) xếp cuối mức, không chen lên đầu.
+ */
+const QUEUE_PRIORITY_RANK: Record<ListingQueueItem["priority"], number> = {
+  red: 0,
+  amber: 1,
+  gray: 2,
+};
+
+function sortQueueByRisk(items: ListingQueueItem[]): ListingQueueItem[] {
+  return [...items].sort((a, b) => {
+    const byPriority = QUEUE_PRIORITY_RANK[a.priority] - QUEUE_PRIORITY_RANK[b.priority];
+    if (byPriority !== 0) return byPriority;
+    return revenueSortValue(b) - revenueSortValue(a);
+  });
+}
 
 /**
  * "Không bán được" — kể cả khi report ghi ACTIVE: mất BUYABLE/DISCOVERABLE,
@@ -109,7 +129,7 @@ export async function LiveListingOverview() {
                   </tr>
                 </thead>
                 <tbody>
-                  {queueItems.map((r) => (
+                  {sortQueueByRisk(queueItems).map((r) => (
                     <tr key={r.sku}>
                       <td className={`${tableCls.td} font-bold`}>
                         {r.sku} · {r.asin}
@@ -186,7 +206,8 @@ export async function LiveListingList({
   rows =
     filters.sort === "sku"
       ? [...rows].sort((a, b) => a.sku.localeCompare(b.sku))
-      : [...rows].sort((a, b) => b.revenue30d - a.revenue30d);
+      // SKU CHƯA CÓ ĐƠN (revenue NULL) xếp cuối — không chen lên đầu như thể doanh thu thấp
+      : [...rows].sort((a, b) => revenueSortValue(b) - revenueSortValue(a));
 
   const shops = [...new Set(allRows.map((r) => r.shop))];
   const brands = [...new Set(allRows.map((r) => r.brand))];
@@ -299,8 +320,10 @@ export async function LiveListingList({
                   <th className={tableCls.th}>Shop</th>
                   <th className={`${tableCls.th} text-right`}>Giá</th>
                   <th className={`${tableCls.th} text-right`}>Tồn</th>
+                  <th className={`${tableCls.th} text-right`}>Doanh thu 30 ngày</th>
                   <th className={`${tableCls.th} text-right`}>Issues</th>
                   <th className={tableCls.th}>Trạng thái</th>
+                  <th className={tableCls.th}>Phụ trách</th>
                   <th className={tableCls.th}>Nguồn / cập nhật</th>
                 </tr>
               </thead>
@@ -324,6 +347,16 @@ export async function LiveListingList({
                       {r.productType ? (
                         <div className="text-[10.5px] text-soft">{r.productType}</div>
                       ) : null}
+                    </td>
+                    <td className={tableCls.tdNum}>
+                      {/* 0017: doanh thu 30 ngày từ Orders — NULL thì "—", không hiện $0 giả */}
+                      <div className="font-bold">{formatRevenue30d(r.revenue30d, r.revenueCurrency)}</div>
+                      <div
+                        className="text-[11px] text-soft"
+                        title="đơn vị bán được trong 30 ngày (đã loại đơn huỷ)"
+                      >
+                        {r.units30d === null ? "chưa có đơn" : `${r.units30d.toLocaleString("en-US")} đơn vị`}
+                      </div>
                     </td>
                     <td className={tableCls.tdNum}>
                       {r.issueErrors > 0 ? (
@@ -355,6 +388,18 @@ export async function LiveListingList({
                         </div>
                       ) : null}
                     </td>
+                    <td className={tableCls.td}>
+                      {r.owner === "—" ? (
+                        <span
+                          className="text-soft"
+                          title="Chưa gán ai phụ trách shop này ở module listings (iam.assignments)"
+                        >
+                          — chưa gán
+                        </span>
+                      ) : (
+                        <span className="font-semibold">{r.owner}</span>
+                      )}
+                    </td>
                     <td className={`${tableCls.td} text-[12px] text-soft`}>
                       {r.lastSource ? (
                         <div title="Nguồn ghi dòng này gần nhất (cột last_source)">
@@ -367,7 +412,7 @@ export async function LiveListingList({
                 ))}
                 {rows.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className={`${tableCls.td} text-center text-soft`}>
+                    <td colSpan={10} className={`${tableCls.td} text-center text-soft`}>
                       Không có SKU nào khớp bộ lọc.
                     </td>
                   </tr>
@@ -382,9 +427,15 @@ export async function LiveListingList({
               cờ BUYABLE/DISCOVERABLE, lý do stranded, enforcement Amazon, issue chi tiết và nguồn ghi gần nhất.
             </p>
             <p className="mt-1.5 text-[13px] text-muted">
-              <span className="font-bold text-amber">Chưa có:</span> brand, owner (RBAC join), doanh thu 30 ngày
-              (Orders join), ảnh thumbnail (Catalog API). Issue chi tiết chỉ có khi chạy{" "}
-              <code>listings:sync --details</code> (gọi getListingsItem cho SKU có vấn đề).
+              <span className="font-bold text-[#0b7a55]">Đã có (migration 0017):</span> doanh thu · đơn vị bán
+              30 ngày theo SKU (<code>vexim_sku_sales_30d</code>, đã loại đơn huỷ — nên nút sort "Doanh thu 30
+              ngày" xếp theo tiền thật) và người phụ trách module listings (<code>iam.assignments</code>). SKU
+              chưa có đơn nào hiện <b>—</b> chứ không hiện $0.
+            </p>
+            <p className="mt-1.5 text-[13px] text-muted">
+              <span className="font-bold text-amber">Chưa có:</span> brand, ảnh thumbnail (cần Catalog API).
+              Issue chi tiết chỉ có khi chạy <code>listings:sync --details</code> (gọi getListingsItem cho SKU có
+              vấn đề).
             </p>
           </Panel>
         </>
@@ -612,6 +663,8 @@ export async function LiveListingQueue() {
   const queueItems = rawRows.map(mapListingQueueItem);
   const open = queueItems.length;
   const unassigned = queueItems.filter((r) => r.owner === "—").length;
+  // 0017: trong cùng mức ưu tiên, listing nào đang MẤT NHIỀU TIỀN HƠN thì xử lý trước
+  const sortedQueue = sortQueueByRisk(queueItems);
   const highPriority = queueItems.filter((r) => r.priority === "red").length;
 
   return (
@@ -652,7 +705,7 @@ export async function LiveListingQueue() {
               </div>
             ))}
           </div>
-          <Panel title="Queue xử lý" hint="xếp theo severity issues">
+          <Panel title="Queue xử lý" hint="ưu tiên cao trước · trong cùng mức xếp theo tiền đang mất">
             {queueItems.length === 0 ? (
               <p className="text-[13px] text-muted">Không có listing nào có vấn đề trong DB.</p>
             ) : (
@@ -664,11 +717,12 @@ export async function LiveListingQueue() {
                     <th className={tableCls.th}>Nguyên nhân (mã lỗi)</th>
                     <th className={tableCls.th}>Đề xuất sửa</th>
                     <th className={tableCls.th}>Ưu tiên</th>
+                    <th className={`${tableCls.th} text-right`}>Tiền đang mất</th>
                     <th className={tableCls.th}>Ai giữ</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {queueItems.map((r) => (
+                  {sortedQueue.map((r) => (
                     <tr key={r.sku}>
                       <td className={tableCls.td}>
                         <a href={`/listing/detail?sku=${r.sku}`} className="font-bold text-blue underline underline-offset-2">
@@ -684,8 +738,26 @@ export async function LiveListingQueue() {
                       <td className={`${tableCls.td} max-w-[260px] text-[12.5px]`}>{r.suggestion}</td>
                       <td className={tableCls.td}>
                         <Chip tone={r.priority}>{r.priorityLabel}</Chip>
+                        <div className="mt-1 text-[10.5px] text-soft">{r.slaLabel}</div>
                       </td>
-                      <td className={`${tableCls.td} font-bold ${r.owner === "—" ? "text-red" : ""}`}>{r.owner}</td>
+                      {/* 0017: doanh thu 30 ngày ÷ 30 — listing lỗi đang làm mất bao nhiêu tiền/ngày */}
+                      <td className={tableCls.tdNum}>
+                        {r.revenue30d === null ? (
+                          <span className="text-soft" title="Chưa có đơn nào trong 30 ngày (hoặc shop chưa sync Orders)">
+                            —
+                          </span>
+                        ) : (
+                          <>
+                            <span className="font-bold">{r.revenuePerDay}</span>
+                            <div className="text-[10.5px] text-soft">
+                              30 ngày: {r.revenue30d.toLocaleString("en-US", { maximumFractionDigits: 0 })}
+                            </div>
+                          </>
+                        )}
+                      </td>
+                      <td className={`${tableCls.td} font-bold ${r.owner === "—" ? "text-red" : ""}`}>
+                        {r.owner === "—" ? "— chưa gán" : r.owner}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

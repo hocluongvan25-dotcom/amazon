@@ -12,7 +12,14 @@ import {
 import { LivePricingPage } from "@/components/pricing/LivePricing";
 import { requireSession } from "@/lib/auth/session";
 import { pricingAlerts, pricingKpis, pricingRows } from "@/lib/data/mock";
-import { COST_BASIS_VI, isCostBlocked } from "@/lib/data/pricing-model";
+import {
+  COST_BASIS_VI,
+  formatRevenue30d,
+  formatSales30d,
+  formatVelocity30d,
+  isCostBlocked,
+  velocitySortValue,
+} from "@/lib/data/pricing-model";
 import type { PersonaKey } from "@/lib/roles";
 import type { BoxStatus, PricingRow } from "@/lib/types";
 
@@ -107,7 +114,8 @@ export default async function PricingPage({
       case "sku":
         return a.sku.localeCompare(b.sku);
       case "velocity":
-        return b.velocity30d - a.velocity30d;
+        // SKU CHƯA CÓ ĐƠN (velocity NULL) xếp cuối — không chen lên đầu như thể bán kém nhất
+        return velocitySortValue(b) - velocitySortValue(a);
       case "risk":
       default: {
         // th tự tự: đỏ (mất box + dưới sàn) → at_risk + thấp biên → holding
@@ -118,7 +126,7 @@ export default async function PricingPage({
           if (r.belowFloor === true) s += 80;
           if (isCostBlocked(r)) s += 30;
           if (r.foepDelta && r.foepDelta > 2) s += 20;
-          s += r.velocity30d / 10;
+          s += (r.velocity30d ?? 0) / 10; // chưa có đơn = không cộng điểm urgency
           return s;
         };
         return score(b) - score(a);
@@ -302,6 +310,7 @@ export default async function PricingPage({
               <th className={`${tableCls.th} text-right`}>Thấp nhất</th>
               <th className={`${tableCls.th} text-right`}>Giá sàn</th>
               <th className={`${tableCls.th} text-right`}>Biên</th>
+              <th className={`${tableCls.th} text-right`}>Bán 30 ngày</th>
               <th className={`${tableCls.th} text-right`}>Đối thủ</th>
               <th className={tableCls.th}>Phụ trách</th>
             </tr>
@@ -347,15 +356,25 @@ export default async function PricingPage({
                   {marginCell(r)}
                 </td>
                 <td className={tableCls.tdNum}>
-                  {r.competitorCount}
-                  {r.velocity30d ? <div className="text-[11px] text-soft">~{r.velocity30d}đ/ngày</div> : null}
+                  <div className="font-bold">{formatSales30d(r)}</div>
+                  <div className="text-[11px] text-soft">{formatVelocity30d(r.velocity30d)}</div>
+                  <div className="text-[11px] font-semibold text-muted">
+                    {formatRevenue30d(r.revenue30d, r.revenueCurrency)}
+                  </div>
                 </td>
-                <td className={tableCls.td}>{r.owner}</td>
+                <td className={tableCls.tdNum}>{r.competitorCount}</td>
+                <td className={tableCls.td}>
+                  {r.owner === "—" ? (
+                    <span className="text-soft" title="Chưa gán ai phụ trách module pricing">— chưa gán</span>
+                  ) : (
+                    <span className="font-semibold">{r.owner}</span>
+                  )}
+                </td>
               </tr>
             ))}
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={10} className={`${tableCls.td} text-center text-soft`}>
+                <td colSpan={11} className={`${tableCls.td} text-center text-soft`}>
                   Không có SKU nào khớp bộ lọc.
                 </td>
               </tr>

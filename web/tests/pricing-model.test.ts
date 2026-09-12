@@ -1,9 +1,12 @@
 /**
- * Test model Module 2 (P1 — Giá & Featured Offer) sau migration 0016.
+ * Test model Module 2 (P1 — Giá & Featured Offer) sau migration 0016 + 0017.
  *
  * Điểm khoá: vexim_pricing đã trả GIÁ VỐN HIỆU LỰC + giá sàn + biên thật, nên
  * web KHÔNG được tự chế "giá sàn ≈ tổng phí" nữa (lỗi của 0013 làm P1 báo lãi
  * cho SKU đang lỗ). Thiếu giá vốn → NULL + nhãn lý do, không phải 0.
+ *
+ * Từ 0017 view nối thêm doanh số 30 ngày + người phụ trách: SKU CHƯA CÓ ĐƠN phải
+ * giữ NULL (không suy ra 0 đơn/ngày) và cột owner lấy từ iam.module_owner().
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -13,9 +16,15 @@ import {
   COST_BASIS_VI,
   computePricingKpis,
   DEFAULT_MIN_MARGIN_PCT,
+  formatRevenue30d,
+  formatSales30d,
+  formatVelocity30d,
   isCostBlocked,
   mapPricingRow,
+  PRICING_SALES_COLUMNS,
   PRICING_SELECT,
+  revenuePerDay30d,
+  velocitySortValue,
   type PricingRaw,
 } from "../src/lib/data/pricing-model.ts";
 
@@ -50,6 +59,14 @@ function raw(partial: Partial<PricingRaw>): PricingRaw {
     margin_pct: 39.5,
     below_floor: false,
     cost_basis: "cost+fees",
+    /* ↓ 0017: 60 đơn vị / 45 đơn / 7.799,40 USD trong 30 ngày → 2 đơn vị/ngày */
+    units_30d: 60,
+    orders_30d: 45,
+    revenue_30d: 7799.4,
+    revenue_currency: "USD",
+    velocity_30d: 2,
+    last_order_at: "2026-09-11T02:00:00Z",
+    owner: "Minh",
     ...partial,
   };
 }
@@ -228,4 +245,85 @@ test("computePricingKpis: chưa SKU nào có giá vốn → biên trung bình '�
   assert.equal(margin?.value, "—");
   assert.equal(margin?.tone, "warn");
   assert.equal(computePricingKpis([]).find((k) => k.label === "Biên trung bình")?.value, "—");
+});
+
+/* ---------- 0017: doanh số 30 ngày + người phụ trách ---------- */
+
+test("PRICING_SELECT: 7 cột 0017 phải nối ĐÚNG THỨ TỰ ở cuối (sai là PGRST204 sập trang)", () => {
+  const cols = PRICING_SELECT.split(",");
+  assert.deepEqual(cols.slice(-7), [...PRICING_SALES_COLUMNS]);
+});
+
+test("mapPricingRow: velocity30d/units/revenue/owner lấy từ view, không hard-code 0", () => {
+  const r = mapPricingRow(raw({}));
+  assert.equal(r.units30d, 60);
+  assert.equal(r.orders30d, 45);
+  assert.equal(r.velocity30d, 2);
+  assert.equal(r.revenue30d, 7799.4);
+  assert.equal(r.revenueCurrency, "USD");
+  assert.equal(r.lastOrderAt, "2026-09-11T02:00:00Z");
+  assert.equal(r.owner, "Minh");
+});
+
+test("mapPricingRow: SKU CHƯA CÓ ĐƠN → velocity/revenue NULL, không suy ra 0", () => {
+  const r = mapPricingRow(
+    raw({
+      units_30d: null,
+      orders_30d: null,
+      revenue_30d: null,
+      revenue_currency: null,
+      velocity_30d: null,
+      last_order_at: null,
+    }),
+  );
+  assert.equal(r.units30d, null);
+  assert.equal(r.velocity30d, null);
+  assert.equal(r.revenue30d, null);
+  assert.equal(r.revenueCurrency, null);
+  assert.equal(r.lastOrderAt, null);
+});
+
+test("mapPricingRow: view cũ chưa có velocity_30d → tự suy từ units_30d (không bỏ trống oan)", () => {
+  const r = mapPricingRow(raw({ velocity_30d: null, units_30d: 90 }));
+  assert.equal(r.velocity30d, 3);
+});
+
+test("mapPricingRow: chưa gán người phụ trách → '—', không bịa tên", () => {
+  assert.equal(mapPricingRow(raw({ owner: null })).owner, "—");
+});
+
+test("formatSales30d/formatVelocity30d: NULL in '—' chứ không in 0", () => {
+  assert.equal(formatSales30d({ units30d: 60, orders30d: 45 }), "60 đơn vị · 45 đơn");
+  assert.equal(formatSales30d({ units30d: 60, orders30d: null }), "60 đơn vị");
+  assert.equal(formatSales30d({ units30d: null, orders30d: null }), "—");
+  assert.equal(formatVelocity30d(2), "2/ngày");
+  assert.equal(formatVelocity30d(0.2), "0.2/ngày");
+  assert.equal(formatVelocity30d(null), "—");
+});
+
+test("formatRevenue30d: lẫn tiền tệ thì BÁO RÕ, không cộng gộp rồi in một số sai", () => {
+  assert.equal(formatRevenue30d(1234.5, "USD"), "$1,234.50");
+  assert.equal(formatRevenue30d(1234.5, "EUR"), "1,234.50 EUR");
+  assert.equal(formatRevenue30d(1234.5, null), "1,234.50 ⚠ lẫn tiền tệ");
+  assert.equal(formatRevenue30d(null, "USD"), "—");
+});
+
+test("velocitySortValue: SKU chưa có đơn xếp CUỐI khi sort 'Velocity cao'", () => {
+  assert.equal(velocitySortValue({ velocity30d: 2 }), 2);
+  assert.equal(velocitySortValue({ velocity30d: null }), Number.NEGATIVE_INFINITY);
+  const sorted = [
+    { velocity30d: null },
+    { velocity30d: 0.5 },
+    { velocity30d: 3 },
+  ].sort((a, b) => velocitySortValue(b) - velocitySortValue(a));
+  assert.deepEqual(
+    sorted.map((r) => r.velocity30d),
+    [3, 0.5, null],
+  );
+});
+
+test("revenuePerDay30d: tiền mất mỗi ngày nếu mất Buy Box = doanh thu 30 ngày ÷ 30", () => {
+  assert.equal(revenuePerDay30d({ revenue30d: 300 }), 10);
+  assert.equal(revenuePerDay30d({ revenue30d: 100 }), 3.33);
+  assert.equal(revenuePerDay30d({ revenue30d: null }), null);
 });

@@ -1,7 +1,12 @@
 import { Bars, Chip, NoAccess, PageHeader, Panel, tableCls } from "@/components/ui";
 import { requireSession } from "@/lib/auth/session";
 import { readInventoryLatest } from "@/lib/data/inventory";
-import { mapInventoryRow, type InventoryLatestRaw } from "@/lib/data/inventory-model";
+import {
+  formatStockValue,
+  formatUnitCost,
+  mapInventoryRow,
+  type InventoryLatestRaw,
+} from "@/lib/data/inventory-model";
 import { inventoryDetails, inventoryRows } from "@/lib/data/mock";
 import type { PersonaKey } from "@/lib/roles";
 
@@ -90,6 +95,41 @@ async function LiveInventoryDetail({ sku }: { sku: string }) {
           </div>
         ))}
       </div>
+      <Panel
+        title="Giá trị tồn kho"
+        hint="migration 0017 · giá vốn hiệu lực từ catalog.cost_inputs"
+      >
+        {row.unitCost === null ? (
+          <p className="text-[13px] text-muted">
+            <b className="text-amber">Chưa có giá vốn</b> cho SKU này nên chưa định giá được tồn kho — nhập tại{" "}
+            <a href="/finance/costs" className="font-bold text-blue underline underline-offset-2">
+              Giá vốn (F3)
+            </a>. Hệ thống KHÔNG tự ước lượng để tránh báo cáo vốn sai.
+          </p>
+        ) : (
+          <ul className="space-y-1.5 text-[13px] text-muted">
+            <li>
+              Giá vốn hiệu lực: <b>{formatUnitCost(row)}</b>
+              {row.costEffectiveFrom ? ` (áp dụng từ ${row.costEffectiveFrom})` : ""}
+              {row.costSource ? ` · nguồn ${row.costSource}` : ""}
+            </li>
+            <li>
+              Khả dụng {row.fulfillable} × giá vốn ={" "}
+              <b>{formatStockValue(row.stockValue, row.valueCurrency)}</b>
+            </li>
+            <li>
+              Cộng reserved {row.reserved} + đang về {row.inbound} ={" "}
+              <b className="text-accent-ink">
+                {formatStockValue(row.totalStockValue, row.valueCurrency)}
+              </b>{" "}
+              vốn đang nằm ở kho Amazon và trên đường về
+            </li>
+            <li className="text-[12px] text-soft">
+              Tính theo tiền của giá vốn ({row.valueCurrency ?? "—"}), không tự quy đổi sang tiền bán.
+            </li>
+          </ul>
+        )}
+      </Panel>
       <Panel title="Phân bổ theo fulfillment center" hint="cần report GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA">
         <p className="text-[13px] text-muted">
           Dữ liệu phân bổ FC chưa có trong vexim_inventory_latest — cần bổ sung view từ

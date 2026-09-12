@@ -1,7 +1,13 @@
-import { Chip, NoAccess, PageHeader, Panel, tableCls } from "@/components/ui";
+import { Chip, KpiCard, KpiGrid, NoAccess, PageHeader, Panel, tableCls } from "@/components/ui";
 import { LiveInventoryList } from "@/components/inventory/LiveInventory";
 import { requireSession } from "@/lib/auth/session";
 import { inventoryRows } from "@/lib/data/mock";
+import {
+  formatInventoryValueTotal,
+  formatStockValue,
+  formatUnitCost,
+  summarizeInventoryValue,
+} from "@/lib/data/inventory-model";
 import type { PersonaKey } from "@/lib/roles";
 import type { InventoryRow } from "@/lib/types";
 
@@ -83,6 +89,46 @@ export default async function InventoryPage({
           </a>
         ))}
       </div>
+      {(() => {
+        // 0017: demo cũng dùng đúng công thức live để hai bản không kể hai câu chuyện
+        const valueSum = summarizeInventoryValue(inventoryRows);
+        return (
+          <KpiGrid>
+            <KpiCard
+              label="Giá trị tồn kho"
+              value={formatInventoryValueTotal(valueSum)}
+              sub="Σ (khả dụng + reserved + đang về) × giá vốn"
+              tone="flat"
+            />
+            <KpiCard
+              label="SKU chưa có giá vốn"
+              value={String(valueSum.missingCost)}
+              sub={
+                valueSum.missingCost > 0
+                  ? "chưa định giá được — nhập ở Giá vốn (F3)"
+                  : `${valueSum.valued} SKU đã định giá đủ`
+              }
+              tone={valueSum.missingCost > 0 ? "warn" : "up"}
+            />
+            <KpiCard
+              label="SKU sắp hết / hết hàng"
+              value={String(
+                inventoryRows.filter((r) => r.status === "low" || r.status === "out").length,
+              )}
+              sub="cover < 14 ngày"
+              tone="down"
+            />
+            <KpiCard
+              label="Tồn khả dụng"
+              value={inventoryRows
+                .reduce((sum, r) => sum + r.fulfillable, 0)
+                .toLocaleString("en-US")}
+              sub="đơn vị · mọi shop"
+              tone="flat"
+            />
+          </KpiGrid>
+        );
+      })()}
       <Panel title="Danh sách SKU" hint="xếp theo mức rủi ro hết hàng → doanh thu">
         <table className={tableCls.table}>
           <thead>
@@ -95,6 +141,8 @@ export default async function InventoryPage({
               <th className={`${tableCls.th} text-right`}>Bán/ngày</th>
               <th className={`${tableCls.th} text-right`}>Cover</th>
               <th className={`${tableCls.th} text-right`}>Đề xuất nhập</th>
+              <th className={`${tableCls.th} text-right`}>Giá vốn</th>
+              <th className={`${tableCls.th} text-right`}>Giá trị tồn</th>
               <th className={tableCls.th}>Trạng thái</th>
             </tr>
           </thead>
@@ -116,6 +164,31 @@ export default async function InventoryPage({
                 <td className={`${tableCls.tdNum} font-bold`}>
                   {r.suggest === null ? "—" : r.suggest}
                 </td>
+                <td className={tableCls.tdNum}>
+                  {r.unitCost === null ? (
+                    <span className="text-soft" title="Chưa nhập giá vốn — vào Giá vốn (F3)">—</span>
+                  ) : (
+                    <>
+                      {formatUnitCost(r)}
+                      <div className="text-[10.5px] text-soft">
+                        {r.costSource ?? "—"}
+                        {r.costEffectiveFrom ? ` · ${r.costEffectiveFrom}` : ""}
+                      </div>
+                    </>
+                  )}
+                </td>
+                <td className={tableCls.tdNum}>
+                  {r.totalStockValue === null ? (
+                    <span className="text-soft">— chưa định giá</span>
+                  ) : (
+                    <>
+                      <span className="font-bold">{formatStockValue(r.totalStockValue, r.valueCurrency)}</span>
+                      <div className="text-[10.5px] text-soft">
+                        khả dụng {formatStockValue(r.stockValue, r.valueCurrency)}
+                      </div>
+                    </>
+                  )}
+                </td>
                 <td className={tableCls.td}>
                   <Chip tone={statusTone[r.status]}>{r.statusLabel}</Chip>
                 </td>
@@ -130,6 +203,11 @@ export default async function InventoryPage({
           <li><b>Đề xuất nhập</b> = velocity × (lead time + safety 14 ngày) − (khả dụng + reserved + đang về), làm tròn theo case pack.</li>
           <li>SKU mới chưa có lịch sử bán (velocity 0): nhập theo kế hoạch launch — hệ thống không tự sinh số ảo.</li>
           <li>Đơn hàng đang về đã được trừ — tránh nhập chồng lô.</li>
+          <li>
+            <b>Giá trị tồn</b> = (khả dụng + reserved + đang về) × <b>giá vốn hiệu lực</b> theo bậc đang áp dụng,
+            tính bằng TIỀN CỦA GIÁ VỐN (không tự quy đổi sang tiền bán). SKU chưa nhập giá vốn hiện <b>—</b> và
+            đếm riêng ở KPI — không hiện $0 để khỏi báo cáo vốn sai.
+          </li>
         </ul>
       </Panel>
     </>

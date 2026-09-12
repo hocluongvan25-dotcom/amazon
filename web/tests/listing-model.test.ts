@@ -1,18 +1,23 @@
 /**
- * Test model Module 1 (Listing — L1/L2/L4) sau migration 0016.
+ * Test model Module 1 (Listing — L1/L2/L4) sau migration 0016 + 0017.
  *
  * Điểm khoá:
  *   • issue JSONB nguyên văn Amazon (enforcements.actions) phải chuẩn hoá được,
  *     nếu không cột "bị Amazon chặn" luôn trống dù listing đang bị ẩn;
  *   • trạng thái lạ KHÔNG được ép về INACTIVE (đếm nhầm listing chết);
  *   • thiếu dữ liệu (quantity/issues) → null/"—", không hiện 0 giả;
- *   • L4 nêu đúng LÝ DO (stranded reason > enforcement > mã issue) để biết sửa gì.
+ *   • L4 nêu đúng LÝ DO (stranded reason > enforcement > mã issue) để biết sửa gì;
+ *   • 0017: doanh thu 30 ngày + người phụ trách — SKU chưa có đơn phải NULL để
+ *     nút sort "Doanh thu 30 ngày" không xếp listing chết lên đầu.
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
   computeListingKpis,
+  formatRevenue30d,
+  formatRevenuePerDay,
+  LISTING_SALES_COLUMNS,
   LISTINGS_SELECT,
   LISTING_QUEUE_SELECT,
   LISTING_STATUS_TONE,
@@ -22,6 +27,7 @@ import {
   normalizeEnforcements,
   normalizeIssues,
   normalizeStatus,
+  revenueSortValue,
   type ListingRaw,
 } from "../src/lib/data/listing-model.ts";
 import type { ListingStatus } from "../src/lib/types.ts";
@@ -314,4 +320,85 @@ test("computeListingKpis: chưa có issue chi tiết → nhắc chạy listings:
   assert.equal(err?.value, "1");
   assert.match(err?.sub ?? "", /listings:sync --details/);
   assert.equal(computeListingKpis([])[0].value, "0");
+});
+
+/* ---------- 0017: doanh thu 30 ngày + người phụ trách ---------- */
+
+test("LISTINGS_SELECT/QUEUE_SELECT: 7 cột 0017 nối ĐÚNG THỨ TỰ ở cuối", () => {
+  assert.deepEqual(LISTINGS_SELECT.split(",").slice(-7), [...LISTING_SALES_COLUMNS]);
+  assert.deepEqual(LISTING_QUEUE_SELECT.split(",").slice(-7), [...LISTING_SALES_COLUMNS]);
+});
+
+test("LISTING_QUEUE_SELECT vẫn KHÔNG có cột offer (queue view không có → PGRST204)", () => {
+  for (const col of ["buy_box_won", "buy_box_price", "competitor_price", "offer_captured_at"]) {
+    assert.ok(!LISTING_QUEUE_SELECT.split(",").includes(col), `queue select thừa ${col}`);
+  }
+});
+
+test("mapListingRow: doanh thu 30 ngày + owner lấy từ view (hết cảnh 0 và '—' cứng)", () => {
+  const r = mapListingRow(
+    raw({
+      revenue_30d: 2880,
+      revenue_currency: "USD",
+      units_30d: 22,
+      orders_30d: 18,
+      last_order_at: "2026-09-11T02:00:00Z",
+      owner: "Lan",
+    }),
+  );
+  assert.equal(r.revenue30d, 2880);
+  assert.equal(r.revenueCurrency, "USD");
+  assert.equal(r.units30d, 22);
+  assert.equal(r.lastOrderAt, "2026-09-11T02:00:00Z");
+  assert.equal(r.owner, "Lan");
+});
+
+test("mapListingRow: SKU chưa có đơn → revenue30d NULL (sort không đẩy listing chết lên đầu)", () => {
+  const r = mapListingRow(raw({ revenue_30d: null, units_30d: null, owner: null }));
+  assert.equal(r.revenue30d, null);
+  assert.equal(r.units30d, null);
+  assert.equal(r.owner, "—");
+});
+
+test("mapListingQueueItem: L4 có tiền/ngày + owner để biết ai sửa và đang mất bao nhiêu", () => {
+  const q = mapListingQueueItem(
+    raw({
+      status: "STRANDED",
+      stranded_reason: "Stranded — còn hàng tại FC",
+      revenue_30d: 2130,
+      revenue_currency: "USD",
+      owner: "Minh",
+    }),
+  );
+  assert.equal(q.revenue30d, 2130);
+  assert.equal(q.revenuePerDay, "$71.00/ngày");
+  assert.equal(q.owner, "Minh");
+});
+
+test("mapListingQueueItem: chưa có đơn → '—' cả tiền/ngày, chưa gán → owner '—'", () => {
+  const q = mapListingQueueItem(raw({ status: "INACTIVE", revenue_30d: null, owner: null }));
+  assert.equal(q.revenue30d, null);
+  assert.equal(q.revenuePerDay, "—");
+  assert.equal(q.owner, "—");
+});
+
+test("formatRevenue30d/formatRevenuePerDay: đúng tiền tệ, NULL in '—', lẫn tiền tệ thì báo rõ", () => {
+  assert.equal(formatRevenue30d(2880, "USD"), "$2,880.00");
+  assert.equal(formatRevenue30d(2880, "EUR"), "2,880.00 EUR");
+  assert.equal(formatRevenue30d(2880, null), "2,880.00 ⚠ lẫn tiền tệ");
+  assert.equal(formatRevenue30d(null, "USD"), "—");
+  assert.equal(formatRevenuePerDay(300, "USD"), "$10.00/ngày");
+  assert.equal(formatRevenuePerDay(null, "USD"), "—");
+});
+
+test("revenueSortValue: SKU chưa có đơn xếp CUỐI bảng khi sort theo doanh thu", () => {
+  const sorted = [
+    { revenue30d: null },
+    { revenue30d: 95 },
+    { revenue30d: 2880 },
+  ].sort((a, b) => revenueSortValue(b) - revenueSortValue(a));
+  assert.deepEqual(
+    sorted.map((r) => r.revenue30d),
+    [2880, 95, null],
+  );
 });

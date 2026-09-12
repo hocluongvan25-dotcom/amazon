@@ -2,7 +2,12 @@ import { Chip, NoAccess, PageHeader, Panel, tableCls } from "@/components/ui";
 import { LiveListingList } from "@/components/listing/LiveListing";
 import { requireSession } from "@/lib/auth/session";
 import { listingList } from "@/lib/data/mock";
-import { LISTING_STATUS_TONE, LISTING_STATUS_VI } from "@/lib/data/listing-model";
+import {
+  formatRevenue30d,
+  LISTING_STATUS_TONE,
+  LISTING_STATUS_VI,
+  revenueSortValue,
+} from "@/lib/data/listing-model";
 import type { PersonaKey } from "@/lib/roles";
 import type { ListingListRow, ListingStatus } from "@/lib/types";
 
@@ -60,7 +65,8 @@ export default async function ListingListPage({
   rows =
     filters.sort === "sku"
       ? [...rows].sort((a, b) => a.sku.localeCompare(b.sku))
-      : [...rows].sort((a, b) => b.revenue30d - a.revenue30d);
+      // SKU CHƯA CÓ ĐƠN (revenue NULL) xếp cuối — không chen lên đầu như thể doanh thu thấp
+      : [...rows].sort((a, b) => revenueSortValue(b) - revenueSortValue(a));
 
   const shops = [...new Set(listingList.map((r) => r.shop))];
   const brands = [...new Set(listingList.map((r) => r.brand))];
@@ -198,6 +204,7 @@ export default async function ListingListPage({
               <th className={tableCls.th}>Brand</th>
               <th className={`${tableCls.th} text-right`}>Giá</th>
               <th className={`${tableCls.th} text-right`}>Tồn</th>
+              <th className={`${tableCls.th} text-right`}>Doanh thu 30 ngày</th>
               <th className={`${tableCls.th} text-right`}>Issues</th>
               <th className={tableCls.th}>Trạng thái</th>
               <th className={tableCls.th}>Phụ trách</th>
@@ -231,6 +238,12 @@ export default async function ListingListPage({
                   {r.stock === null ? <span className="text-soft">—</span> : r.stock.toLocaleString("en-US")}
                 </td>
                 <td className={tableCls.tdNum}>
+                  <div className="font-bold">{formatRevenue30d(r.revenue30d, r.revenueCurrency)}</div>
+                  <div className="text-[11px] text-soft">
+                    {r.units30d === null ? "chưa có đơn" : `${r.units30d.toLocaleString("en-US")} đơn vị`}
+                  </div>
+                </td>
+                <td className={tableCls.tdNum}>
                   {r.issueErrors > 0 ? (
                     <span className="font-extrabold text-red">{r.issueErrors} lỗi</span>
                   ) : null}
@@ -250,7 +263,7 @@ export default async function ListingListPage({
             ))}
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={10} className={`${tableCls.td} text-center text-soft`}>
+                <td colSpan={11} className={`${tableCls.td} text-center text-soft`}>
                   Không có SKU nào khớp bộ lọc.
                 </td>
               </tr>

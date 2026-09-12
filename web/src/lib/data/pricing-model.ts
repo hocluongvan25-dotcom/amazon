@@ -50,14 +50,37 @@ export type PricingRaw = {
   margin_pct: number | null;
   below_floor: boolean | null;
   cost_basis: CostBasis | string | null;
+  /* ↓ migration 0017: doanh số 30 ngày + người phụ trách (nối CUỐI view) */
+  units_30d: number | null;
+  orders_30d: number | null;
+  revenue_30d: number | null;
+  revenue_currency: string | null;
+  velocity_30d: number | null;
+  last_order_at: string | null;
+  owner: string | null;
 };
 
 /* ------------------------------------------------------------------ */
 /* Select strings                                                      */
 /* ------------------------------------------------------------------ */
 
+/**
+ * PostgREST select theo TÊN: thiếu 1 cột là PGRST204 và SẬP CẢ TRANG P1, nên chuỗi
+ * này phải bám sát cột của `public.vexim_pricing` (0016 + 7 cột nối cuối của 0017).
+ */
 export const PRICING_SELECT =
-  "id,seller_account_id,shop,sku,asin,title,our_price,currency,updated_at,buy_box_won,buy_box_price,competitor_price,offer_captured_at,referral_fee,fba_fee,total_fees,fees_estimated_at,unit_cost,cost_currency,cost_effective_from,cost_source,referral_rate_used,min_margin_rate,other_fee_per_unit,floor_price,gross_profit,margin_pct,below_floor,cost_basis";
+  "id,seller_account_id,shop,sku,asin,title,our_price,currency,updated_at,buy_box_won,buy_box_price,competitor_price,offer_captured_at,referral_fee,fba_fee,total_fees,fees_estimated_at,unit_cost,cost_currency,cost_effective_from,cost_source,referral_rate_used,min_margin_rate,other_fee_per_unit,floor_price,gross_profit,margin_pct,below_floor,cost_basis,units_30d,orders_30d,revenue_30d,revenue_currency,velocity_30d,last_order_at,owner";
+
+/** 7 cột 0017 nối cuối vexim_pricing — harness BƯỚC 18 soát đúng danh sách này. */
+export const PRICING_SALES_COLUMNS = [
+  "units_30d",
+  "orders_30d",
+  "revenue_30d",
+  "revenue_currency",
+  "velocity_30d",
+  "last_order_at",
+  "owner",
+] as const;
 
 /* ------------------------------------------------------------------ */
 /* Nhãn tiếng Việt                                                     */
@@ -155,7 +178,11 @@ export function mapPricingRow(raw: PricingRaw): PricingRow {
   const belowFloor = raw.below_floor ?? (floorPrice !== null && ourPrice > 0 ? ourPrice < floorPrice : null);
 
   // FOEP: chưa có trong DB → null
-  // velocity30d: chưa có trong listings view → 0
+  // Doanh số 30 ngày (0017): view trả NULL khi SKU chưa có đơn nào — GIỮ NULL,
+  // không suy ra 0 (0 đơn thật ≠ chưa có dữ liệu đơn).
+  const units30d = raw.units_30d ?? null;
+  const velocity30d =
+    raw.velocity_30d ?? (units30d === null ? null : Math.round((units30d / 30) * 100) / 100);
 
   return {
     sku: raw.sku,
@@ -171,10 +198,16 @@ export function mapPricingRow(raw: PricingRaw): PricingRow {
     currentMargin,
     marginTone,
     boxStatus,
-    competitorCount: 0, // chưa có trong DB
-    velocity30d: 0, // chưa có trong DB
+    competitorCount: 0, // chưa có trong DB (cần Pricing API — Đợt 2)
+    velocity30d,
     lastPriceChange: timeAgoShort(raw.updated_at),
-    owner: "—", // chưa có RBAC join
+    // iam.module_owner(shop, 'pricing') — tên nhân viên VEXIM, không email/không uuid
+    owner: raw.owner ?? "—",
+    units30d,
+    orders30d: raw.orders_30d ?? null,
+    revenue30d: raw.revenue_30d ?? null,
+    revenueCurrency: raw.revenue_currency ?? null,
+    lastOrderAt: raw.last_order_at ?? null,
     unitCost,
     costCurrency: raw.cost_currency ?? null,
     costEffectiveFrom: raw.cost_effective_from ?? null,
@@ -207,6 +240,53 @@ function timeAgoShort(updatedAt: string): string {
 /* ------------------------------------------------------------------ */
 /* Derived metrics                                                     */
 /* ------------------------------------------------------------------ */
+
+/**
+ * "6 đơn vị · 3 đơn" — NULL nghĩa là CHƯA CÓ ĐƠN trong 30 ngày (không phải bán 0).
+ */
+export function formatSales30d(r: {
+  units30d: number | null;
+  orders30d: number | null;
+}): string {
+  if (r.units30d === null) return "—";
+  const units = r.units30d.toLocaleString("en-US");
+  return r.orders30d === null ? `${units} đơn vị` : `${units} đơn vị · ${r.orders30d} đơn`;
+}
+
+/** Velocity = đơn vị/ngày, làm tròn 2 số — dùng cho nhãn và sort "Velocity cao". */
+export function formatVelocity30d(v: number | null): string {
+  if (v === null) return "—";
+  return `${v.toLocaleString("en-US", { maximumFractionDigits: 2 })}/ngày`;
+}
+
+/**
+ * Tiền 30 ngày. `currency = null` nghĩa là đơn của shop lẫn nhiều tiền tệ → view
+ * KHÔNG cộng gộp, ta cũng không được tự quy đổi (không có tỷ giá thật).
+ */
+export function formatRevenue30d(amount: number | null, currency: string | null): string {
+  if (amount === null) return "—";
+  const n = amount.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  if (currency === null) return `${n} ⚠ lẫn tiền tệ`;
+  return currency === "USD" ? `$${n}` : `${n} ${currency}`;
+}
+
+/**
+ * Giá trị để sort khi cột có thể NULL: SKU CHƯA CÓ ĐƠN xếp CUỐI, không chen lên đầu
+ * như thể velocity thấp nhất (cùng luật với sort biên thấp nhất của 0016).
+ */
+export function velocitySortValue(r: { velocity30d: number | null }): number {
+  return r.velocity30d ?? Number.NEGATIVE_INFINITY;
+}
+
+/** Tiền đang bị đe doạ mỗi ngày nếu mất Buy Box = doanh thu 30 ngày ÷ 30. */
+export function revenuePerDay30d(r: {
+  revenue30d: number | null;
+}): number | null {
+  return r.revenue30d === null ? null : Math.round((r.revenue30d / 30) * 100) / 100;
+}
 
 export function computePricingKpis(rows: PricingRow[]) {
   const holding = rows.filter((r) => r.boxStatus === "holding").length;

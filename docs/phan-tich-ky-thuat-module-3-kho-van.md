@@ -43,6 +43,9 @@ velocity_14d      = (đơn vị bán 14 ngày gần nhất, đã loại 2 ngày 
 days_of_cover     = fulfillable / velocity_14d          (velocity = 0 → ∞, hiển thị "—")
 in_stock %        = SKU có fulfillable > 0 / tổng SKU đang bán
 giá trị tồn       = Σ (fulfillable + reserved + inbound) × unit_cost (bảng cost_inputs)
+                    ✅ ĐÃ CÓ (migration 0017): view vexim_inventory_latest trả stock_value,
+                    total_stock_value, unit_cost, value_currency, value_basis ('cost'|'missing').
+                    Thiếu giá vốn → NULL + 'missing', KHÔNG hiện 0. Tính theo tiền của giá vốn.
 ```
 
 ### 2.2. Đề xuất nhập hàng (I3) — công thức đã chốt ở SOP-01

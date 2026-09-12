@@ -1704,6 +1704,246 @@ await cmp(
 
 await ex("reset role; rollback;");
 
+// ============================================================================
+console.log("\n=== BƯỚC 18: 0017 — ĐỢT B hái quả ngay (doanh số 30 ngày · phụ trách · giá trị tồn) ===");
+// ============================================================================
+ok(
+  await ex(rd("migrations/0017_sales30d_owner_inventory_value.sql"), "0017_sales30d_owner_inventory_value.sql"),
+  "0017 chạy sạch (DO-block tự soát: cột nối CUỐI view · quyền · PII · công thức)",
+);
+
+// Web đọc các view này bằng chuỗi select cố định (PRICING_SELECT / LISTINGS_SELECT /
+// LISTING_QUEUE_SELECT / INVENTORY_SELECT) → cột mới PHẢI nằm cuối, đúng thứ tự;
+// thiếu/sai 1 cột là PostgREST trả PGRST204 và SẬP CẢ TRANG.
+const tailCols = async (view, n) =>
+  (await one(`select string_agg(column_name, ',' order by ordinal_position) c
+     from information_schema.columns
+    where table_schema='public' and table_name='${view}'
+      and ordinal_position > (select max(ordinal_position) - ${n}
+                                from information_schema.columns
+                               where table_schema='public' and table_name='${view}')`)).c;
+
+const SALES_TAIL =
+  "units_30d,orders_30d,revenue_30d,revenue_currency,velocity_30d,last_order_at,owner";
+for (const v of ["vexim_pricing", "vexim_listings", "vexim_listing_queue"]) {
+  ok((await tailCols(v, 7)) === SALES_TAIL, `0017: ${v} nối 7 cột mới Ở CUỐI (không đảo cột 0016)`);
+}
+ok(
+  (await tailCols("vexim_inventory_latest", 8)) ===
+    "unit_cost,cost_currency,cost_effective_from,cost_source,stock_value,total_stock_value,value_currency,value_basis",
+  "0017: vexim_inventory_latest nối 8 cột giá trị tồn Ở CUỐI",
+);
+await cmp(
+  "0017: vexim_sku_sales_30d là security_invoker (RLS bảng gốc vẫn áp)",
+  `select count(*) n from pg_class c join pg_namespace ns on ns.oid=c.relnamespace
+    where ns.nspname='public' and c.relname='vexim_sku_sales_30d'
+      and 'security_invoker=true' = any (c.reloptions)`,
+  1,
+);
+
+// ---- fixture: người phụ trách · listing · đơn hàng · tồn kho · giá vốn -------
+await ex("begin");
+await ex("reset role;");
+const bShop = (await one("select id from connections.seller_accounts order by seller_id limit 1")).id;
+const bPricingRw = "b1000000-0000-4000-8000-000000000001"; // pricing, can_write — gán SAU
+const bPricingRo = "b1000000-0000-4000-8000-000000000002"; // pricing, chỉ đọc — gán TRƯỚC
+const bListing   = "b1000000-0000-4000-8000-000000000003"; // listings
+const bCustomer  = "b1000000-0000-4000-8000-000000000004"; // user của KHÁCH HÀNG
+const bStranger  = "b1000000-0000-4000-8000-000000000005"; // không được gán shop
+ok(
+  await ex(`insert into auth.users(id,email) values
+     ('${bPricingRw}','local-b-prw@example.test'),
+     ('${bPricingRo}','local-b-pro@example.test'),
+     ('${bListing}','local-b-listing@example.test'),
+     ('${bCustomer}','local-b-customer@example.test'),
+     ('${bStranger}','local-b-stranger@example.test');
+   insert into iam.user_profiles(id,display_name,email,vexim_employee) values
+     ('${bPricingRw}','Minh giá','local-b-prw@example.test',true),
+     ('${bPricingRo}','An chỉ đọc','local-b-pro@example.test',true),
+     ('${bListing}','Lan listing','local-b-listing@example.test',true),
+     ('${bCustomer}','Khách của VEXIM','local-b-customer@example.test',false),
+     ('${bStranger}','Người lạ','local-b-stranger@example.test',true);
+   insert into iam.assignments(user_id,seller_account_id,module,can_write,created_at) values
+     ('${bPricingRo}','${bShop}','pricing',false, now() - interval '10 days'),
+     ('${bPricingRw}','${bShop}','pricing',true,  now() - interval '1 day'),
+     ('${bListing}',  '${bShop}','listings',true, now() - interval '3 days'),
+     ('${bCustomer}', '${bShop}','inventory',true, now() - interval '3 days');
+   insert into iam.role_assignments(user_id,role) values
+     ('${bPricingRw}','operator'),('${bPricingRo}','operator'),('${bListing}','operator');`),
+  "0017 fixture: 5 user (pricing rw/ro · listings · khách hàng · người lạ)",
+);
+
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role service_role;");
+ok(
+  await ex(`insert into catalog.listings(seller_account_id,sku,asin,title,status,price,currency,quantity) values
+     ('${bShop}','QW-SELL','B0QW1','bán chạy','ACTIVE',50,'USD',100),
+     ('${bShop}','QW-DEAD','B0QW2','không có đơn nào','INACTIVE',30,'USD',50),
+     ('${bShop}','QW-CANCEL','B0QW3','chỉ có đơn huỷ','ACTIVE',25,'USD',10),
+     ('${bShop}','qw-lowcase','B0QW4','SKU viết thường','ACTIVE',20,'USD',7);
+   insert into sales.orders(id,seller_account_id,amazon_order_id,status,channel,purchase_date,order_total,currency,items_count) values
+     ('b2000000-0000-4000-8000-000000000001','${bShop}','B-OK-1','Shipped','AFN',   now() - interval '5 days',  150,'USD',3),
+     ('b2000000-0000-4000-8000-000000000002','${bShop}','B-OK-2','Pending','AFN',   now() - interval '10 days', 100,'USD',2),
+     ('b2000000-0000-4000-8000-000000000003','${bShop}','B-CANCEL','Cancelled','AFN',now() - interval '2 days', 450,'USD',9),
+     ('b2000000-0000-4000-8000-000000000004','${bShop}','B-OLD','Shipped','AFN',    now() - interval '40 days', 350,'USD',7),
+     ('b2000000-0000-4000-8000-000000000005','${bShop}','B-CASE','Shipped','AFN',   now() - interval '1 day',   50,'USD',1),
+     ('b2000000-0000-4000-8000-000000000006','${bShop}','B-CANCEL2','Canceled','MFN',now() - interval '3 days', 25,'USD',1);
+   insert into sales.order_items(order_id,asin,sku,quantity,item_price) values
+     ('b2000000-0000-4000-8000-000000000001','B0QW1','QW-SELL',3,50),
+     ('b2000000-0000-4000-8000-000000000002','B0QW1','QW-SELL',2,50),
+     ('b2000000-0000-4000-8000-000000000003','B0QW1','QW-SELL',9,50),
+     ('b2000000-0000-4000-8000-000000000004','B0QW1','QW-SELL',7,50),
+     ('b2000000-0000-4000-8000-000000000005','B0QW1','qw-sell',1,50),
+     ('b2000000-0000-4000-8000-000000000006','B0QW3','QW-CANCEL',1,25);
+   insert into inventory.inventory_snapshots(seller_account_id,sku,asin,fulfillable,reserved,inbound,captured_at) values
+     ('${bShop}','QW-SELL','B0QW1',100,20,30, now()),
+     ('${bShop}','QW-DEAD','B0QW2',50,0,0, now()),
+     ('${bShop}','qw-lowcase','B0QW4',7,0,0, now());
+   insert into catalog.cost_inputs(seller_account_id,sku,unit_cost,currency,effective_from,source) values
+     ('${bShop}','QW-SELL',10,'USD',    current_date - 30,'csv'),
+     ('${bShop}','QW-LOWCASE',4,'USD',  current_date - 30,'manual');`),
+  "0017 fixture: 4 listing · 6 đơn (2 huỷ · 1 quá 30 ngày · 1 SKU viết thường) · 3 tồn kho · 2 giá vốn",
+);
+
+// --- 1. iam.module_owner: đúng người · đúng module · ưu tiên can_write --------
+const ownerOf = async (u, moduleCode) => {
+  await ex("reset role;");
+  await ex(`select set_config('request.jwt.claim.sub','${u ?? ""}',false);`);
+  await ex("set role authenticated;");
+  return (await one(`select iam.module_owner('${bShop}','${moduleCode}') as v`)).v;
+};
+ok((await ownerOf(bPricingRw, "pricing")) === "Minh giá",
+   "0017 owner: ưu tiên người can_write dù gán SAU (không lấy bừa người gán đầu tiên)");
+ok((await ownerOf(bListing, "listings")) === "Lan listing",
+   "0017 owner: đúng phạm vi module — hỏi 'listings' ra người phụ trách listing");
+ok((await ownerOf(bPricingRw, "ads")) === null,
+   "0017 owner: module chưa gán ai → NULL (không đoán bừa người phụ trách)");
+ok((await ownerOf(bPricingRw, "inventory")) === null,
+   "0017 owner: user của KHÁCH HÀNG (vexim_employee=false) không bị nêu tên phụ trách");
+ok((await ownerOf(bStranger, "pricing")) === null,
+   "0017 owner: người không đọc được shop KHÔNG dò được tên người phụ trách");
+
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role anon;");
+ok(
+  await mustBlock(`select iam.module_owner('${bShop}','pricing')`),
+  "0017 owner CHẶN: anon không gọi được iam.module_owner",
+);
+
+// --- 2. vexim_sku_sales_30d: cửa sổ 30 ngày · loại đơn huỷ · bất chấp hoa/thường
+await ex("reset role;");
+await ex(`select set_config('request.jwt.claim.sub','${bListing}',false);`);
+await ex("set role authenticated;");
+const sales = {};
+for (const r of (await db.query(
+  `select sku, units_30d, orders_30d, revenue_30d, currency, currency_mixed, last_order_at
+     from public.vexim_sku_sales_30d
+    where seller_account_id='${bShop}' and sku like 'QW%' order by sku`)).rows) {
+  sales[r.sku] = r;
+}
+ok(sales["QW-SELL"]?.units_30d === 6 && sales["QW-SELL"]?.orders_30d === 3
+     && Number(sales["QW-SELL"]?.revenue_30d) === 300,
+   `0017 doanh số: Shipped 3 + Pending 2 + SKU viết thường 1 = 6 đơn vị · 3 đơn · 300.00 (đơn huỷ 9 + đơn 40 ngày 7 bị loại) — ${JSON.stringify(sales["QW-SELL"])}`);
+ok(sales["QW-CANCEL"] === undefined,
+   "0017 doanh số: SKU chỉ có đơn huỷ ('Cancelled' + 'Canceled') → KHÔNG có dòng");
+ok(sales["QW-DEAD"] === undefined,
+   "0017 doanh số: SKU không có đơn → KHÔNG có dòng (để NULL, không suy ra 0 giả)");
+await cmp(
+  "0017 doanh số: last_order_at = đơn KHÔNG huỷ gần nhất (1 ngày trước)",
+  `select count(*) n from public.vexim_sku_sales_30d
+    where seller_account_id='${bShop}' and sku='QW-SELL'
+      and last_order_at between now() - interval '25 hours' and now() - interval '23 hours'`,
+  1,
+);
+
+// --- 3. P1 (vexim_pricing): velocity30d + owner thay cho 0 / "—" ------------
+const p17 = {};
+for (const r of (await db.query(
+  `select sku, units_30d, orders_30d, revenue_30d, revenue_currency, velocity_30d, owner, unit_cost, cost_basis
+     from public.vexim_pricing
+    where seller_account_id='${bShop}'
+      and sku in ('QW-SELL','QW-DEAD','QW-CANCEL','qw-lowcase') order by sku`)).rows) {
+  p17[r.sku] = r;
+}
+ok(Number(p17["QW-SELL"]?.velocity_30d) === 0.2 && p17["QW-SELL"]?.units_30d === 6,
+   `0017 P1: velocity30d = 6 đơn vị / 30 ngày = 0.20 đơn/ngày (thay cho số 0 hard-code) — ${JSON.stringify(p17["QW-SELL"])}`);
+ok(p17["QW-SELL"]?.owner === "Minh giá",
+   `0017 P1: user THƯỜNG thấy tên đồng nghiệp phụ trách nhờ hàm security definer (owner=${p17["QW-SELL"]?.owner})`);
+ok(Number(p17["QW-SELL"]?.revenue_30d) === 300 && p17["QW-SELL"]?.revenue_currency === "USD",
+   "0017 P1: doanh thu 30 ngày 300.00 kèm tiền tệ (không cộng gộp khác tiền)");
+ok(p17["QW-DEAD"]?.units_30d === null && p17["QW-DEAD"]?.velocity_30d === null
+     && p17["QW-DEAD"]?.revenue_30d === null && p17["QW-DEAD"]?.revenue_currency === null,
+   `0017 P1: SKU chưa có đơn → velocity/revenue NULL chứ không phải 0 — ${JSON.stringify(p17["QW-DEAD"])}`);
+ok(Number(p17["qw-lowcase"]?.unit_cost) === 4,
+   `0017 P1: listing SKU viết thường vẫn thấy giá vốn nhập VIẾT HOA (sửa lỗ hổng 0016) — ${JSON.stringify(p17["qw-lowcase"])}`);
+
+// --- 4. L1 (vexim_listings) + L4 (vexim_listing_queue) ----------------------
+const listings = {};
+for (const r of (await db.query(
+  `select sku, units_30d, revenue_30d, owner from public.vexim_listings
+    where seller_account_id='${bShop}'
+      and sku in ('QW-SELL','QW-DEAD') order by sku`)).rows) {
+  listings[r.sku] = r;
+}
+ok(Number(listings["QW-SELL"]?.revenue_30d) === 300 && listings["QW-SELL"]?.owner === "Lan listing",
+   `0017 L1: revenue30d 300.00 + owner module listings (nút sort "Doanh thu 30 ngày" hết sort trên số 0) — ${JSON.stringify(listings["QW-SELL"])}`);
+const queue = await one(`select sku, owner, revenue_30d, units_30d from public.vexim_listing_queue
+   where seller_account_id='${bShop}' and sku='QW-DEAD'`);
+ok(queue?.owner === "Lan listing" && queue?.revenue_30d === null,
+   `0017 L4: queue có người phụ trách + doanh thu NULL cho listing INACTIVE — ${JSON.stringify(queue)}`);
+
+// --- 5. Module 3: GIÁ TRỊ TỒN KHO = Σ tồn × giá vốn hiệu lực ----------------
+const inv = {};
+for (const r of (await db.query(
+  `select sku, fulfillable, reserved, inbound, unit_cost, cost_currency, stock_value,
+          total_stock_value, value_currency, value_basis
+     from public.vexim_inventory_latest
+    where seller_account_id='${bShop}' and sku in ('QW-SELL','QW-DEAD','qw-lowcase') order by sku`)).rows) {
+  inv[r.sku] = r;
+}
+ok(Number(inv["QW-SELL"]?.stock_value) === 1000 && Number(inv["QW-SELL"]?.total_stock_value) === 1500
+     && inv["QW-SELL"]?.value_basis === "cost" && inv["QW-SELL"]?.value_currency === "USD",
+   `0017 Module 3: 100 × 10 = 1.000 · (100+20+30) × 10 = 1.500 USD — ${JSON.stringify(inv["QW-SELL"])}`);
+ok(inv["QW-DEAD"]?.unit_cost === null && inv["QW-DEAD"]?.stock_value === null
+     && inv["QW-DEAD"]?.total_stock_value === null && inv["QW-DEAD"]?.value_basis === "missing",
+   `0017 Module 3: THIẾU giá vốn → giá trị NULL + nhãn 'missing' (I3 không hiện 0 giả) — ${JSON.stringify(inv["QW-DEAD"])}`);
+ok(Number(inv["qw-lowcase"]?.unit_cost) === 4 && Number(inv["qw-lowcase"]?.stock_value) === 28,
+   `0017 Module 3: tồn kho SKU viết thường vẫn định giá được (7 × 4 = 28) — ${JSON.stringify(inv["qw-lowcase"])}`);
+
+// --- 6. RLS: người lạ không thấy gì qua các view mới ------------------------
+await ex(`select set_config('request.jwt.claim.sub','${bStranger}',false);`);
+await cmp(
+  "0017 RLS: người lạ không thấy doanh số 30 ngày của shop",
+  `select count(*) n from public.vexim_sku_sales_30d where seller_account_id='${bShop}'`,
+  0,
+);
+await cmp(
+  "0017 RLS: người lạ không thấy giá trị tồn kho của shop",
+  `select count(*) n from public.vexim_inventory_latest where seller_account_id='${bShop}'`,
+  0,
+);
+await cmp(
+  "0017 RLS: người lạ không thấy dòng P1 của shop",
+  `select count(*) n from public.vexim_pricing where seller_account_id='${bShop}'`,
+  0,
+);
+
+await ex("reset role; rollback;");
+
+// --- 7. idempotent ----------------------------------------------------------
+ok(
+  await ex(rd("migrations/0017_sales30d_owner_inventory_value.sql"), "0017 lần 2"),
+  "0017 idempotent",
+);
+ok((await tailCols("vexim_pricing", 7)) === SALES_TAIL, "0017 lần 2: 7 cột vẫn nối cuối, không nhân đôi");
+await cmp(
+  "0017 lần 2: index order_items không bị tạo trùng",
+  `select count(*) n from pg_indexes where tablename='order_items' and indexname='idx_order_items_order'`,
+  1,
+);
+
 console.log(`\n${"=".repeat(70)}`);
 console.log(fails === 0 ? "TẤT CẢ PASS" : `${fails} MỤC FAIL`);
 console.log("=".repeat(70));

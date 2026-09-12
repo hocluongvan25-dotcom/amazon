@@ -16,8 +16,12 @@ import {
   COST_BASIS_HINT,
   COST_BASIS_VI,
   computePricingKpis,
+  formatRevenue30d,
+  formatSales30d,
+  formatVelocity30d,
   isCostBlocked,
   mapPricingRow,
+  velocitySortValue,
   type PricingRaw,
 } from "@/lib/data/pricing-model";
 import type { BoxStatus, PricingRow } from "@/lib/types";
@@ -133,7 +137,8 @@ export async function LivePricingPage({
       // SKU chưa tính được biên xếp CUỐI (không được chen lên đầu như thể biên thấp nhất)
       case "margin": return (a.currentMargin ?? Number.POSITIVE_INFINITY) - (b.currentMargin ?? Number.POSITIVE_INFINITY);
       case "sku": return a.sku.localeCompare(b.sku);
-      case "velocity": return b.velocity30d - a.velocity30d;
+      // SKU CHƯA CÓ ĐƠN (velocity NULL) xếp cuối — không chen lên đầu như thể bán kém nhất
+      case "velocity": return velocitySortValue(b) - velocitySortValue(a);
       case "risk":
       default: {
         const score = (r: PricingRow) => {
@@ -142,7 +147,7 @@ export async function LivePricingPage({
           if (r.boxStatus === "at_risk") s += 50;
           if (r.belowFloor === true) s += 80;
           if (isCostBlocked(r)) s += 30; // thiếu giá vốn = không quyết định được giá → cần soi
-          s += r.velocity30d / 10;
+          s += (r.velocity30d ?? 0) / 10; // chưa có đơn = không cộng điểm urgency
           return s;
         };
         return score(b) - score(a);
@@ -336,6 +341,7 @@ export async function LivePricingPage({
                   <th className={`${tableCls.th} text-right`}>Thấp nhất</th>
                   <th className={`${tableCls.th} text-right`}>Giá sàn</th>
                   <th className={`${tableCls.th} text-right`}>Biên</th>
+                  <th className={`${tableCls.th} text-right`}>Bán 30 ngày</th>
                   <th className={`${tableCls.th} text-right`}>Đối thủ</th>
                   <th className={tableCls.th}>Phụ trách</th>
                 </tr>
@@ -378,15 +384,33 @@ export async function LivePricingPage({
                       <MarginCell r={r} />
                     </td>
                     <td className={tableCls.tdNum}>
-                      {r.competitorCount}
-                      {r.velocity30d ? <div className="text-[11px] text-soft">~{r.velocity30d}đ/ngày</div> : null}
+                      {/* 0017: đơn vị/đơn/doanh thu 30 ngày từ Orders — NULL thì hiện "—", không hiện 0 */}
+                      <div className="font-bold">{formatSales30d(r)}</div>
+                      <div className="text-[11px] text-soft">
+                        {formatVelocity30d(r.velocity30d)}
+                      </div>
+                      <div
+                        className="text-[11px] font-semibold text-muted"
+                        title="Σ item_price × quantity của đơn không huỷ trong 30 ngày"
+                      >
+                        {formatRevenue30d(r.revenue30d, r.revenueCurrency)}
+                      </div>
                     </td>
-                    <td className={tableCls.td}>{r.owner}</td>
+                    <td className={tableCls.tdNum}>{r.competitorCount}</td>
+                    <td className={tableCls.td}>
+                      {r.owner === "—" ? (
+                        <span className="text-soft" title="Chưa gán ai phụ trách shop này ở module pricing (iam.assignments)">
+                          — chưa gán
+                        </span>
+                      ) : (
+                        <span className="font-semibold">{r.owner}</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
                 {rows.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className={`${tableCls.td} text-center text-soft`}>
+                    <td colSpan={11} className={`${tableCls.td} text-center text-soft`}>
                       Không có SKU nào khớp bộ lọc.
                     </td>
                   </tr>
@@ -402,9 +426,14 @@ export async function LivePricingPage({
               (nhập tại <a href="/finance/costs" className="font-bold text-blue underline underline-offset-2">Giá vốn</a>).
             </p>
             <p className="mt-1.5 text-[13px] text-muted">
+              <span className="font-bold text-[#0b7a55]">Đã có (migration 0017):</span> đơn vị · số đơn · doanh thu
+              30 ngày theo SKU (<code>vexim_sku_sales_30d</code>, loại đơn huỷ) → velocity = đơn vị/ngày để ước
+              thiệt hại khi mất box; và người phụ trách module pricing (<code>iam.assignments</code>). SKU chưa có
+              đơn nào hiện <b>—</b> chứ không hiện 0.
+            </p>
+            <p className="mt-1.5 text-[13px] text-muted">
               <span className="font-bold text-amber">Chưa có:</span> FOEP
-              (getFeaturedOfferExpectedPriceBatch), velocity30d (Orders join), số đối thủ — hiển thị khi worker
-              sync Pricing API.
+              (getFeaturedOfferExpectedPriceBatch), số đối thủ — hiển thị khi worker sync Pricing API.
             </p>
           </Panel>
         </>

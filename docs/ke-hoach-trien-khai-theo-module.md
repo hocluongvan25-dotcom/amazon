@@ -52,10 +52,10 @@ Mỗi module gồm 6 phần:
 
 | # | Màn hình | Nội dung chính | Cấp |
 |---|---|---|---|
-| L1 | **Danh sách listing** | Bảng: ảnh, SKU, ASIN, tiêu đề, trạng thái (ACTIVE/INACTIVE/STRANDED…), giá, tồn, số issues, người phụ trách. Filter: shop / trạng thái / loại lỗi / brand. Tìm kiếm, sort theo doanh thu/SKU. Hành động hàng loạt: export, gán người xử lý | 🟢 |
+| L1 | **Danh sách listing** | Bảng: ảnh, SKU, ASIN, tiêu đề, trạng thái (ACTIVE/INACTIVE/STRANDED…), giá, tồn, số issues, người phụ trách. Filter: shop / trạng thái / loại lỗi / brand. Tìm kiếm, sort theo doanh thu/SKU. Hành động hàng loạt: export, gán người xử lý · ✅ **0017**: doanh thu + đơn vị 30 ngày (`vexim_sku_sales_30d`) và người phụ trách (`iam.module_owner`) — hết cảnh sort theo toàn số 0 | 🟢 |
 | L2 | **Chi tiết listing** | Đầy đủ thuộc tính hiện có trên Amazon (theo product type), danh sách **issues** đúng mã lỗi Amazon (thiếu ảnh, thiếu thuộc tính bắt buộc…), lịch sử thay đổi, tình trạng offer & Buy Box, doanh thu 30 ngày của SKU | 🟢 |
 | L3 | **Trình soạn/sửa listing** (content editor) | Form **động theo product type** (trường bắt buộc/bắt buộc có điều kiện lấy từ schema Amazon): tiêu đề, bullet points, mô tả, từ khóa backend, ảnh, variation, `fulfillment_availability`, `purchasable_offer`. Luồng: **Draft → Trưởng phòng duyệt → Publish**. Kiểm tra hạn chế danh mục trước khi đăng | 🟡 |
-| L4 | **Hàng đợi inactive/stranded** | Queue theo SOP-03: mỗi dòng = 1 SKU lỗi + nguyên nhân + đề xuất sửa + ai giữ | 🟢 |
+| L4 | **Hàng đợi inactive/stranded** | Queue theo SOP-03: mỗi dòng = 1 SKU lỗi + nguyên nhân + đề xuất sửa + ai giữ · ✅ **0017**: thêm "tiền đang mất"/ngày và xếp hàng đợi theo mức ưu tiên → doanh thu 30 ngày | 🟢 |
 | L5 | **A+ Content** | Danh sách & quản lý A+ của shop (yêu cầu Brand Registry) | 🔵 |
 
 ### Ánh xạ API (đã kiểm chứng docs Amazon)
@@ -93,7 +93,7 @@ Checklist nội dung chuẩn khi tạo listing mới (tiêu đề theo formula, 
 
 | # | Màn hình | Nội dung chính | Cấp |
 |---|---|---|---|
-| P1 | **Bảng giá & Featured Offer** | Mỗi SKU: giá hiện tại, **FOEP** (giá để vào Featured Offer), giá cạnh tranh tham chiếu, đang giữ box hay không, **giá sàn** (vốn + phí + biên tối thiểu), biên lãi hiện tại. Lọc: SKU mất box / sắp mất / dưới giá sàn | 🟢 |
+| P1 | **Bảng giá & Featured Offer** | Mỗi SKU: giá hiện tại, **FOEP** (giá để vào Featured Offer), giá cạnh tranh tham chiếu, đang giữ box hay không, **giá sàn** (vốn + phí + biên tối thiểu), biên lãi hiện tại. Lọc: SKU mất box / sắp mất / dưới giá sàn · ✅ **0017**: velocity 30 ngày (đơn vị/ngày) + doanh thu 30 ngày để ước thiệt hại khi mất box, và người phụ trách module pricing | 🟢 |
 | P2 | **Chi tiết giá 1 SKU** | Lịch sử giá 30–90 ngày, danh sách offer đối thủ (giá + vận chuyển + kênh fulfil), breakdown giá sàn: giá vốn + referral fee + FBA fee + biên | 🟢 |
 | P3 | **Duyệt & áp giá** | Hàng chờ duyệt: SKU, giá cũ → mới, % thay đổi, lý do (đề xuất tự động hoặc thủ công). Áp: ≤2% operator tự duyệt, >2% trưởng phòng duyệt. Ghi audit + rollback được | 🟢 |
 | P4 | **Quy tắc giá tự động** | Luật kiểu "nếu mất box > 2h và còn dư trên giá sàn → điều theo FOEP" (chạy có giới hạn + duyệt) | 🔵 |
@@ -131,9 +131,9 @@ Giá vốn từng SKU (import Excel/API nội bộ), biên tối thiểu %, ngư
 
 | # | Màn hình | Nội dung chính | Cấp |
 |---|---|---|---|
-| I1 | **Tồn kho theo SKU** | Bảng: SKU, ảnh, tồn khả dụng / reserved / đang về (inbound), **days of cover**, velocity 14 ngày, SKU sắp hết (đỏ), tồn lâu. Sort theo doanh thu/SKU | 🟢 |
-| I2 | **Chi tiết tồn 1 SKU** | Biểu đồ tồn + doanh số 90 ngày, phân bổ theo fulfillment center, lịch sử nhận hàng | 🟢 |
-| I3 | **Kế hoạch nhập hàng** | Danh sách SKU cần nhập (đề xuất tự động = velocity × (lead time + safety) − tồn − đang về) → chốt số lượng + giá vốn → duyệt → **tạo inbound plan** → theo dõi | 🟡 (đọc 🟢) |
+| I1 | **Tồn kho theo SKU** | Bảng: SKU, ảnh, tồn khả dụng / reserved / đang về (inbound), **days of cover**, velocity 14 ngày, SKU sắp hết (đỏ), tồn lâu. Sort theo doanh thu/SKU · ✅ **0017**: **giá trị tồn kho** = Σ (khả dụng + reserved + đang về) × giá vốn hiệu lực, theo tiền của giá vốn; SKU thiếu giá vốn hiện "—" và đếm riêng ở KPI | 🟢 |
+| I2 | **Chi tiết tồn 1 SKU** | Biểu đồ tồn + doanh số 90 ngày, phân bổ theo fulfillment center, lịch sử nhận hàng · ✅ **0017**: panel "Giá trị tồn kho" diễn giải vốn hiệu lực → khả dụng × vốn → cộng reserved + đang về | 🟢 |
+| I3 | **Kế hoạch nhập hàng** | Danh sách SKU cần nhập (đề xuất tự động = velocity × (lead time + safety) − tồn − đang về) → chốt số lượng + giá vốn → duyệt → **tạo inbound plan** → theo dõi · ✅ **0017**: cột giá vốn + **giá trị lô** = đề xuất × giá vốn hiệu lực (thiếu giá vốn thì ghi rõ "— chưa có giá vốn", không in $0) | 🟡 (đọc 🟢) |
 | I4 | **Inbound shipments** | Bảng lô hàng: trạng thái (WORKING/SHIPPED/RECEIVING/CLOSED…), số lượng, FC đích, ETA; cảnh báo "nhận thiếu so với kế hoạch" | 🟡 (đọc 🟢) |
 
 ### Ánh xạ API (đã kiểm chứng)
@@ -152,7 +152,7 @@ Giá vốn từng SKU (import Excel/API nội bộ), biên tối thiểu %, ngư
 - Notification **`FBA_SHIPMENT_STATUS`**? — dùng báo cáo + `getShipment` theo lịch cho I4 (an toàn hơn vì không phải shop nào cũng có notification type này)
 
 ### Đầu ra cho dashboard
-Alert `stockout_risk` → SOP-01 (toàn bộ vòng đời nằm ở I3). KPI: số SKU sắp hết, in-stock %, giá trị tồn.
+Alert `stockout_risk` → SOP-01 (toàn bộ vòng đời nằm ở I3). KPI: số SKU sắp hết, in-stock %, giá trị tồn (✅ **0017** đã tính được từ giá vốn hiệu lực).
 
 ### Input VEXIM
 Lead time nhập hàng (VN→US theo từng đường: nhanh/chậm), tồn kho ngoài Amazon (nếu có), safety stock chuẩn.
@@ -322,6 +322,7 @@ Alert `account_health`, `odr_threshold` → SOP-08. KPI: số shop xanh/vàng/đ
 | 3 | Log tin nhắn buyer (O5) | **Đợt 1: form nhập thủ công 30 giây/tin** (CSKH). **Đợt 2: inbound email parse tự động** (Postmark/Resend webhook → Supabase Edge Function → `buyer_messages`) |
 | 4 | Giá vốn | **Import Excel/CSV theo template + nhập tay SKU lẻ** — lưu theo khoảng thời gian hiệu lực (bảng `catalog.cost_inputs`, migration 0003). API nội bộ: cân nhắc ở Đợt 3 · ✅ **ĐÃ XONG (Đợt A, 12/09)**: trang `/finance/costs` + template CSV tải trong app + import atomic (migration 0016) |
 | 5 | Thứ tự build Đợt 1 | **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** — Listing-đọc lên trước Giá (là dữ liệu nền SKU master cho Giá & Kho) |
+| 6 | Doanh số 30 ngày · người phụ trách · giá trị tồn | ✅ **ĐÃ XONG (Đợt B, 12/09)** — migration `0017`: view `vexim_sku_sales_30d` (loại đơn huỷ, SKU không có đơn → NULL chứ không 0), `iam.module_owner()` (security definer vì RLS `iam.*` chỉ cho đọc chính mình; chỉ trả TÊN, không email/uuid), 7 cột nối cuối `vexim_pricing`/`vexim_listings`/`vexim_listing_queue`, 8 cột giá trị nối cuối `vexim_inventory_latest`, và sửa `effective_cost_row()` tra SKU không phân biệt hoa/thường |
 | + | Buyer Communication, A+ (L5), auto-pricing (P4), MCF | **Defer đúng kế hoạch** 🟡/🔵 — không xin role/module trước khi có tính năng thật |
 
 ---

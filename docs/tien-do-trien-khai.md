@@ -2,6 +2,77 @@
 
 > Cập nhật: 12/09/2026 · Thứ tự build đã chốt: **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** (21 màn Đợt 1)
 
+## Cập nhật 12/09 — ĐỢT B: "hái quả ngay" (migration 0017 · doanh số 30 ngày · người phụ trách · giá trị tồn kho)
+
+Đợt A mở khoá giá vốn + ghi listing thật. Đợt B lấy nốt **ba thứ dữ liệu ĐÃ CÓ SẴN trong DB nhưng
+UI vẫn để số 0 / dấu "—"**, không phải chờ thêm API nào của Amazon:
+
+- **Migration `0017_sales30d_owner_inventory_value.sql`** (idempotent + self-check 11 mục: cột nối
+  CUỐI view / quyền / PII / công thức / khớp bảng gốc / idempotent):
+  - **`public.vexim_sku_sales_30d`** (mới, `security_invoker`): MỘT định nghĩa doanh số 30 ngày theo
+    (shop × SKU) từ `sales.orders ⋈ sales.order_items` — `units_30d`, `orders_30d`, `revenue_30d`
+    (Σ `item_price × quantity`), `currency` + cờ `currency_mixed`, `last_order_at`. **Loại đơn huỷ**
+    (cả hai cách viết `Cancelled`/`Canceled` của report lẫn API) và `Unfulfillable`; đơn `Pending`
+    VẪN TÍNH vì P1 cần "cầu thật" để ước thiệt hại khi mất Buy Box. SKU không có đơn → **không có
+    dòng** (view để NULL, không suy ra 0). *Khác `inventory.units_sold_per_day()` (0005): hàm đó chỉ
+    đếm Shipped/Delivered 14 ngày để tính velocity NHẬP HÀNG — hai con số cho hai quyết định khác nhau.*
+  - **`iam.module_owner(p_seller, p_module)`**: tên nhân viên VEXIM phụ trách shop ở module đó
+    (ưu tiên `can_write`, rồi người gán sớm nhất). Bắt buộc là **`security definer`** vì RLS của
+    `iam.assignments`/`iam.user_profiles` chỉ cho đọc CHÍNH MÌNH — join thẳng trong view
+    `security_invoker` sẽ ra NULL với mọi user thường và cột "Phụ trách" chết. Chỉ trả **tên hiển thị**
+    (không email, không uuid → không phải PII), bỏ qua user của khách hàng (`vexim_employee = false`),
+    trả NULL nếu người gọi không đọc được shop, và **revoke khỏi `public`/`anon`**.
+  - **`vexim_pricing` (P1) · `vexim_listings` (L1/L2) · `vexim_listing_queue` (L4)** nối THÊM 7 cột ở
+    CUỐI: `units_30d, orders_30d, revenue_30d, revenue_currency, velocity_30d, last_order_at, owner`
+    (P1 lấy owner module `pricing`, L1/L4 lấy module `listings`; `velocity_30d = units_30d / 30`).
+    Nối cuối để web đang select theo tên không vỡ (bài học PGRST204).
+  - **`vexim_inventory_latest` (Module 3)** nối THÊM 8 cột ở CUỐI: `unit_cost, cost_currency,
+    cost_effective_from, cost_source, stock_value, total_stock_value, value_currency, value_basis`.
+    `stock_value = fulfillable × giá vốn`, `total_stock_value = (fulfillable + reserved + inbound) ×
+    giá vốn` — tra giá vốn NGOÀI khối `distinct on` để mỗi (shop × SKU) chỉ tra một lần. Tính theo
+    **TIỀN CỦA GIÁ VỐN** (VEXIM nhập VND, bán USD → không tự quy đổi); thiếu giá vốn →
+    `value_basis = 'missing'` + các cột giá trị NULL.
+  - **Sửa lỗ hổng còn lại của 0016:** `catalog.effective_cost_row()` nay so SKU
+    **không phân biệt hoa/thường** (`cost_inputs.sku` luôn VIẾT HOA vì `apply_cost_input` chuẩn hoá,
+    còn `listings.sku`/`inventory_snapshots.sku` giữ nguyên xi như report) — hết cảnh "đã nhập giá vốn
+    mà P1/Module 3 vẫn báo thiếu" chỉ vì một chữ thường. Sửa ở MỘT chỗ nên `effective_cost()`,
+    `vexim_pricing`, `vexim_cost_coverage` và view tồn kho cùng hưởng.
+  - Index `idx_order_items_order` (aggregate 30 ngày đi qua join `order_id`, trước đó bảng chỉ có PK).
+- **Web — số thật thay cho 0/"—" (demo và live dùng chung một model):**
+  - **P1**: cột mới **"Bán 30 ngày"** (đơn vị · số đơn · velocity/ngày · doanh thu 30 ngày), owner hiện
+    "— chưa gán" khi DB chưa gán ai; sort "Velocity cao" và điểm rủi ro **null-safe** (SKU chưa có đơn
+    xếp CUỐI, không chen lên đầu như thể bán kém nhất). `velocity30d` đổi sang `number | null`.
+  - **L1**: cột mới **"Doanh thu 30 ngày"** + **"Phụ trách"** → nút sort "Doanh thu 30 ngày" hết xếp
+    theo toàn số 0; `revenue30d` thành `number | null`.
+  - **L4**: thêm cột **"Tiền đang mất"** (doanh thu/ngày + tổng 30 ngày) và **xếp hàng đợi theo tiền**:
+    cùng mức ưu tiên thì listing đang mất nhiều tiền hơn lên trước (`sortQueueByRisk` dùng chung cho
+    cả overview); owner + SLA hết là "—".
+  - **Module 3**: I1 thêm KPI **"Giá trị tồn kho"** · **"SKU chưa có giá vốn"** và 2 cột
+    *Giá vốn* / *Giá trị tồn* (kèm phần chỉ tính khả dụng); I2 thêm panel **"Giá trị tồn kho"** diễn giải
+    từng bước (giá vốn hiệu lực · khả dụng × vốn · cộng reserved + đang về); I3 hết cảnh
+    `unitCost: "—", value: "—"` — giá trị lô = đề xuất nhập × giá vốn, thiếu giá vốn thì ghi thẳng
+    "— chưa có giá vốn" + nhãn "Nháp — thiếu giá vốn" (vàng) và KPI đếm số lô chưa định giá được.
+    Cộng tiền **theo từng tiền tệ** (`summarizeInventoryValue`) — không bao giờ cộng VND với USD.
+- **Kiểm chứng local (chạy thật, không suy luận):** `supabase npm test` **TẤT CẢ PASS** (BƯỚC 1..18;
+  BƯỚC 18 dựng 5 user + 4 listing + 6 đơn (2 huỷ · 1 quá 30 ngày · 1 SKU viết thường) + 3 tồn kho +
+  2 giá vốn rồi soát: `velocity_30d = 6/30 = 0.20`, doanh thu 300.00, đơn huỷ/đơn 40 ngày bị loại,
+  SKU không có đơn → NULL chứ không phải 0, owner đúng theo module + ưu tiên `can_write`, user lạ
+  KHÔNG dò được tên, `anon` bị chặn gọi hàm, `100 × 10 = 1.000` và `(100+20+30) × 10 = 1.500`,
+  thiếu giá vốn → NULL + `missing`, SKU viết thường vẫn định giá được, RLS 3 view, 0017 chạy 2 lần) ·
+  `web npm test` **113/113** (+30 test: `inventory-model.test.ts` mới 13 test + mở rộng
+  pricing/listing model) · `worker npm test` **293/293** · `npx tsc --noEmit` sạch · 8 trang
+  (`/pricing`, `/listing/list`, `/listing/queue`, `/fulfillment`, `/fulfillment/inventory`,
+  `/fulfillment/inventory/detail`, `/fulfillment/restock`, `/finance/costs`) trả HTTP 200.
+
+### Chờ VEXIM (Đợt B)
+
+- ☐ Chạy `supabase/migrations/0017_sales30d_owner_inventory_value.sql` trong SQL Editor (sau `0016`).
+- ☐ **Gán người phụ trách** trong `iam.assignments` theo (shop × module `pricing` / `listings` /
+  `inventory`) — chưa gán thì cột "Phụ trách" hiện "— chưa gán" (có chủ đích, không tự bịa tên).
+- ☐ Chạy `orders:sync` để có đơn 30 ngày: chưa có đơn thì P1/L1 hiện "—" chứ không hiện 0.
+- ☐ Nhập giá vốn cho SKU còn tồn (`/finance/costs`): SKU thiếu giá vốn sẽ hiện "— chưa định giá"
+  ở I1/I2 và "— chưa có giá vốn" ở I3, đồng thời bị đếm trong KPI "SKU chưa có giá vốn".
+
 ## Cập nhật 12/09 — ĐỢT A: gỡ chặn dữ liệu lõi (migration 0016 · giá vốn · ghi listing · P1 dùng giá vốn)
 
 Ba việc chặn nhau suốt Đợt 1 đã được gỡ theo đúng thứ tự **giá vốn → ghi listing → pricing**:
@@ -526,7 +597,7 @@ nên không phụ thuộc bước này).
 - ✅ Tạo project Supabase (`pitmyzovjwflkyoqjbkz`) + set 14 biến môi trường trên Vercel — **xong 12/09**
 - ☐ **Chạy `0006` rồi `0007` trong SQL Editor** (dọn fixture test + tạo super_admin/alerts)
 - ☐ Chạy `0008` → `0009` → **`0010`** (wrapper RPC · shop production · hạ tầng Module 4/6/7)
-- ☐ ✅ `0011`/`0012`/`0013` đã chạy · ☐ **`0014`** (trình soạn listing L3) · ☐ **`0015`** (bồi hoàn FBA + lợi nhuận SKU) · ☐ **`0016`** (Đợt A: giá vốn + ghi listing + `vexim_pricing` dùng giá vốn)
+- ☐ ✅ `0011`/`0012`/`0013` đã chạy · ☐ **`0014`** (trình soạn listing L3) · ☐ **`0015`** (bồi hoàn FBA + lợi nhuận SKU) · ☐ **`0016`** (Đợt A: giá vốn + ghi listing + `vexim_pricing` dùng giá vốn) · ☐ **`0017`** (Đợt B: doanh số 30 ngày + người phụ trách + giá trị tồn kho)
 - ☐ **Thêm `CRON_SECRET` trên Vercel** (Production + Preview) → Redeploy
 - ☐ `AMAZON_LWA_CLIENT_ID` / `_CLIENT_SECRET` / `_REFRESH_TOKEN` khi Developer Profile được duyệt — thiếu 3 biến này thì worker chỉ chạy demo trong bộ nhớ (an toàn, không ghi DB thật)
 - ☐ 4 thông tin thật cho landing page (email/phone/địa chỉ/tên pháp lý)

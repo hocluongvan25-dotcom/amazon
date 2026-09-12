@@ -11,6 +11,10 @@ import {
   mapInboundRow,
   computeFulfillKpis,
   buildSkuStock,
+  formatInventoryValueTotal,
+  formatStockValue,
+  formatUnitCost,
+  summarizeInventoryValue,
   type InventoryLatestRaw,
   type InboundShipmentRaw,
 } from "@/lib/data/inventory-model";
@@ -67,6 +71,10 @@ export async function LiveInventoryList({ filter }: { filter: string }) {
     ["aged", "Tồn lâu >365 ngày", `${allRows.filter((r) => r.status === "aged").length}`],
   ];
 
+  // 0017: giá trị tồn = Σ (khả dụng + reserved + đang về) × giá vốn hiệu lực
+  const valueSum = summarizeInventoryValue(allRows);
+  const lowOrOut = allRows.filter((r) => r.status === "low" || r.status === "out").length;
+
   const now = new Date();
   const latestCapture = rawRows[0]?.captured_at
     ? new Date(rawRows[0].captured_at)
@@ -103,11 +111,44 @@ export async function LiveInventoryList({ filter }: { filter: string }) {
       {failed ? (
         <Panel title="Không tải được dữ liệu">
           <p role="alert">
-            Không thể đọc Supabase. Kiểm tra migration 0011, quyền SELECT,
+            Không thể đọc Supabase. Kiểm tra migration 0011/0017, quyền SELECT,
             RLS và phiên đăng nhập rồi tải lại.
           </p>
         </Panel>
       ) : (
+        <>
+        <KpiGrid>
+          <KpiCard
+            label="Giá trị tồn kho"
+            value={formatInventoryValueTotal(valueSum)}
+            sub="Σ (khả dụng + reserved + đang về) × giá vốn"
+            tone={valueSum.byCurrency.length === 0 ? "warn" : "flat"}
+          />
+          <KpiCard
+            label="SKU chưa có giá vốn"
+            value={String(valueSum.missingCost)}
+            sub={
+              valueSum.missingCost > 0
+                ? "chưa định giá được — nhập ở /finance/costs"
+                : `${valueSum.valued} SKU đã định giá đủ`
+            }
+            tone={valueSum.missingCost > 0 ? "warn" : "up"}
+          />
+          <KpiCard
+            label="SKU sắp hết / hết hàng"
+            value={String(lowOrOut)}
+            sub="cover < 14 ngày"
+            tone={lowOrOut > 0 ? "down" : "flat"}
+          />
+          <KpiCard
+            label="Tồn khả dụng"
+            value={allRows
+              .reduce((sum, r) => sum + r.fulfillable, 0)
+              .toLocaleString("en-US")}
+            sub="đơn vị · mọi shop"
+            tone="flat"
+          />
+        </KpiGrid>
         <Panel title="Danh sách SKU" hint="xếp theo mức rủi ro hết hàng → doanh thu">
           <table className={tableCls.table}>
             <thead>
@@ -120,6 +161,8 @@ export async function LiveInventoryList({ filter }: { filter: string }) {
                 <th className={`${tableCls.th} text-right`}>Bán/ngày</th>
                 <th className={`${tableCls.th} text-right`}>Cover</th>
                 <th className={`${tableCls.th} text-right`}>Đề xuất nhập</th>
+                <th className={`${tableCls.th} text-right`}>Giá vốn</th>
+                <th className={`${tableCls.th} text-right`}>Giá trị tồn</th>
                 <th className={tableCls.th}>Trạng thái</th>
               </tr>
             </thead>
@@ -144,6 +187,39 @@ export async function LiveInventoryList({ filter }: { filter: string }) {
                   <td className={`${tableCls.tdNum} font-bold`}>
                     {r.suggest === null ? "—" : r.suggest}
                   </td>
+                  {/* 0017: giá vốn hiệu lực — thiếu thì "—" kèm việc cần làm, không đoán */}
+                  <td className={tableCls.tdNum}>
+                    {r.unitCost === null ? (
+                      <span
+                        className="text-soft"
+                        title="Chưa nhập giá vốn cho SKU này — nhập tại /finance/costs"
+                      >
+                        —
+                      </span>
+                    ) : (
+                      <>
+                        {formatUnitCost(r)}
+                        <div className="text-[10.5px] text-soft">
+                          {r.costSource ?? "—"}
+                          {r.costEffectiveFrom ? ` · ${r.costEffectiveFrom}` : ""}
+                        </div>
+                      </>
+                    )}
+                  </td>
+                  <td className={tableCls.tdNum}>
+                    {r.totalStockValue === null ? (
+                      <span className="text-soft">— chưa định giá</span>
+                    ) : (
+                      <>
+                        <span className="font-bold">
+                          {formatStockValue(r.totalStockValue, r.valueCurrency)}
+                        </span>
+                        <div className="text-[10.5px] text-soft" title="chỉ tính phần khả dụng × giá vốn">
+                          khả dụng {formatStockValue(r.stockValue, r.valueCurrency)}
+                        </div>
+                      </>
+                    )}
+                  </td>
                   <td className={tableCls.td}>
                     <Chip tone={statusTone[r.status]}>{r.statusLabel}</Chip>
                   </td>
@@ -152,6 +228,7 @@ export async function LiveInventoryList({ filter }: { filter: string }) {
             </tbody>
           </table>
         </Panel>
+        </>
       )}
       <Panel title="Nguyên tắc tính" hint="đúng docs/phan-tich-ky-thuat-module-3-kho-van.md">
         <ul className="list-disc space-y-1.5 pl-5 text-[13px] text-muted">
@@ -159,6 +236,11 @@ export async function LiveInventoryList({ filter }: { filter: string }) {
           <li><b>Đề xuất nhập</b> = velocity × (lead time + safety 14 ngày) − (khả dụng + reserved + đang về), làm tròn theo case pack.</li>
           <li>SKU mới chưa có lịch sử bán (velocity 0): nhập theo kế hoạch launch — hệ thống không tự sinh số ảo.</li>
           <li>Đơn hàng đang về đã được trừ — tránh nhập chồng lô.</li>
+          <li>
+            <b>Giá trị tồn</b> (migration 0017) = (khả dụng + reserved + đang về) × <b>giá vốn hiệu lực</b> của
+            bậc đang áp dụng (<code>catalog.effective_cost</code>) — tính theo TIỀN CỦA GIÁ VỐN, không tự quy đổi
+            sang tiền bán. SKU chưa nhập giá vốn hiện <b>—</b> và được đếm riêng ở KPI, không hiện 0.
+          </li>
         </ul>
       </Panel>
     </>

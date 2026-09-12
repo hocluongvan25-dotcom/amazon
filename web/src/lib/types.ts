@@ -184,7 +184,23 @@ export type InventoryRow = {
   agedDays: number | null;
   status: "out" | "low" | "ok" | "aged";
   statusLabel: string;
+  /* ↓ migration 0017: giá vốn hiệu lực + GIÁ TRỊ TỒN KHO (Σ tồn × unit_cost) */
+  /** Giá vốn hiệu lực hôm nay (catalog.effective_cost) — NULL khi chưa nhập. */
+  unitCost: number | null;
+  costCurrency: string | null;
+  costEffectiveFrom: string | null;
+  costSource: string | null;
+  /** fulfillable × unit_cost. NULL khi thiếu giá vốn — KHÔNG hiện 0 giả. */
+  stockValue: number | null;
+  /** (fulfillable + reserved + inbound) × unit_cost = vốn đang kẹt ở FC + đang về. */
+  totalStockValue: number | null;
+  /** Tiền tệ của giá vốn: VEXIM nhập VND, bán USD → không tự quy đổi ở tầng view. */
+  valueCurrency: string | null;
+  valueBasis: InventoryValueBasis;
 };
+
+/** 'cost' = đã định giá được · 'missing' = chưa có giá vốn (I3 để "—", không đoán). */
+export type InventoryValueBasis = "cost" | "missing";
 
 export type InventoryDetailMock = {
   sku: string;
@@ -386,9 +402,22 @@ export type PricingRow = {
   marginTone: "red" | "amber" | "green" | "gray"; // <0 đỏ · <biên tối thiểu vàng · gray = chưa tính được
   boxStatus: BoxStatus;
   competitorCount: number;
-  velocity30d: number; // đơn/ngày — để ước tính tổn thất khi mất box
+  /**
+   * Đơn vị bán/ngày trong 30 ngày (units_30d ÷ 30) — để ước tính tổn thất khi mất box.
+   * NULL = chưa có đơn nào trong 30 ngày (hoặc shop chưa sync Orders) — KHÔNG phải 0.
+   */
+  velocity30d: number | null;
   lastPriceChange: string;
+  /** Người phụ trách module pricing của shop (iam.assignments) — "—" khi chưa gán. */
   owner: string;
+  /* ↓ migration 0017: doanh số 30 ngày theo SKU (nguồn: vexim_sku_sales_30d) */
+  units30d: number | null;
+  orders30d: number | null;
+  /** Doanh thu 30 ngày (Σ item_price × quantity, loại đơn huỷ). NULL = chưa có đơn. */
+  revenue30d: number | null;
+  /** NULL khi đơn của shop lẫn >1 tiền tệ → không cộng gộp được, UI báo rõ. */
+  revenueCurrency: string | null;
+  lastOrderAt: string | null;
   /* ↓ migration 0016: giá vốn hiệu lực + các thành phần của công thức sàn */
   unitCost: number | null; // giá vốn hiệu lực hôm nay (catalog.effective_cost)
   costCurrency: string | null;
@@ -491,8 +520,17 @@ export type ListingListRow = {
   stock: number | null;
   issueErrors: number;
   issueWarnings: number;
+  /** Người phụ trách module listings của shop (iam.assignments) — "—" khi chưa gán. */
   owner: string;
-  revenue30d: number; // USD — để sort
+  /**
+   * Doanh thu 30 ngày theo SKU (migration 0017, nguồn vexim_sku_sales_30d).
+   * NULL = chưa có đơn nào trong 30 ngày — KHÔNG suy ra 0.
+   */
+  revenue30d: number | null;
+  /** NULL khi đơn của shop lẫn >1 tiền tệ (không cộng gộp được). */
+  revenueCurrency: string | null;
+  units30d: number | null;
+  lastOrderAt: string | null;
   updated: string;
   /* ↓ migration 0016: chi tiết để L1/L2 giải thích được "vì sao" */
   /** Issue nguyên văn từ Amazon, đã chuẩn hoá để hiển thị (L2). */
@@ -542,6 +580,11 @@ export type ListingQueueItem = {
   owner: string;
   slaLabel: string; // SLA còn lại theo SOP-03 (SKU doanh thu cao ≤ 24h)
   revenuePerDay: string;
+  /**
+   * Doanh thu 30 ngày (migration 0017) — để L4 xếp "đang mất bao nhiêu tiền".
+   * NULL = chưa có đơn nào trong 30 ngày.
+   */
+  revenue30d: number | null;
   priority: "red" | "amber" | "gray";
   priorityLabel: string;
 };
