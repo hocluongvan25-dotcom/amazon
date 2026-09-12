@@ -8,6 +8,7 @@ import {
   Panel,
   tableCls,
 } from "@/components/ui";
+import { LiveFulfillmentOverview } from "@/components/inventory/LiveInventory";
 import { requireSession } from "@/lib/auth/session";
 import { fulfillKpis, inboundShipments, skuStock } from "@/lib/data/mock";
 import type { PersonaKey } from "@/lib/roles";
@@ -17,9 +18,11 @@ const ALLOWED: PersonaKey[] = ["ceo", "lead_fulfill"];
 export default async function FulfillmentPage() {
   const session = await requireSession();
   if (!ALLOWED.includes(session.persona)) return <NoAccess />;
+  if (session.mode === "supabase") return <LiveFulfillmentOverview />;
 
   return (
     <>
+      <div className="mb-3 text-sm font-bold text-amber">DEMO · Dữ liệu minh họa</div>
       <PageHeader
         title="Kho vận & FBA"
         sub={

@@ -1,4 +1,5 @@
 import { Chip, NoAccess, PageHeader, Panel, tableCls } from "@/components/ui";
+import { LivePriceApprovals } from "@/components/pricing/LivePricing";
 import { requireSession } from "@/lib/auth/session";
 import { priceApprovalQueue } from "@/lib/data/mock";
 import type { PersonaKey } from "@/lib/roles";
@@ -16,6 +17,11 @@ export default async function PriceApprovalPage({
 }) {
   const session = await requireSession();
   if (!ALLOWED.includes(session.persona)) return <NoAccess />;
+
+  // Supabase mode
+  if (session.mode === "supabase") {
+    return <LivePriceApprovals />;
+  }
 
   const sp = await searchParams;
   const filterSku = sp.sku ?? null;

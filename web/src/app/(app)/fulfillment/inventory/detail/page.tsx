@@ -1,9 +1,110 @@
 import { Bars, Chip, NoAccess, PageHeader, Panel, tableCls } from "@/components/ui";
 import { requireSession } from "@/lib/auth/session";
+import { readInventoryLatest } from "@/lib/data/inventory";
+import { mapInventoryRow, type InventoryLatestRaw } from "@/lib/data/inventory-model";
 import { inventoryDetails, inventoryRows } from "@/lib/data/mock";
 import type { PersonaKey } from "@/lib/roles";
 
 const ALLOWED: PersonaKey[] = ["ceo", "lead_fulfill"];
+
+/** I2 chi tiết tồn SKU — supabase mode */
+async function LiveInventoryDetail({ sku }: { sku: string }) {
+  let rawRows: InventoryLatestRaw[] = [];
+  let failed = false;
+
+  try {
+    rawRows = await readInventoryLatest();
+  } catch {
+    failed = true;
+  }
+
+  const allRows = rawRows.map(mapInventoryRow);
+  const row = allRows.find((r) => r.sku === sku);
+  const raw = rawRows.find((r) => r.sku === sku);
+
+  if (failed) {
+    return (
+      <>
+        <div className="mb-3 text-sm font-bold text-accent-ink">
+          SUPABASE · dữ liệu thật
+        </div>
+        <PageHeader
+          title={`Tồn kho — ${sku}`}
+          sub="Không tải được dữ liệu"
+        />
+        <Panel title="Lỗi">
+          <p role="alert">
+            Không thể đọc Supabase. Kiểm tra migration 0011, quyền SELECT,
+            RLS và phiên đăng nhập rồi tải lại.
+          </p>
+        </Panel>
+      </>
+    );
+  }
+
+  if (!row || !raw) {
+    return (
+      <>
+        <div className="mb-3 text-sm font-bold text-accent-ink">
+          SUPABASE · dữ liệu thật
+        </div>
+        <PageHeader title={`Tồn kho — ${sku}`} sub="Không tìm thấy SKU" />
+        <Panel title="Không tìm thấy">
+          <p className="text-[13px] text-muted">
+            SKU chưa có dữ liệu trong vexim_inventory_latest. Kiểm tra lại
+            mã SKU hoặc chờ worker đồng bộ.
+          </p>
+        </Panel>
+      </>
+    );
+  }
+
+  // Tính thời gian cập nhật
+  const now = new Date();
+  const capturedAt = raw.captured_at ? new Date(raw.captured_at) : null;
+  const minutesAgo = capturedAt
+    ? Math.round((now.getTime() - capturedAt.getTime()) / 60000)
+    : null;
+
+  return (
+    <>
+      <div className="mb-3 text-sm font-bold text-accent-ink">
+        SUPABASE · dữ liệu thật từ vexim_inventory_latest
+      </div>
+      <PageHeader
+        title={`Tồn kho — ${sku}`}
+        sub={`${raw.asin ?? "—"} · ${raw.shop} · cập nhật ${minutesAgo !== null ? `${minutesAgo} phút` : "—"} trước`}
+        desc="Nguồn: snapshots (getInventorySummaries) · phân bổ FC: GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA · nhận hàng: GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA."
+      />
+      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {[
+          { label: "Khả dụng / Reserved", value: `${row.fulfillable} / ${row.reserved}`, sub: "đơn vị" },
+          { label: "Đang về (inbound)", value: `${row.inbound}`, sub: "lô đang trên đường" },
+          { label: "Days of cover", value: row.coverDays === null ? "—" : `${row.coverDays} ngày`, sub: `velocity ${row.velocity}/ngày (14 ngày)` },
+          { label: "Đề xuất nhập", value: row.suggest === null ? "Đủ hàng" : `${row.suggest} đơn vị`, sub: "SOP-01" },
+        ].map((k) => (
+          <div key={k.label} className="rounded-[13px] border border-line bg-card px-4 py-3.5">
+            <div className="text-[11.5px] font-bold uppercase tracking-wide text-soft">{k.label}</div>
+            <div className="mt-0.5 text-[19px] font-extrabold tracking-tight">{k.value}</div>
+            <div className="mt-0.5 truncate text-[11.5px] font-semibold text-soft">{k.sub}</div>
+          </div>
+        ))}
+      </div>
+      <Panel title="Phân bổ theo fulfillment center" hint="cần report GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA">
+        <p className="text-[13px] text-muted">
+          Dữ liệu phân bổ FC chưa có trong vexim_inventory_latest — cần bổ sung view từ
+          report GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA (Đợt 2: worker sync report theo FC).
+        </p>
+      </Panel>
+      <Panel title="Lịch sử nhận hàng" hint="cần report GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA">
+        <p className="text-[13px] text-muted">
+          Dữ liệu nhận hàng chi tiết chưa có — cần bổ sung view từ
+          report GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA (Đợt 2: worker sync receipt data).
+        </p>
+      </Panel>
+    </>
+  );
+}
 
 export default async function InventoryDetailPage({
   searchParams,
@@ -14,11 +115,19 @@ export default async function InventoryDetailPage({
   if (!ALLOWED.includes(session.persona)) return <NoAccess />;
 
   const { sku } = await searchParams;
+
+  // Supabase mode → đọc từ vexim_inventory_latest
+  if (session.mode === "supabase") {
+    return <LiveInventoryDetail sku={sku ?? ""} />;
+  }
+
+  // Demo mode → mock data
   const detail = sku ? inventoryDetails[sku] : undefined;
   const row = inventoryRows.find((r) => r.sku === sku);
 
   return (
     <>
+      <div className="mb-3 text-sm font-bold text-amber">DEMO · Dữ liệu minh họa</div>
       <PageHeader
         title={`Tồn kho — ${sku ?? ""}`}
         sub={detail ? `${detail.asin} · FNSKU ${detail.fnsku} · ${detail.shop}` : "Không tìm thấy SKU"}

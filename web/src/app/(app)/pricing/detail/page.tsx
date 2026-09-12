@@ -9,10 +9,116 @@ import {
   tableCls,
 } from "@/components/ui";
 import { requireSession } from "@/lib/auth/session";
+import { readPricing } from "@/lib/data/pricing";
+import { mapPricingRow, type PricingRaw } from "@/lib/data/pricing-model";
 import { pricingDetails, pricingRows } from "@/lib/data/mock";
 import type { PersonaKey } from "@/lib/roles";
 
 const ALLOWED: PersonaKey[] = ["ceo"];
+
+/** P2 chi tiết giá — supabase mode */
+async function LivePricingDetail({ sku }: { sku: string }) {
+  let rawRows: PricingRaw[] = [];
+  let failed = false;
+
+  try {
+    rawRows = await readPricing();
+  } catch {
+    failed = true;
+  }
+
+  const raw = rawRows.find((r) => r.sku === sku);
+
+  if (failed) {
+    return (
+      <>
+        <div className="mb-3 text-sm font-bold text-accent-ink">SUPABASE</div>
+        <PageHeader title={`Chi tiết giá · ${sku}`} sub="Lỗi tải dữ liệu" />
+        <Panel title="Lỗi"><p role="alert">Không thể đọc Supabase.</p></Panel>
+      </>
+    );
+  }
+
+  if (!raw) {
+    return (
+      <>
+        <div className="mb-3 text-sm font-bold text-accent-ink">SUPABASE</div>
+        <PageHeader title={`Chi tiết giá · ${sku}`} sub="Không tìm thấy SKU" />
+        <Panel title="Không tìm thấy">
+          <p className="text-[13px] text-muted">SKU chưa có trong vexim_pricing.</p>
+        </Panel>
+      </>
+    );
+  }
+
+  const r = mapPricingRow(raw);
+  const boxTone = r.boxStatus === "holding" ? "green" : r.boxStatus === "at_risk" ? "amber" : r.boxStatus === "lost" ? "red" : "gray";
+  const boxLabel = r.boxStatus === "holding" ? "Đang giữ box" : r.boxStatus === "at_risk" ? "Sắp mất" : r.boxStatus === "lost" ? "Mất box" : "Không offer";
+
+  return (
+    <>
+      <div className="mb-3 text-sm font-bold text-accent-ink">SUPABASE · dữ liệu thật từ vexim_pricing</div>
+      <PageHeader
+        title={`Chi tiết giá · ${sku}`}
+        sub={`${raw.asin ?? "—"} · ${raw.shop}`}
+        desc="Lịch sử giá · offer đối thủ · breakdown giá sàn."
+      />
+      <div className="mb-4 flex flex-wrap gap-2">
+        <a href="/pricing" className="rounded-full border border-line bg-card px-4 py-1.5 text-[12.5px] font-bold text-muted transition hover:border-accent hover:text-accent-ink">
+          ← Quay lại bảng giá
+        </a>
+      </div>
+      <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {[
+          { label: "Giá mình", value: `$${r.ourPrice.toFixed(2)}`, sub: `cập nhật ${r.lastPriceChange}` },
+          { label: "FOEP", value: r.foep ? `$${r.foep.toFixed(2)}` : "—", sub: "chưa có trong DB" },
+          { label: "Giá sàn", value: `$${r.floorPrice.toFixed(2)}`, sub: `biên ${r.currentMargin.toFixed(1)}%` },
+          { label: "Buy Box", value: boxLabel, sub: `${r.competitorCount} đối thủ` },
+        ].map((k) => (
+          <div key={k.label} className="rounded-[13px] border border-line bg-card px-4 py-3">
+            <div className="text-[11.5px] font-bold uppercase text-soft">{k.label}</div>
+            <div className="text-[22px] font-extrabold">{k.value}</div>
+            <div className="text-[12px] text-soft">{k.sub}</div>
+          </div>
+        ))}
+      </div>
+      <Grid2>
+        <Panel title="Lịch sử giá" hint="cần getPricing + ANY_OFFER_CHANGED">
+          <p className="text-[13px] text-muted">
+            Lịch sử giá 30 ngày chưa có trong DB — cần worker sync Pricing API.
+          </p>
+        </Panel>
+        <Panel title="Breakdown giá sàn" hint="từ getMyFeesEstimateForSKU">
+          <table className={tableCls.table}>
+            <tbody>
+              <tr>
+                <td className={tableCls.td}>Referral fee</td>
+                <td className={tableCls.tdNum}>{raw.referral_fee !== null ? `$${raw.referral_fee.toFixed(2)}` : "—"}</td>
+              </tr>
+              <tr>
+                <td className={tableCls.td}>FBA fulfillment fee</td>
+                <td className={tableCls.tdNum}>{raw.fba_fee !== null ? `$${raw.fba_fee.toFixed(2)}` : "—"}</td>
+              </tr>
+              <tr>
+                <td className={tableCls.td}>Giá vốn (COGS)</td>
+                <td className={tableCls.tdNum}>—</td>
+              </tr>
+              <tr className="border-t-2 border-line">
+                <td className={`${tableCls.td} font-extrabold`}>Tổng phí ước tính</td>
+                <td className={`${tableCls.tdNum} font-extrabold text-accent-ink`}>{raw.total_fees !== null ? `$${raw.total_fees.toFixed(2)}` : "—"}</td>
+              </tr>
+            </tbody>
+          </table>
+        </Panel>
+      </Grid2>
+      <Panel title="Offers đối thủ" hint="cần getItemOffers + getListingOffersBatch">
+        <p className="text-[13px] text-muted">
+          Chi tiết offers đối thủ chưa có trong DB — cần worker sync Pricing API (getListingOffersBatch).
+        </p>
+      </Panel>
+    </>
+  );
+}
 
 function usd(v: number) {
   return `$${v.toFixed(2)}`;
@@ -27,6 +133,12 @@ export default async function PricingDetailPage({
   if (!ALLOWED.includes(session.persona)) return <NoAccess />;
 
   const { sku } = await searchParams;
+
+  // Supabase mode
+  if (session.mode === "supabase") {
+    return <LivePricingDetail sku={sku ?? ""} />;
+  }
+
   const selSku = sku && pricingDetails[sku] ? sku : "XMO-950-BLK";
   const d = pricingDetails[selSku];
   const r = pricingRows.find((x) => x.sku === selSku);

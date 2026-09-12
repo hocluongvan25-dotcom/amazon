@@ -1,4 +1,5 @@
 import { Chip, NoAccess, PageHeader, Panel, tableCls } from "@/components/ui";
+import { LiveListingList } from "@/components/listing/LiveListing";
 import { requireSession } from "@/lib/auth/session";
 import { listingList } from "@/lib/data/mock";
 import type { PersonaKey } from "@/lib/roles";
@@ -37,7 +38,7 @@ export default async function ListingListPage({
   if (!ALLOWED.includes(session.persona)) return <NoAccess />;
 
   const sp = await searchParams;
-  const state = {
+  const filters = {
     f: sp.f ?? "all",
     shop: sp.shop ?? "all",
     sev: sp.sev ?? "all",
@@ -46,21 +47,27 @@ export default async function ListingListPage({
     sort: sp.sort === "sku" ? "sku" : "rev",
   };
 
+  // Supabase mode
+  if (session.mode === "supabase") {
+    return <LiveListingList filters={filters} />;
+  }
+
+  // Demo mode
   let rows = listingList.filter((r) => {
-    if (state.f !== "all" && r.status !== state.f) return false;
-    if (state.shop !== "all" && r.shop !== state.shop) return false;
-    if (state.sev === "error" && r.issueErrors === 0) return false;
-    if (state.sev === "warning" && r.issueWarnings === 0) return false;
-    if (state.sev === "clean" && (r.issueErrors > 0 || r.issueWarnings > 0)) return false;
-    if (state.brand !== "all" && r.brand !== state.brand) return false;
-    if (state.q) {
+    if (filters.f !== "all" && r.status !== filters.f) return false;
+    if (filters.shop !== "all" && r.shop !== filters.shop) return false;
+    if (filters.sev === "error" && r.issueErrors === 0) return false;
+    if (filters.sev === "warning" && r.issueWarnings === 0) return false;
+    if (filters.sev === "clean" && (r.issueErrors > 0 || r.issueWarnings > 0)) return false;
+    if (filters.brand !== "all" && r.brand !== filters.brand) return false;
+    if (filters.q) {
       const hay = `${r.sku} ${r.asin} ${r.title}`.toLowerCase();
-      if (!hay.includes(state.q)) return false;
+      if (!hay.includes(filters.q)) return false;
     }
     return true;
   });
   rows =
-    state.sort === "sku"
+    filters.sort === "sku"
       ? [...rows].sort((a, b) => a.sku.localeCompare(b.sku))
       : [...rows].sort((a, b) => b.revenue30d - a.revenue30d);
 
@@ -82,6 +89,7 @@ export default async function ListingListPage({
 
   return (
     <>
+      <div className="mb-3 text-sm font-bold text-amber">DEMO · Dữ liệu minh họa</div>
       <PageHeader
         title="Danh sách listing"
         sub={`${listingList.length} SKU · 14 shop · cập nhật 2 giờ trước`}
@@ -92,11 +100,11 @@ export default async function ListingListPage({
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <form action="/listing/list" method="get" className="flex flex-1 items-center gap-2">
           {(["f", "shop", "sev", "brand", "sort"] as const).map((k) =>
-            state[k] !== "all" && k !== "sort" ? (
-              <input key={k} type="hidden" name={k} value={state[k]} />
+            sp[k] !== undefined && sp[k] !== "all" && k !== "sort" ? (
+              <input key={k} type="hidden" name={k} value={sp[k]} />
             ) : null,
           )}
-          {state.sort === "sku" ? <input type="hidden" name="sort" value="sku" /> : null}
+          {sp.sort === "sku" ? <input type="hidden" name="sort" value="sku" /> : null}
           <input
             name="q"
             defaultValue={sp.q ?? ""}
@@ -118,7 +126,7 @@ export default async function ListingListPage({
           ⬇ Xuất CSV
         </a>
         <span
-          title="Gán người xử lý là thao tác ghi nội bộ — kích hoạt khi có Supabase (Đợt 1: xem + xuất)"
+          title="Gán người xử lý — thao tác ghi nội bộ, kích hoạt khi có Supabase"
           className="h-9 cursor-not-allowed rounded-full border border-dashed border-line px-4 py-2 text-[12.5px] font-bold text-soft"
         >
           👤 Gán người xử lý
@@ -136,15 +144,15 @@ export default async function ListingListPage({
             ["SUPPRESSED", "Bị ẩn", listingList.filter((r) => r.status === "SUPPRESSED").length],
           ] as [string, string, number][]
         ).map(([key, label, count]) => (
-          <a key={key} href={chipHref({ ...sp, q: sp.q }, "f", key)} className={chip(state.f === key)}>
+          <a key={key} href={chipHref({ ...sp, q: sp.q }, "f", key)} className={chip(filters.f === key)}>
             {label} · {count}
           </a>
         ))}
       </div>
       {/* Filter: shop / loại lỗi / brand */}
       <div className="mb-2 flex flex-wrap gap-2">
-        {[["all", "Mọi shop"], ...shops.map((s) => [s, `Shop ${s}`] as [string, string])].map(([key, label]) => (
-          <a key={key} href={chipHref({ ...sp, q: sp.q }, "shop", key)} className={chip(state.shop === key)}>
+        {[[ "all", "Mọi shop"], ...shops.map((s) => [s, `Shop ${s}`] as [string, string])].map(([key, label]) => (
+          <a key={key} href={chipHref({ ...sp, q: sp.q }, "shop", key)} className={chip(filters.shop === key)}>
             {label}
           </a>
         ))}
@@ -157,13 +165,13 @@ export default async function ListingListPage({
             ["clean", "Sạch lỗi"],
           ] as [string, string][]
         ).map(([key, label]) => (
-          <a key={key} href={chipHref({ ...sp, q: sp.q }, "sev", key)} className={chip(state.sev === key)}>
+          <a key={key} href={chipHref({ ...sp, q: sp.q }, "sev", key)} className={chip(filters.sev === key)}>
             {label}
           </a>
         ))}
         <span className="mx-1 w-px self-stretch bg-line" />
-        {[["all", "Mọi brand"], ...brands.map((b) => [b, b] as [string, string])].map(([key, label]) => (
-          <a key={key} href={chipHref({ ...sp, q: sp.q }, "brand", key)} className={chip(state.brand === key)}>
+        {[[ "all", "Mọi brand"], ...brands.map((b) => [b, b] as [string, string])].map(([key, label]) => (
+          <a key={key} href={chipHref({ ...sp, q: sp.q }, "brand", key)} className={chip(filters.brand === key)}>
             {label}
           </a>
         ))}
@@ -173,14 +181,14 @@ export default async function ListingListPage({
         Xếp theo:
         <a
           href={chipHref({ ...sp, q: sp.q }, "sort", "rev")}
-          className={state.sort === "rev" ? "text-accent-ink" : "text-muted hover:text-accent-ink"}
+          className={filters.sort === "rev" ? "text-accent-ink" : "text-muted hover:text-accent-ink"}
         >
           Doanh thu 30 ngày
         </a>
         ·
         <a
           href={chipHref({ ...sp, q: sp.q }, "sort", "sku")}
-          className={state.sort === "sku" ? "text-accent-ink" : "text-muted hover:text-accent-ink"}
+          className={filters.sort === "sku" ? "text-accent-ink" : "text-muted hover:text-accent-ink"}
         >
           SKU A→Z
         </a>
@@ -208,7 +216,7 @@ export default async function ListingListPage({
                 <td className={tableCls.td}>
                   <div
                     className="flex h-9 w-9 items-center justify-center rounded-md border border-line bg-soft text-[11px] font-extrabold text-muted"
-                    title="Ảnh từ Catalog API (getCatalogItem) khi kết nối"
+                    title="Ảnh từ Catalog API khi kết nối"
                   >
                     {r.brand.slice(0, 2).toUpperCase()}
                   </div>

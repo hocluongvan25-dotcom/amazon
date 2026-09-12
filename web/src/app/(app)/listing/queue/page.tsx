@@ -1,4 +1,5 @@
 import { Chip, NoAccess, PageHeader, Panel, tableCls } from "@/components/ui";
+import { LiveListingQueue } from "@/components/listing/LiveListing";
 import { requireSession } from "@/lib/auth/session";
 import { listingQueueFull } from "@/lib/data/mock";
 import type { PersonaKey } from "@/lib/roles";
@@ -9,12 +10,19 @@ export default async function ListingQueuePage() {
   const session = await requireSession();
   if (!ALLOWED.includes(session.persona)) return <NoAccess />;
 
+  // Supabase mode
+  if (session.mode === "supabase") {
+    return <LiveListingQueue />;
+  }
+
+  // Demo mode
   const open = listingQueueFull.length;
   const unassigned = listingQueueFull.filter((r) => r.owner === "—").length;
   const highRev = listingQueueFull.filter((r) => r.priority === "red").length;
 
   return (
     <>
+      <div className="mb-3 text-sm font-bold text-amber">DEMO · Dữ liệu minh họa</div>
       <PageHeader
         title="Hàng đợi inactive / stranded — SOP-03"
         sub={`${open} SKU đang mở · ${unassigned} chưa gán · SLA: SKU doanh thu cao ≤ 24h`}

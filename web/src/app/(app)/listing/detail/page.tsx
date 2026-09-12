@@ -1,4 +1,5 @@
 import { Chip, NoAccess, PageHeader, Panel, tableCls } from "@/components/ui";
+import { LiveListingDetail } from "@/components/listing/LiveListing";
 import { requireSession } from "@/lib/auth/session";
 import { listingDetails, listingList } from "@/lib/data/mock";
 import type { PersonaKey } from "@/lib/roles";
@@ -14,11 +15,19 @@ export default async function ListingDetailPage({
   if (!ALLOWED.includes(session.persona)) return <NoAccess />;
 
   const { sku } = await searchParams;
+
+  // Supabase mode
+  if (session.mode === "supabase") {
+    return <LiveListingDetail sku={sku ?? ""} />;
+  }
+
+  // Demo mode
   const detail = sku ? listingDetails[sku] : undefined;
   const row = listingList.find((r) => r.sku === sku);
 
   return (
     <>
+      <div className="mb-3 text-sm font-bold text-amber">DEMO · Dữ liệu minh họa</div>
       <PageHeader
         title={`Listing — ${sku ?? ""}`}
         sub={detail ? `${detail.asin} · Shop ${detail.shop} · ${detail.productType} · ${detail.conditionType}` : "Không tìm thấy SKU"}
