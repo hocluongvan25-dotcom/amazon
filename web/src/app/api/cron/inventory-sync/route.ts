@@ -3,7 +3,14 @@
  * Protect bằng CRON_SECRET (header Authorization: Bearer <CRON_SECRET>).
  *
  * Ở DEMO MODE (không SP-API/DB credentials) endpoint vẫn trả 200 và chạy
- * với dữ liệu demo — không làm lỗi build preview trên Vercel.
+ * với dữ liệu demo trong bộ nhớ — không làm lỗi build preview trên Vercel.
+ *
+ * CHẨN ĐOÁN (thêm 12/09/2026):
+ *   Trước đây khi CRON_SECRET chưa được đặt, hàm isAuthorized() trả false
+ *   trên production và endpoint trả 401 "unauthorized" — trông giống lỗi
+ *   xác thực, che mất nguyên nhân thật là THIẾU BIẾN MÔI TRƯỜNG. Vercel Cron
+ *   chỉ hiện "failed" không lý do. Nay trả 500 kèm thông báo nêu đích danh
+ *   biến còn thiếu.
  */
 import { NextResponse } from "next/server";
 import { runInventorySyncAll } from "@/lib/worker";
@@ -12,11 +19,40 @@ import { getSpApiConfig } from "@/lib/spapi/client";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-function isAuthorized(req: Request): boolean {
+type AuthResult =
+  | { ok: true }
+  | { ok: false; status: 401 | 500; error: string; hint?: string };
+
+function authorize(req: Request): AuthResult {
   const expected = process.env.CRON_SECRET;
-  if (!expected) return process.env.NODE_ENV !== "production";
+  const isProd = process.env.NODE_ENV === "production";
+
+  // Thiếu biến: KHÔNG im lặng trả 401. Trên production đây là lỗi cấu hình.
+  if (!expected) {
+    if (isProd) {
+      return {
+        ok: false,
+        status: 500,
+        error: "CRON_SECRET chưa được cấu hình trên Vercel.",
+        hint:
+          "Vercel → Project Settings → Environment Variables → thêm CRON_SECRET " +
+          "(chuỗi ngẫu nhiên dài) cho cả Production và Preview, rồi Redeploy. " +
+          "Vercel Cron tự gửi header Authorization: Bearer <CRON_SECRET>.",
+      };
+    }
+    // Dev/preview local: cho chạy để test, nhưng nói rõ trong response.
+    return { ok: true };
+  }
+
   const auth = req.headers.get("authorization");
-  return auth === `Bearer ${expected}`;
+  if (auth !== `Bearer ${expected}`) {
+    return {
+      ok: false,
+      status: 401,
+      error: "Sai hoặc thiếu header Authorization: Bearer <CRON_SECRET>.",
+    };
+  }
+  return { ok: true };
 }
 
 async function run() {
@@ -33,20 +69,27 @@ async function run() {
 }
 
 export async function GET(req: Request) {
-  if (!isAuthorized(req)) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const auth = authorize(req);
+  if (!auth.ok) {
+    return NextResponse.json(
+      { ok: false, error: auth.error, hint: auth.hint },
+      { status: auth.status },
+    );
   }
+
   try {
     const { res, log } = await run();
     return NextResponse.json({
       ok: true,
       mode: res.mode,
+      db: res.db,
       shopsProcessed: res.shopsProcessed,
       totalSkus: res.totalSkus,
       totalAlerts: res.totalAlerts,
       errors: res.errors,
       log,
       spapiConfigured: !!getSpApiConfig(),
+      cronSecretConfigured: !!process.env.CRON_SECRET,
     });
   } catch (e) {
     return NextResponse.json(

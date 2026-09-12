@@ -12,6 +12,11 @@
  *
  * Ở DEMO MODE (không có credentials hoặc Supabase unreachable) → dùng dữ liệu
  * giả + MockDbAdapter để training/demo không cần kết nối SP-API thật.
+ *
+ * NGUYÊN TẮC AN TOÀN DỮ LIỆU (bắt buộc):
+ *   DB thật CHỈ được ghi khi mode === "production", tức có đủ cả LWA credentials
+ *   lẫn Supabase credentials. Có Supabase mà thiếu LWA → chạy demo TRONG BỘ NHỚ,
+ *   tuyệt đối không ghi SKU giả xuống DB production.
  */
 import { loadConfig } from "../config.ts";
 import { LwaTokenManager } from "../amazon/lwa.ts";
@@ -22,6 +27,8 @@ import { runInventorySync } from "../jobs/inventory-sync.job.ts";
 
 export type InventorySyncRunResult = {
   mode: "mock" | "sandbox" | "production";
+  /** "supabase" = có ghi DB thật; "mock" = chỉ chạy trong bộ nhớ. */
+  db: "supabase" | "mock";
   shopsProcessed: number;
   totalSkus: number;
   totalAlerts: number;
@@ -54,13 +61,49 @@ export async function runInventorySyncAll(
   let db: DbAdapter;
   let shops: ActiveShop[];
 
-  if (cfg.supabase) {
+  // ==========================================================================
+  // CHẶN CỨNG: chỉ ghi DB THẬT khi mode === "production".
+  //
+  // loadConfig() chỉ trả mode="production" khi có ĐỦ 5 biến:
+  //   AMAZON_LWA_CLIENT_ID, AMAZON_LWA_CLIENT_SECRET, AMAZON_LWA_REFRESH_TOKEN,
+  //   NEXT_PUBLIC_SUPABASE_URL (hoặc SUPABASE_URL), SUPABASE_SERVICE_ROLE_KEY
+  //
+  // TRƯỚC ĐÂY điều kiện là `if (cfg.supabase)` — tức chỉ cần Supabase URL +
+  // service role key. Cấu hình đó đã có thật trên Vercel của VEXIM trong khi
+  // AMAZON_LWA_* chưa set → client rơi xuống makeMockClient() và ghi SKU demo
+  // (XMO-950-BLK / VPN-220 / B0DEMO0001…) thẳng vào DB production.
+  // Đó là sự cố dữ liệu, không phải demo vô hại. Chặn tại đây.
+  // ==========================================================================
+  const allowRealDb = cfg.mode === "production" && cfg.supabase !== null;
+
+  if (allowRealDb && cfg.supabase) {
     const sb = new SupabaseDbAdapter(cfg.supabase.url, cfg.supabase.serviceRoleKey);
     try {
       const shopsFromDb = await sb.listActiveProductionShops();
+      if (shopsFromDb.length === 0) {
+        // KHÔNG fallback DEMO_SHOP nữa: UUID 00000000-…-000000000001 không tồn
+        // tại trong connections.seller_accounts, mà
+        // inventory_snapshots.seller_account_id có FK tới bảng đó → insert sẽ
+        // vỡ khoá ngoại và mỗi shop bị ghi sync_jobs status='failed'.
+        // Trả về sạch để cron báo "0 shop" — đúng sự thật, dễ chẩn đoán.
+        log(
+          `[inventory-sync] mode=production nhưng KHÔNG có shop nào thoả ` +
+            `(status='active' AND data_source='production'). Không sync gì cả.\n`,
+        );
+        return {
+          mode: cfg.mode,
+          db: "supabase",
+          shopsProcessed: 0,
+          totalSkus: 0,
+          totalAlerts: 0,
+          errors: [],
+        };
+      }
       db = sb;
-      shops = shopsFromDb.length > 0 ? shopsFromDb : [DEMO_SHOP];
-      log(`[inventory-sync] mode=${cfg.mode} host=${cfg.spApiHost}\n`);
+      shops = shopsFromDb;
+      log(
+        `[inventory-sync] mode=production host=${cfg.spApiHost} · ${shops.length} shop production\n`,
+      );
     } catch (e) {
       log(
         `[inventory-sync] cảnh báo: không kết nối được DB (${(e as Error).message.split("\n")[0]}). Chuyển DEMO MODE.\n`,
@@ -71,7 +114,14 @@ export async function runInventorySyncAll(
   } else {
     db = mock;
     shops = [DEMO_SHOP];
-    log(`[inventory-sync] mode=mock (không có Supabase/LWA — chạy trên dữ liệu demo)\n`);
+    if (cfg.supabase) {
+      log(
+        `[inventory-sync] mode=${cfg.mode} · có Supabase credentials nhưng THIẾU AMAZON_LWA_* → ` +
+          `KHÔNG ghi DB thật (chống demo data lọt vào production). Chạy demo trong bộ nhớ.\n`,
+      );
+    } else {
+      log(`[inventory-sync] mode=mock (không có Supabase/LWA — chạy trên dữ liệu demo)\n`);
+    }
   }
 
   // Đảm bảo mock db có dữ liệu bán cho các shop demo
@@ -81,6 +131,7 @@ export async function runInventorySyncAll(
 
   const result: InventorySyncRunResult = {
     mode: cfg.mode,
+    db: db instanceof SupabaseDbAdapter ? "supabase" : "mock",
     shopsProcessed: 0,
     totalSkus: 0,
     totalAlerts: 0,

@@ -1,6 +1,6 @@
 -- ============================================================================
 -- BỘ TEST RLS MULTI-TENANT — VEXIM OPS
--- Chỉ chạy trên môi trường test local (sau shim + migrations 0001→0003).
+-- CHỈ CHẠY TRÊN POSTGRES LOCAL (sau shim + migrations 0001→0005).
 -- Mỗi test FAIL sẽ RAISE EXCEPTION → runner báo lỗi; PASS in ra notice.
 --
 -- Kịch bản (khớp 4 persona của app):
@@ -8,11 +8,90 @@
 --   U2 = Super Admin
 --   U3 = Client Viewer — thuộc org "Doanh nghiệp A" (S1, S2)
 --   Shop: S1, S2 thuộc org A · S3 thuộc org B
+--
 -- ============================================================================
+-- ⚠️⚠️ HAI CHỐT AN TOÀN (thêm 12/09/2026 sau sự cố) ⚠️⚠️
+-- ============================================================================
+-- SỰ CỐ: file này từng kết thúc bằng `commit;`. Khi bị chạy nhầm trong
+--   Supabase SQL Editor trên project production, toàn bộ fixture test
+--   (2 org giả, 3 shop giả, 3 auth user giả, 7 listing TEST-S*-…) bị
+--   COMMIT VĨNH VIỄN vào DB thật. Phải dọn bằng migration 0006.
+--
+-- CHỐT 1 — cuối file là `rollback;` (không phải `commit;`): fixture chỉ tồn
+--   tại trong transaction test, không bao giờ ghi xuống đĩa.
+--
+-- CHỐT 2 — phải BẬT CỜ chủ động thì file mới chạy (xem ngay bên dưới).
+--
+-- CÁCH CHẠY ĐÚNG (local, một phiên psql duy nhất):
+--   psql "$LOCAL_DATABASE_URL" -v ON_ERROR_STOP=1 \
+--     -c "select set_config('vexim.allow_rls_test','on',false);" \
+--     -f supabase/tests/rls_test.sql
+--
+-- KHÔNG chạy file này trên project Supabase thật.
+-- ============================================================================
+
+do $$
+begin
+  if coalesce(current_setting('vexim.allow_rls_test', true), 'off') <> 'on' then
+    raise exception
+      'TỪ CHỐI chạy rls_test.sql: chưa bật cờ vexim.allow_rls_test. '
+      'File này chèn fixture test và CHỈ dành cho Postgres local. '
+      'Bật bằng: select set_config(''vexim.allow_rls_test'',''on'',false); '
+      'trong CÙNG phiên psql, rồi chạy lại.';
+  end if;
+  raise notice 'rls_test.sql: cờ cho phép đã bật — chạy trên Postgres local.';
+end $$;
 
 begin;
 
-create temp table test_results (name text, ok boolean);
+-- ---------------------------------------------------------------------------
+-- TỰ DỌN TRƯỚC KHI SEED: nếu lần chạy trước bị commit (sự cố đã xảy ra),
+-- fixture còn sót sẽ làm lần chạy này vỡ "duplicate key". Xoá theo đúng thứ tự
+-- FK, chỉ đụng 3 nhóm UUID cố định của test.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_users uuid[] := array[
+    'cccc0000-0000-4000-8000-000000000001',
+    'cccc0000-0000-4000-8000-000000000002',
+    'cccc0000-0000-4000-8000-000000000003'
+  ];
+  v_shops uuid[] := array[
+    'bbbb0000-0000-4000-8000-000000000001',
+    'bbbb0000-0000-4000-8000-000000000002',
+    'bbbb0000-0000-4000-8000-000000000003'
+  ];
+  v_orgs  uuid[] := array[
+    'aaaa0000-0000-4000-8000-000000000002',
+    'aaaa0000-0000-4000-8000-000000000003'
+  ];
+begin
+  delete from iam.audit_logs         where actor_id = any (v_users);
+  delete from ops.task_events        where actor_id = any (v_users);
+  delete from iam.assignments        where user_id = any (v_users)
+                                       or assigned_by = any (v_users)
+                                       or seller_account_id = any (v_shops);
+  delete from iam.role_assignments   where user_id = any (v_users);
+  delete from catalog.cost_inputs    where seller_account_id = any (v_shops)
+                                       or imported_by = any (v_users);
+  delete from ops.tasks              where seller_account_id = any (v_shops)
+                                       or assignee_id = any (v_users)
+                                       or created_by = any (v_users);
+  delete from ops.alerts             where assigned_to = any (v_users);
+  delete from catalog.fees_estimates where seller_account_id = any (v_shops);
+  delete from catalog.listing_offers where seller_account_id = any (v_shops);
+  delete from catalog.listings       where seller_account_id = any (v_shops);
+  delete from connections.oauth_tokens where seller_account_id = any (v_shops);
+  delete from iam.user_profiles      where id = any (v_users);
+  delete from auth.users             where id = any (v_users);
+  delete from connections.seller_accounts where id = any (v_shops);
+  delete from iam.organizations      where id = any (v_orgs);
+end $$;
+
+-- `on commit drop` + `if not exists`: cho phép chạy lại trong CÙNG phiên psql.
+-- Thiếu hai thứ này thì lần chạy thứ hai vỡ ngay ở đây ("already exists").
+create temp table if not exists test_results (name text, ok boolean) on commit drop;
+truncate test_results;
 
 -- ---------------------------------------------------------------------------
 -- SEED dữ liệu test (id cố định để chạy lặp được)
@@ -254,4 +333,8 @@ begin
   raise notice '=== TẤT CẢ % TEST PASS ===', (select count(*) from test_results);
 end $$;
 
-commit;
+-- ============================================================================
+-- CHỐT AN TOÀN 1: ROLLBACK — fixture test KHÔNG BAO GIỜ được ghi xuống đĩa.
+-- (Trước đây là `commit;` — nguyên nhân fixture lọt vào DB production.)
+-- ============================================================================
+rollback;

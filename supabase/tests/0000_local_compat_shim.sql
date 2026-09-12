@@ -29,8 +29,15 @@ create schema if not exists auth;
 create table if not exists auth.users (
   id       uuid primary key,
   email    text,
+  -- Supabase thật có cột này (metadata từ provider). Migration 0007 đọc
+  -- raw_user_meta_data->>'full_name' để đặt display_name → shim phải có,
+  -- nếu không test local sẽ lệch với production.
+  raw_user_meta_data jsonb default '{}'::jsonb,
   created_at timestamptz default now()
 );
+
+-- Idempotent: nếu auth.users đã tồn tại từ lần chạy trước (chưa có cột mới)
+alter table auth.users add column if not exists raw_user_meta_data jsonb default '{}'::jsonb;
 
 -- Giả lập JWT: test đặt người dùng bằng
 --   set request.jwt.claim.sub = '<uuid>'

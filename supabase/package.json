@@ -1,0 +1,13 @@
+{
+  "name": "vexim-ops-supabase-tests",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Kiểm chứng migrations VEXIM Ops trên Postgres thật (PGlite/WASM) — không cần Docker hay Supabase project.",
+  "scripts": {
+    "test": "node tests/run-migrations.mjs"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8"
+  }
+}
