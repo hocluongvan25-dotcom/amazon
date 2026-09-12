@@ -1,3 +1,4 @@
+import { LiveOperations } from "@/components/operations/LiveOperations";
 import { Chip, NoAccess, PageHeader, Panel, tableCls } from "@/components/ui";
 import { requireSession } from "@/lib/auth/session";
 import { ordersList } from "@/lib/data/mock";
@@ -15,9 +16,11 @@ const statusTone: Record<string, "green" | "amber" | "gray" | "red"> = {
 export default async function OrdersListPage() {
   const session = await requireSession();
   if (!ALLOWED.includes(session.persona)) return <NoAccess />;
+  if (session.mode === "supabase") return <LiveOperations screen="orders" />;
 
   return (
     <>
+      <div className="mb-3 text-sm font-bold text-amber">DEMO · Dữ liệu minh họa</div>
       <PageHeader
         title="Danh sách đơn hàng"
         sub="341 đơn hôm nay · FBA 320 · FBM 21"

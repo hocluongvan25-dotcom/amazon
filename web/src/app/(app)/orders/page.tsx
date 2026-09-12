@@ -1,3 +1,4 @@
+import { LiveOperations } from "@/components/operations/LiveOperations";
 import {
   AlertList,
   Chip,
@@ -18,9 +19,11 @@ const ALLOWED: PersonaKey[] = ["ceo"];
 export default async function OrdersPage() {
   const session = await requireSession();
   if (!ALLOWED.includes(session.persona)) return <NoAccess />;
+  if (session.mode === "supabase") return <LiveOperations screen="orders" />;
 
   return (
     <>
+      <div className="mb-3 text-sm font-bold text-amber">DEMO · Dữ liệu minh họa</div>
       <PageHeader
         title="Đơn hàng & CSKH"
         sub="Hôm nay"

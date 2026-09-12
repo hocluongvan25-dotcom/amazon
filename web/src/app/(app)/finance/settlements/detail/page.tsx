@@ -1,3 +1,4 @@
+import { LiveOperations } from "@/components/operations/LiveOperations";
 import { NoAccess, PageHeader, Panel, tableCls } from "@/components/ui";
 import { requireSession } from "@/lib/auth/session";
 import { settlementDetails, settlementList } from "@/lib/data/mock";
@@ -21,6 +22,7 @@ export default async function SettlementDetailPage({
 }) {
   const session = await requireSession();
   if (!ALLOWED.includes(session.persona)) return <NoAccess />;
+  if (session.mode === "supabase") return <LiveOperations screen="settlements" detail id={(await searchParams).id} />;
 
   const { id } = await searchParams;
   const selId = id && settlementDetails[id] ? id : "12948510001";
@@ -30,6 +32,7 @@ export default async function SettlementDetailPage({
 
   return (
     <>
+      <div className="mb-3 text-sm font-bold text-amber">DEMO · Dữ liệu minh họa</div>
       <PageHeader
         title={`Kỳ settlement · ${d.id}`}
         sub={`${d.shop} · ${d.startDate} → ${d.endDate} · chuyển ${d.depositDate}`}

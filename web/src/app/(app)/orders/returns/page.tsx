@@ -1,3 +1,4 @@
+import { LiveOperations } from "@/components/operations/LiveOperations";
 import { Bars, NoAccess, PageHeader, Panel, tableCls } from "@/components/ui";
 import { requireSession } from "@/lib/auth/session";
 import { returnReasonSummary, returnsList } from "@/lib/data/mock";
@@ -8,9 +9,11 @@ const ALLOWED: PersonaKey[] = ["ceo"];
 export default async function ReturnsPage() {
   const session = await requireSession();
   if (!ALLOWED.includes(session.persona)) return <NoAccess />;
+  if (session.mode === "supabase") return <LiveOperations screen="returns" />;
 
   return (
     <>
+      <div className="mb-3 text-sm font-bold text-amber">DEMO · Dữ liệu minh họa</div>
       <PageHeader
         title="Returns & Refunds"
         sub="28 return trong 30 ngày · tỷ lệ 2.1%"
