@@ -7,6 +7,7 @@ import {
   Panel,
   tableCls,
 } from "@/components/ui";
+import { LiveListingOverview } from "@/components/listing/LiveListing";
 import { requireSession } from "@/lib/auth/session";
 import { listingKpis, listingQueue } from "@/lib/data/mock";
 import type { PersonaKey } from "@/lib/roles";
@@ -16,9 +17,11 @@ const ALLOWED: PersonaKey[] = ["ceo"];
 export default async function ListingPage() {
   const session = await requireSession();
   if (!ALLOWED.includes(session.persona)) return <NoAccess />;
+  if (session.mode === "supabase") return <LiveListingOverview />;
 
   return (
     <>
+      <div className="mb-3 text-sm font-bold text-amber">DEMO · Dữ liệu minh họa</div>
       <PageHeader
         title="Listing & Nội dung"
         sub="Hôm qua · 14 shop"
