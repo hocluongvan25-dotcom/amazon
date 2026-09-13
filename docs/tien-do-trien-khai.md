@@ -2,6 +2,35 @@
 
 > Cập nhật: 13/09/2026 · Thứ tự build đã chốt: **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** (21 màn Đợt 1)
 
+## Cập nhật 13/09 — VÁ UI MENU TRÁI trước khi bàn giao Ops (active 2 dòng · số mock)
+
+Hai lỗi Ops báo khi nhận Module 5:
+
+1. **Hai mục menu cùng sáng cam.** Ở `/ppc/search-terms` thì cả *Quảng cáo (PPC)* lẫn
+   *Search term & chặn (A3)* đều được tô nền — vì logic cũ
+   `pathname === href || pathname.startsWith(href + "/")` coi mục CHA là khớp khi đang ở
+   mục CON. Sửa bằng cách **chọn href khớp dài nhất** (`activeHrefFor` trong `lib/roles.ts`,
+   thuần nên test được): mục con thắng mục cha, trang con không có trong menu
+   (`/ppc/campaigns/C-1`) vẫn sáng mục cha gần nhất, và khớp theo **biên đoạn** nên `/ppcx`
+   KHÔNG bị tính là `/ppc`. Đã kiểm cho **toàn bộ menu** (mọi href của cả 4 vai trò) chứ
+   không chỉ vá mỗi `/ppc`.
+2. **Số đỏ cạnh menu là số mock cứng** (5 · 7 · 12 · 3…) nằm trong `roles.ts`. Một con số
+   đỏ là *lời hứa* "có 12 việc đang chờ" — bấm vào không thấy thì mất niềm tin cả dashboard.
+   Đã **gỡ hẳn trường `count`** khỏi `NavItem` và thay bằng `readNavBadges()`
+   (`lib/data/nav-badges.ts`): đếm thật bằng `select("*", { count: "exact", head: true })`
+   (Postgres đếm, KHÔNG kéo dòng nào về) trên view có RLS, mỗi badge một dòng trong
+   `NAV_BADGE_SPECS`. Hiện nối 2 badge đã có định nghĩa rõ "cần người xử lý":
+   `/ppc` = yêu cầu **chờ trưởng phòng duyệt** (`vexim_ads_changes.status='pending_approval'`),
+   `/ppc/search-terms` = gợi ý negative **đang chờ duyệt** (`vexim_ads_negative_suggestions.status='pending'`).
+   Các mục còn lại **không hiện gì** cho tới khi có query thật (thà trống còn hơn số sai);
+   query lỗi ⇒ badge biến mất, không làm sập layout.
+
+**Kiểm chứng:** `web` **174 test** (+5 test menu: chỉ 1 mục sáng · toàn bộ menu · 4 vai trò ·
+biên đoạn · không còn số mock) · `tsc` sạch · `next build` qua · chạy thật: 8 đường dẫn
+(`/ppc`, `/ppc/search-terms`, `/ppc/approvals`, `/ppc/campaigns/C-DEMO-01`, `/finance/claims`,
+`/listing/editor`, `/module0/users/new`, `/dashboard`) đều đúng **1 mục sáng** và **0 badge**
+ở chế độ demo.
+
 ## Cập nhật 13/09 — MODULE 5 PHẦN 2 & 3 (A2 · A3 · GHI NGƯỢC LÊN AMAZON: hàng đợi duyệt > 30%/ngày · audit · REVERT 1 chạm) — migration 0021
 
 Phần 2 (đọc sâu) và phần 3 (ghi thật) của Module 5 đã xong trong cùng một đợt, vì

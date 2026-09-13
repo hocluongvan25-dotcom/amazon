@@ -63,9 +63,55 @@ export type NavItem = {
   href: string;
   label: string;
   icon: string;
-  count?: number;
   personas: PersonaKey[];
 };
+
+/**
+ * BADGE SỐ BÊN CẠNH MENU — CHỈ HIỆN KHI CÓ SỐ THẬT TỪ DB.
+ *
+ * Trước đây `NavItem.count` là số MOCK viết cứng (5 · 7 · 12 · 3…) nằm trong file
+ * này ⇒ Ops nhìn thấy "12 việc cần xử lý" ở màn Giá rồi đi tìm 12 việc không có.
+ * Từ nay badge lấy từ `readNavBadges()` (đếm thật bằng view/RPC, có RLS) truyền
+ * xuống qua prop `badges`; chưa nối được query ⇒ **KHÔNG hiện gì** (thà trống còn
+ * hơn số sai).
+ */
+export type NavBadges = Record<string, number>;
+
+/** Badge chỉ có nghĩa khi > 0 và là số hữu hạn (null/NaN/0 ⇒ ẩn). */
+export function badgeOf(badges: NavBadges | undefined, href: string): number | null {
+  const n = badges?.[href];
+  return typeof n === "number" && Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
+}
+
+/**
+ * Một mục menu có đang được chọn không.
+ *
+ * Cách cũ (`pathname.startsWith(href + "/")`) làm `/ppc` và `/ppc/search-terms`
+ * CÙNG sáng khi đang ở `/ppc/search-terms` — hai dòng cam một lúc. Cách đúng:
+ * so khớp theo BIÊN ĐOẠN (`/ppc` khớp `/ppc` và `/ppc/...`, không khớp `/ppcx`),
+ * rồi chỉ chọn mục KHỚP DÀI NHẤT (xem `activeHrefFor`) — nghĩa là mục con thắng
+ * mục cha, còn `/ppc/campaigns/C-1` (không có trong menu) vẫn làm sáng `/ppc`.
+ */
+export function isNavActive(pathname: string, href: string): boolean {
+  if (!pathname || !href) return false;
+  const clean = pathname.split("?")[0].split("#")[0];
+  if (clean === href) return true;
+  return clean.startsWith(href.endsWith("/") ? href : `${href}/`);
+}
+
+/**
+ * Href của mục menu DUY NHẤT được sáng: mục khớp dài nhất.
+ * `["/ppc", "/ppc/search-terms"]` + `/ppc/search-terms` ⇒ `/ppc/search-terms`.
+ * `["/ppc", "/ppc/search-terms"]` + `/ppc/campaigns/C-DEMO-01` ⇒ `/ppc`.
+ */
+export function activeHrefFor(hrefs: string[], pathname: string): string | null {
+  let best: string | null = null;
+  for (const href of hrefs) {
+    if (!isNavActive(pathname, href)) continue;
+    if (best === null || href.length > best.length) best = href;
+  }
+  return best;
+}
 
 export const NAV: { group: string; items: NavItem[] }[] = [
   {
@@ -77,16 +123,16 @@ export const NAV: { group: string; items: NavItem[] }[] = [
   {
     group: "Phòng ban",
     items: [
-      { href: "/health", label: "Vận hành & Health", icon: "🛡️", count: 5, personas: ["ceo"] },
-      { href: "/listing", label: "Listing & Nội dung", icon: "🏷️", count: 7, personas: ["ceo"] },
+      { href: "/health", label: "Vận hành & Health", icon: "🛡️", personas: ["ceo"] },
+      { href: "/listing", label: "Listing & Nội dung", icon: "🏷️", personas: ["ceo"] },
       { href: "/listing/editor", label: "Soạn listing (L3)", icon: "✍️", personas: ["ceo"] },
-      { href: "/pricing", label: "Giá & Buy Box", icon: "💲", count: 12, personas: ["ceo"] },
-      { href: "/ppc", label: "Quảng cáo (PPC)", icon: "📈", count: 3, personas: ["ceo", "op_ppc"] },
+      { href: "/pricing", label: "Giá & Buy Box", icon: "💲", personas: ["ceo"] },
+      { href: "/ppc", label: "Quảng cáo (PPC)", icon: "📈", personas: ["ceo", "op_ppc"] },
       { href: "/ppc/search-terms", label: "Search term & chặn (A3)", icon: "🚫", personas: ["ceo", "op_ppc"] },
       { href: "/ppc/approvals", label: "Duyệt thay đổi (P3)", icon: "✅", personas: ["ceo", "op_ppc"] },
-      { href: "/fulfillment", label: "Kho vận & FBA", icon: "📦", count: 5, personas: ["ceo", "lead_fulfill"] },
-      { href: "/orders", label: "Đơn hàng & CSKH", icon: "💬", count: 4, personas: ["ceo"] },
-      { href: "/finance", label: "Tài chính & Đối soát", icon: "💰", count: 7, personas: ["ceo"] },
+      { href: "/fulfillment", label: "Kho vận & FBA", icon: "📦", personas: ["ceo", "lead_fulfill"] },
+      { href: "/orders", label: "Đơn hàng & CSKH", icon: "💬", personas: ["ceo"] },
+      { href: "/finance", label: "Tài chính & Đối soát", icon: "💰", personas: ["ceo"] },
       { href: "/finance/costs", label: "Giá vốn (F3/F4/P1)", icon: "🏷️", personas: ["ceo"] },
       { href: "/finance/claims", label: "Bồi hoàn FBA (F3)", icon: "🧾", personas: ["ceo"] },
       { href: "/finance/profit", label: "Lợi nhuận SKU (F4)", icon: "💹", personas: ["ceo"] },
