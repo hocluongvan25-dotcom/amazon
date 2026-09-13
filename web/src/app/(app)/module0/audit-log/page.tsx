@@ -1,67 +1,113 @@
-import { Chip, MockDataNotice, NoAccess, PageHeader, Panel, tableCls } from "@/components/ui";
+import { Chip, NoAccess, PageHeader, Panel, tableCls } from "@/components/ui";
 import { requireSession } from "@/lib/auth/session";
-import { auditLogs } from "@/lib/data/mock";
+import { createClient } from "@/lib/supabase/server";
+import { isForbidden, type AdminAuditRow } from "@/lib/data/users-admin";
+import { auditActionLabel, auditDiff, relativeTime } from "@/lib/users-model";
 import type { PersonaKey } from "@/lib/roles";
+import AuditLogBoard from "./AuditLogBoard";
 
-const ALLOWED: PersonaKey[] = ["ceo"];
+const DEMO_ALLOWED: PersonaKey[] = ["ceo"];
+
+async function readAuditSnapshot(limit = 200): Promise<
+  | { ok: true; audit: AdminAuditRow[] }
+  | { ok: false; message: string }
+> {
+  const client = await createClient();
+  if (!client) return { ok: false, message: "Chưa cấu hình Supabase (chế độ demo)." };
+
+  const { data, error } = await client.rpc("vexim_admin_audit", { p_limit: limit });
+  if (error) {
+    const msg = error.message || "Không đọc được nhật ký.";
+    return { ok: false, message: isForbidden(msg) ? "Bạn không phải admin người dùng." : msg };
+  }
+
+  const audit: AdminAuditRow[] = ((data ?? []) as unknown as {
+    id: string;
+    created_at: string | null;
+    actor_name: string | null;
+    actor_email: string | null;
+    action: string;
+    entity: string | null;
+    before_value: Record<string, unknown> | null;
+    after_value: Record<string, unknown> | null;
+    result: string | null;
+  }[]).map((r) => ({
+    id: r.id,
+    createdAt: r.created_at,
+    actorName: r.actor_name,
+    actorEmail: r.actor_email,
+    action: r.action,
+    entity: r.entity,
+    beforeValue: r.before_value,
+    afterValue: r.after_value,
+    result: r.result,
+  }));
+
+  return { ok: true, audit };
+}
 
 export default async function AuditLogPage() {
   const session = await requireSession();
-  if (!ALLOWED.includes(session.persona)) return <NoAccess />;
+
+  // SUPABASE MODE
+  if (session.mode === "supabase") {
+    const snapshot = await readAuditSnapshot(200);
+    if (!snapshot.ok) {
+      return (
+        <>
+          <PageHeader
+            title="Nhật ký thao tác (audit log)"
+            sub="iam.audit_logs · append-only · module iam"
+            desc="Toàn bộ thao tác quản trị người dùng và vận hành được ghi append-only, không cho update/delete. Chỉ Super Admin / Org Admin được xem."
+          />
+          <NoAccess />
+          <Panel title="Vì sao bị chặn" hint="thông điệp từ database">
+            <p className="text-[12.5px] text-muted">{snapshot.message}</p>
+            <p className="mt-2 text-[12px] text-soft">
+              Quyền xem nhật ký do <code>iam.is_user_admin()</code> quyết định (migration 0022). Nếu bạn là admin mà vẫn bị chặn, kiểm tra lại vai trò trong <code>iam.role_assignments</code>.
+            </p>
+          </Panel>
+        </>
+      );
+    }
+
+    return (
+      <>
+        <PageHeader
+          title="Nhật ký thao tác (audit log)"
+          sub={`${snapshot.audit.length} bản ghi gần nhất · iam.audit_logs · append-only`}
+          desc="Toàn bộ thao tác ghi ra Amazon (đổi giá, sửa listing, chỉnh campaign) và thao tác quản trị người dùng (mời, đổi vai trò, khóa) đều ghi: ai · lúc nào · giá trị trước/sau · kết quả. Bảng không cho update/delete — đây là nguồn sự thật cuối cùng."
+        />
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <a
+            href="/module0/users"
+            className="rounded-full border border-line bg-card px-4 py-1.5 text-[12.5px] font-bold text-muted transition hover:border-accent hover:text-accent-ink"
+          >
+            ← Người dùng & phân quyền
+          </a>
+          <span className="text-[12px] text-soft">
+            Nhật ký đã được tách khỏi trang Người dùng để tránh trang dài hàng trăm dòng khi có nhiều thao tác.
+          </span>
+        </div>
+        <AuditLogBoard audit={snapshot.audit} demo={false} />
+      </>
+    );
+  }
+
+  // DEMO MODE
+  if (!DEMO_ALLOWED.includes(session.persona)) return <NoAccess />;
 
   return (
     <>
-      {session.mode === "supabase" ? (
-        <MockDataNotice what={<>Bảng dưới đọc từ mảng viết cứng trong `lib/data/mock.ts`; nhật ký THẬT đang nằm ở
-        `iam.audit_logs` (màn `/module0/users` đã hiện nhật ký thao tác quản trị thật).</>} />
-      ) : null}
       <PageHeader
         title="Nhật ký thao tác (audit log)"
-        sub="iam.audit_logs · append-only"
-        desc="Toàn bộ thao tác ghi ra Amazon (đổi giá, sửa listing, chỉnh campaign) ghi: ai · lúc nào · giá trị trước/sau · kết quả. Bảng không cho update/delete."
+        sub="chế độ demo — không có nhật ký thật"
+        desc="Toàn bộ thao tác ghi ra Amazon và quản trị người dùng đều ghi vào iam.audit_logs (append-only). Chế độ demo không có kết nối Supabase nên bảng để trống; đăng nhập bằng tài khoản thật để xem nhật ký."
       />
-      <Panel title="Thao tác gần nhất">
-        <table className={tableCls.table}>
-          <thead>
-            <tr>
-              <th className={tableCls.th}>Thời gian</th>
-              <th className={tableCls.th}>Người thao tác</th>
-              <th className={tableCls.th}>Module</th>
-              <th className={tableCls.th}>Hành động</th>
-              <th className={tableCls.th}>Đối tượng</th>
-              <th className={tableCls.th}>Thay đổi</th>
-              <th className={tableCls.th}>Kết quả</th>
-            </tr>
-          </thead>
-          <tbody>
-            {auditLogs.map((a, i) => (
-              <tr key={i}>
-                <td className={tableCls.td}>{a.time}</td>
-                <td className={`${tableCls.td} font-bold`}>{a.actor}</td>
-                <td className={tableCls.td}>{a.module}</td>
-                <td className={`${tableCls.td} font-mono text-[12px]`}>
-                  {a.action}
-                </td>
-                <td className={tableCls.td}>{a.entity}</td>
-                <td className={tableCls.td}>{a.change}</td>
-                <td className={tableCls.td}>
-                  <Chip tone={a.result === "ok" ? "green" : "red"}>
-                    {a.result === "ok" ? "OK" : "Lỗi"}
-                  </Chip>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Panel>
-      <Panel title="Quy tắc duyệt theo ngưỡng (đã chốt)">
-        <ul className="list-disc space-y-1.5 pl-5 text-[13px] text-muted">
-          <li>Đổi giá ≤ 2%: operator tự duyệt · &gt; 2%: trưởng phòng duyệt.</li>
-          <li>Tăng budget campaign &gt; 30%/ngày: trưởng phòng duyệt.</li>
-          <li>Lô nhập hàng &gt; ngưỡng $: trưởng phòng Kho vận duyệt.</li>
-          <li>Mọi thao tác đều ghi audit log — kể cả bị từ chối.</li>
-        </ul>
-      </Panel>
+      <div className="mb-4 rounded-[13px] border-2 border-dashed border-amber/60 bg-amber-soft px-4 py-3 text-[12.5px] text-[#8a5602]">
+        <b>CHẾ ĐỘ DEMO — bảng để TRỐNG theo chủ đích.</b> Không bày dữ liệu giả trong màn kiểm toán. Đăng nhập bằng tài khoản thật (super_admin/org_admin) để đọc <code>iam.audit_logs</code> thật.
+      </div>
+      <AuditLogBoard audit={[]} demo />
     </>
   );
 }
