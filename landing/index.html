@@ -3,23 +3,17 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>VEXIM Ops — Nền tảng quản trị vận hành Amazon cho doanh nghiệp tăng trưởng</title>
-<meta name="description" content="VEXIM Ops là nền tảng quản trị vận hành Amazon đa gian hàng, kết nối chính thức qua Amazon SP-API & Ads API. Tập trung đơn hàng, tồn kho FBA, listing, giá & Buy Box, quảng cáo PPC, tài chính đối soát và sức khỏe tài khoản trên một dashboard duy nhất — phân quyền theo phòng ban, chuẩn hoá SOP.">
-<meta property="og:title" content="VEXIM Ops — Nền tảng vận hành Amazon">
-<meta property="og:description" content="Một dashboard cho mọi phòng ban vận hành Amazon: giảm thất thoát doanh thu, giữ Buy Box, tối ưu ACOS/TACOS, chống hết hàng, bảo vệ sức khỏe tài khoản.">
+<title>VEXIM Ops — Quản lý gian hàng Amazon: Buy Box, FBA, Quảng cáo, Lợi nhuận</title>
+<meta name="description" content="VEXIM Ops giúp người bán Amazon quản lý Buy Box, tồn kho FBA, listing, quảng cáo Sponsored Products, đơn hàng FBM và báo cáo lợi nhuận thực sau phí trên một dashboard duy nhất.">
+<meta property="og:title" content="VEXIM Ops — Bán hàng Amazon hiệu quả hơn">
+<meta property="og:description" content="Giữ Buy Box, chống hết hàng FBA, tối ưu ACOS/TACOS, bảo vệ sức khỏe tài khoản Amazon — tất cả trên một nền tảng.">
 <meta property="og:type" content="website">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f1720'/%3E%3Cpath d='M9 10l7 13 7-13h-4.2L16 16.2 13.2 10z' fill='%23ff9900'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap&subset=vietnamese" rel="stylesheet">
 <style>
-  /* Đồng nhất font Mac vs Windows: Inter + antialiased */
-  html{
-    -webkit-font-smoothing:antialiased;
-    -moz-osx-font-smoothing:grayscale;
-    text-rendering:optimizeLegibility;
-    font-feature-settings:"rlig" 1,"calt" 1,"ss01" 1;
-  }
+  html{ -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; text-rendering:optimizeLegibility; font-feature-settings:"rlig" 1,"calt" 1,"ss01" 1; }
   :root{
     --ink:#0f1720; --muted:#5b6472; --soft:#8a93a3;
     --bg:#f7f8fa; --card:#ffffff; --line:#e5e8ee;
@@ -27,16 +21,14 @@
     --green:#0e9f6e; --green-soft:#e6f7f0;
     --red:#e02424; --red-soft:#fdeaea;
     --amber:#c27803; --amber-soft:#fdf3e0;
-    --blue:#2563eb;
     --radius:14px;
     --shadow:0 1px 2px rgba(15,23,32,.05), 0 8px 24px rgba(15,23,32,.06);
   }
   *{margin:0;padding:0;box-sizing:border-box}
-  html{scroll-behavior:smooth;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-rendering:optimizeLegibility}
-  body{font-family:"Inter",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;color:var(--ink);background:var(--bg);line-height:1.6;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;letter-spacing:-0.011em}
+  html{scroll-behavior:smooth}
+  body{font-family:"Inter",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;color:var(--ink);background:var(--bg);line-height:1.6;letter-spacing:-0.011em}
   a{color:inherit;text-decoration:none}
   .wrap{max-width:1120px;margin:0 auto;padding:0 24px}
-
   header{position:sticky;top:0;z-index:50;background:rgba(255,255,255,.86);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
   .nav{display:flex;align-items:center;gap:28px;height:68px}
   .logo{display:flex;align-items:center;gap:10px;font-weight:900;font-size:18px;letter-spacing:-.02em}
@@ -50,21 +42,17 @@
   .btn-ghost{border-color:var(--line);background:#fff;color:var(--ink)}
   .btn-ghost:hover{border-color:#c9cfda}
   .burger{display:none;margin-left:auto;background:none;border:0;font-size:22px;cursor:pointer;color:var(--ink)}
-
-  .hero{padding:84px 0 72px;background:
-    radial-gradient(1000px 400px at 85% -10%, #fff4e5 0%, transparent 60%),
-    radial-gradient(700px 380px at -10% 10%, #eaf1ff 0%, transparent 55%), var(--bg)}
+  .hero{padding:84px 0 72px;background:radial-gradient(1000px 400px at 85% -10%, #fff4e5 0%, transparent 60%),radial-gradient(700px 380px at -10% 10%, #eaf1ff 0%, transparent 55%), var(--bg)}
   .hero-grid{display:grid;grid-template-columns:1.08fr .92fr;gap:52px;align-items:center}
   .badge{display:inline-flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line);color:var(--muted);font-size:12.5px;font-weight:700;padding:7px 14px;border-radius:999px;box-shadow:var(--shadow)}
   .badge .b-dot{width:7px;height:7px;border-radius:50%;background:var(--green)}
   h1{font-size:clamp(34px,4.8vw,54px);line-height:1.05;letter-spacing:-.035em;font-weight:900;margin:20px 0 18px}
-  h1 em{font-style:normal;color:var(--accent-ink);position:relative;white-space:nowrap}
+  h1 em{font-style:normal;color:var(--accent-ink);white-space:nowrap}
   .hero p.lead{font-size:17.5px;color:var(--muted);max-width:560px;margin-bottom:30px}
   .hero-ctas{display:flex;gap:12px;flex-wrap:wrap}
   .hero-note{margin-top:18px;font-size:12.5px;color:var(--soft);line-height:1.5}
   .hero-bullets{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
   .hero-bullets span{font-size:11.5px;font-weight:700;color:var(--muted);background:#fff;border:1px solid var(--line);padding:5px 11px;border-radius:999px}
-
   .mock{background:var(--card);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);overflow:hidden}
   .mock-top{display:flex;align-items:center;gap:10px;padding:13px 18px;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--muted);font-weight:600}
   .dots{display:flex;gap:5px}
@@ -89,19 +77,16 @@
   .alert.red{background:var(--red-soft);color:#a01717}.alert.red .a-icon{background:var(--red)}
   .alert.amber{background:var(--amber-soft);color:#8a5602}.alert.amber .a-icon{background:var(--amber)}
   .alert.green{background:var(--green-soft);color:#0b7a55}.alert.green .a-icon{background:var(--green)}
-
   section{padding:80px 0}
   .sec-head{max-width:720px;margin-bottom:44px}
   .kicker{font-size:12px;font-weight:900;letter-spacing:.14em;text-transform:uppercase;color:var(--accent-ink);margin-bottom:12px}
   h2{font-size:clamp(28px,3.6vw,40px);letter-spacing:-.025em;line-height:1.12;font-weight:900;margin-bottom:14px}
   .sec-head p{color:var(--muted);font-size:17px;line-height:1.6}
-
   .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
   .step{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:28px 24px;box-shadow:var(--shadow)}
   .step-n{width:36px;height:36px;border-radius:10px;background:var(--accent-soft);color:var(--accent-ink);display:grid;place-items:center;font-weight:900;font-size:15px;margin-bottom:16px}
   .step h3{font-size:17.5px;margin-bottom:8px;letter-spacing:-.01em}
-  .step p{font-size:14.5px;color:var(--muted)}
-
+  .step p{font-size:14.5px;color:var(--muted);line-height:1.55}
   .departments{background:#fff;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
   .dept-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
   .dept{background:var(--bg);border:1px solid var(--line);border-radius:var(--radius);padding:26px;transition:.18s}
@@ -110,19 +95,16 @@
   .dept h3{font-size:16.5px;margin-bottom:7px;letter-spacing:-.01em}
   .dept p{font-size:14px;color:var(--muted);line-height:1.55}
   .dept .dept-kpi{display:inline-block;margin-top:12px;font-size:11.5px;font-weight:800;color:var(--accent-ink);background:var(--accent-soft);border-radius:999px;padding:5px 12px}
-
   .modules-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
   .module-card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:22px 24px;display:flex;gap:14px}
   .module-card .m-ico{flex:none;width:40px;height:40px;border-radius:10px;background:var(--bg);border:1px solid var(--line);display:grid;place-items:center;font-size:18px}
   .module-card h3{font-size:15.5px;margin-bottom:4px}
-  .module-card p{font-size:13.5px;color:var(--muted)}
-
+  .module-card p{font-size:13.5px;color:var(--muted);line-height:1.5}
   .sec-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
   .sec-item{display:flex;gap:14px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:20px 22px}
   .sec-item .s-ico{flex:none;width:38px;height:38px;border-radius:10px;background:var(--green-soft);color:var(--green);display:grid;place-items:center;font-size:17px;font-weight:900}
   .sec-item h3{font-size:15.5px;margin-bottom:4px}
-  .sec-item p{font-size:13.8px;color:var(--muted)}
-
+  .sec-item p{font-size:13.8px;color:var(--muted);line-height:1.5}
   .split{display:grid;grid-template-columns:1.1fr .9fr;gap:40px;align-items:start}
   .about p{color:var(--muted);font-size:16.5px;margin-bottom:14px;line-height:1.65}
   .about ul{margin:12px 0 0 18px;color:var(--muted);font-size:15px}
@@ -135,15 +117,12 @@
   .contact-row .c-ico{width:34px;height:34px;border-radius:9px;background:#1d2836;display:grid;place-items:center;font-size:15px}
   .contact-row b{display:block;font-size:11px;color:#8f9aa9;font-weight:700;text-transform:uppercase;letter-spacing:.08em}
   .contact-row span{color:#e7ebf1}
-
   footer{border-top:1px solid var(--line);background:#fff;padding:36px 0;font-size:13.5px;color:var(--soft)}
   .foot{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
   .foot .sep{flex:1}
   .foot a:hover{color:var(--ink)}
-
   .reveal{opacity:0;transform:translateY(14px);transition:.6s ease}
   .reveal.in{opacity:1;transform:none}
-
   @media (max-width:980px){
     .nav-links{display:none}
     .burger{display:block}
@@ -165,12 +144,12 @@
   <div class="wrap nav">
     <a class="logo" href="#top">
       <span class="logo-mark">V</span>
-      VEXIM&nbsp;Ops <small>Nền tảng vận hành Amazon</small>
+      VEXIM&nbsp;Ops <small>Vận hành Amazon</small>
     </a>
     <nav class="nav-links" id="navLinks">
-      <a href="#platform">Nền tảng</a>
-      <a href="#departments">Phòng ban</a>
-      <a href="#modules">Module</a>
+      <a href="#platform">Cách hoạt động</a>
+      <a href="#departments">Công việc</a>
+      <a href="#modules">Tính năng</a>
       <a href="#security">Bảo mật</a>
       <a href="#about">Về VEXIM</a>
       <a href="#contact">Liên hệ</a>
@@ -182,47 +161,46 @@
 
 <main id="top">
 
-  <!-- HERO -->
   <section class="hero">
     <div class="wrap hero-grid">
       <div>
-        <span class="badge"><span class="b-dot"></span> Kết nối chính thức qua Amazon SP-API & Ads API • Không scraping</span>
-        <h1>Vận hành Amazon<br><em>tập trung & đo được.</em></h1>
-        <p class="lead">VEXIM Ops là nền tảng quản trị vận hành Amazon đa gian hàng cho agency và brand tăng trưởng. Kết nối shop qua OAuth chính thức, dữ liệu chảy về theo thời gian thực và được chuyển hoá thành hành động hằng ngày cho từng phòng ban — giảm thất thoát, giữ Buy Box, tối ưu biên lợi nhuận.</p>
+        <span class="badge"><span class="b-dot"></span> Kết nối chính thức Amazon • Đồng bộ Buy Box, FBA, Quảng cáo</span>
+        <h1>Bán hàng Amazon<br><em>hiệu quả hơn, lợi nhuận rõ hơn.</em></h1>
+        <p class="lead">VEXIM Ops giúp bạn quản lý toàn bộ gian hàng Amazon trên một nơi: giữ Buy Box, chống hết hàng FBA, tối ưu listing, quảng cáo Sponsored Products, đơn hàng FBM và báo cáo lợi nhuận thực sau phí. Không còn Excel rời rạc, không bỏ lỡ doanh thu vì hết hàng hay đốt ngân sách.</p>
         <div class="hero-ctas">
           <a class="btn btn-dark" href="#contact">Yêu cầu demo live →</a>
-          <a class="btn btn-ghost" href="#platform">Xem cách vận hành</a>
+          <a class="btn btn-ghost" href="#platform">Xem cách hoạt động</a>
         </div>
-        <p class="hero-note">Chủ shop uỷ quyền 1 lần bằng Login with Amazon (OAuth 2.0), có thể thu hồi bất kỳ lúc nào trong Seller Central. Token LWA được mã hoá, tự động nhắc gia hạn trước 30 ngày.</p>
+        <p class="hero-note">Kết nối gian hàng bằng tài khoản Amazon, có thể ngắt kết nối bất kỳ lúc nào trong Seller Central. Dữ liệu đơn hàng, tồn kho, quảng cáo được cập nhật liên tục.</p>
         <div class="hero-bullets">
-          <span>✓ Multi-tenant: VEXIM → Doanh nghiệp → Shop</span>
-          <span>✓ RBAC 6 vai trò + phân quyền theo phòng ban</span>
-          <span>✓ 12 SOP chuẩn hoá</span>
-          <span>✓ Audit log & RLS cấp database</span>
+          <span>✓ Giữ Buy Box & giá cạnh tranh</span>
+          <span>✓ Chống hết hàng FBA</span>
+          <span>✓ Tối ưu ACOS / TACOS / ROAS</span>
+          <span>✓ Bảo vệ sức khỏe tài khoản</span>
         </div>
       </div>
 
       <div class="mock" aria-hidden="true">
         <div class="mock-top">
           <span class="dots"><i></i><i></i><i></i></span>
-          Dashboard CEO — Toàn bộ gian hàng
+          Dashboard — Toàn bộ gian hàng Amazon
           <span class="live"><i></i> Live</span>
         </div>
         <div class="mock-body">
-          <div class="mock-title">Hôm qua · Toàn hệ thống · 14 shop</div>
+          <div class="mock-title">Hôm qua · 14 gian hàng · $12,480 doanh thu</div>
           <div class="kpis">
             <div class="kpi">
-              <div class="k-label">Doanh thu thuần</div>
+              <div class="k-label">Doanh thu</div>
               <div class="k-value">$12,480</div>
-              <div class="k-delta up">▲ 8.2% vs cùng kỳ tuần trước</div>
+              <div class="k-delta up">▲ 8.2% vs tuần trước</div>
             </div>
             <div class="kpi">
               <div class="k-label">Đơn hàng</div>
               <div class="k-value">341</div>
-              <div class="k-delta up">▲ 4.7% · CR 4.2%</div>
+              <div class="k-delta up">▲ 4.7% · Tỷ lệ chuyển đổi 4.2%</div>
             </div>
             <div class="kpi">
-              <div class="k-label">Chi phí QC · TACOS</div>
+              <div class="k-label">Chi phí quảng cáo · TACOS</div>
               <div class="k-value">$862</div>
               <div class="k-delta flat">TACOS 6.9% · Mục tiêu ≤ 8%</div>
             </div>
@@ -236,192 +214,187 @@
             <i style="height:38%"></i><i style="height:52%"></i><i style="height:44%"></i><i style="height:63%"></i><i style="height:57%"></i><i style="height:72%"></i><i style="height:88%"></i>
           </div>
           <div class="alerts">
-            <div class="alert red"><span class="a-icon"></span>2 SKU sắp hết hàng (cover 5 ngày) — cần kế hoạch nhập hôm nay, ~$410/ngày nếu đứt</div>
-            <div class="alert amber"><span class="a-icon"></span>2 campaign cạn ngân sách trước 18h — đang bỏ lỡ hiển thị</div>
-            <div class="alert green"><span class="a-icon"></span>Sức khỏe tài khoản toàn hệ thống đạt chuẩn Amazon</div>
+            <div class="alert red"><span class="a-icon"></span>2 SKU sắp hết hàng FBA (còn 5 ngày bán) — cần nhập hàng hôm nay, ~$410/ngày nếu đứt hàng</div>
+            <div class="alert amber"><span class="a-icon"></span>2 chiến dịch Sponsored Products cạn ngân sách trước 18h — đang bỏ lỡ hiển thị</div>
+            <div class="alert green"><span class="a-icon"></span>Sức khỏe tài khoản đạt chuẩn Amazon — không có vi phạm mở</div>
           </div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- HOW IT WORKS -->
   <section id="platform">
     <div class="wrap">
       <div class="sec-head">
-        <div class="kicker">Nền tảng vận hành</div>
-        <h2>Từ kết nối đến hành động trong 30 phút</h2>
-        <p>Không file Excel rời rạc, không copy-paste thủ công. Toàn bộ dữ liệu lấy trực tiếp từ API chính thức của Amazon, chuẩn hoá về Supabase và phân phối theo quyền từng phòng ban — mỗi con số đều trả lời “hôm nay phải làm gì”.</p>
+        <div class="kicker">Cách hoạt động</div>
+        <h2>Từ kết nối gian hàng đến hành động mỗi ngày — trong 30 phút</h2>
+        <p>Không cần file Excel, không copy-paste thủ công. Dữ liệu lấy trực tiếp từ Amazon: đơn hàng, tồn kho FBA, listing, giá Buy Box, quảng cáo, phí và settlement — tất cả về một dashboard, mỗi sáng biết ngay việc gì cần làm.</p>
       </div>
       <div class="steps">
         <div class="step reveal">
           <div class="step-n">1</div>
-          <h3>Kết nối gian hàng chính thức</h3>
-          <p>Chủ tài khoản bấm “Kết nối Amazon” trong Seller Central, uỷ quyền qua OAuth 2.0. Hệ thống nhận LWA refresh token, mã hoá bằng Supabase Vault, tự động đăng ký nhận thông báo <code>ORDER_CHANGE</code>, <code>ANY_OFFER_CHANGED</code>, <code>LISTINGS_ITEM_ISSUES_CHANGE</code>.</p>
+          <h3>Kết nối gian hàng Amazon</h3>
+          <p>Chủ gian hàng bấm “Kết nối Amazon” trong Seller Central, đăng nhập bằng tài khoản Amazon. Kết nối an toàn, có thể ngắt bất kỳ lúc nào. Tự động theo dõi đơn hàng mới, thay đổi Buy Box, cảnh báo listing.</p>
         </div>
         <div class="step reveal">
           <div class="step-n">2</div>
-          <h3>Đồng bộ 3 tầng — không bỏ sót tín hiệu</h3>
-          <p><b>Tầng 1 Realtime</b> (EventBridge/SQS), <b>Tầng 2 Incremental</b> (15–60 phút), <b>Tầng 3 Báo cáo đối soát</b> (hằng ngày). Backfill 30 ngày đơn hàng, tồn kho, listing và settlement ngay sau khi kết nối — dashboard có số thật trong &lt;30 phút.</p>
+          <h3>Đồng bộ tự động — không bỏ sót tín hiệu</h3>
+          <p><b>Realtime</b> đơn hàng & Buy Box, <b>hằng giờ</b> tồn kho FBA & giá, <b>hằng ngày</b> báo cáo doanh thu, quảng cáo, phí lưu kho và settlement. Lịch sử 30 ngày có ngay sau khi kết nối — dashboard có số thật trong &lt;30 phút.</p>
         </div>
         <div class="step reveal">
           <div class="step-n">3</div>
-          <h3>Phòng ban hành động theo cảnh báo</h3>
-          <p>Mỗi phòng ban mở dashboard riêng với 5–8 chỉ số cốt lõi và hàng đợi ưu tiên theo doanh thu/nguy cơ. Mọi thao tác ghi (đổi giá, sửa listing, duyệt campaign) đều ghi <code>iam.audit_logs</code> với before/after.</p>
+          <h3>Hành động mỗi ngày theo cảnh báo</h3>
+          <p>Mỗi đội mở dashboard riêng với chỉ số cốt lõi: SKU sắp hết hàng, listing mất Buy Box, campaign cạn ngân sách, tin nhắn khách hàng quá hạn. Mọi thay đổi giá, listing, quảng cáo đều lưu lịch sử trước/sau.</p>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- DEPARTMENTS -->
   <section id="departments" class="departments">
     <div class="wrap">
       <div class="sec-head">
-        <div class="kicker">Vận hành theo phòng ban — đúng cách Amazon vận hành</div>
-        <h2>Một dashboard cho mỗi đội, một ngôn ngữ chung về tăng trưởng</h2>
-        <p>Cơ chế phân quyền RBAC 6 cấp (super_admin → client_viewer) kết hợp RLS cấp database đảm bảo mỗi người chỉ thấy shop và module được giao. Không còn tình trạng “ai cũng thấy hết, không ai chịu trách nhiệm”.</p>
+        <div class="kicker">Làm việc như người bán Amazon chuyên nghiệp</div>
+        <h2>Một dashboard cho mỗi công việc, một ngôn ngữ chung về tăng trưởng</h2>
+        <p>Mỗi người chỉ thấy gian hàng và công việc được giao. Không còn tình trạng “ai cũng thấy hết, không ai chịu trách nhiệm” — việc nào, người nào, rõ ràng.</p>
       </div>
       <div class="dept-grid">
         <div class="dept reveal">
           <div class="dept-ico">🛡️</div>
-          <h3>Vận hành & Sức khỏe tài khoản</h3>
-          <p>Theo dõi Account Health Rating, vi phạm chính sách, listing bị gỡ, KYC, khiếu nại — cảnh báo sớm trước khi Amazon hạn chế.</p>
-          <span class="dept-kpi">KPI hằng ngày: AHR · Vi phạm mở · Nhiệm vụ quá SLA</span>
+          <h3>Sức khỏe tài khoản Amazon</h3>
+          <p>Theo dõi Account Health Rating, vi phạm chính sách, listing bị Amazon gỡ, yêu cầu cung cấp giấy tờ — cảnh báo sớm trước khi bị hạn chế bán hàng.</p>
+          <span class="dept-kpi">Mỗi ngày: AHR · Vi phạm mở · Nhiệm vụ cần xử lý</span>
         </div>
         <div class="dept reveal">
           <div class="dept-ico">🏷️</div>
-          <h3>Listing & Nội dung</h3>
-          <p>Quản lý vòng đời listing: active/inactive/stranded, lỗi chất lượng, hàng đợi duyệt nội dung, editor tuân thủ giới hạn Amazon.</p>
-          <span class="dept-kpi">KPI hằng ngày: Listing lỗi · Chờ duyệt · Doanh thu/ngày bị ảnh hưởng</span>
+          <h3>Listing & Tồn kho lỗi</h3>
+          <p>Quản lý listing Active, Suppressed, Stranded Inventory, lỗi hình ảnh, tiêu đề, từ khóa. Ưu tiên xử lý theo doanh thu bị ảnh hưởng.</p>
+          <span class="dept-kpi">Mỗi ngày: Listing lỗi · Stranded · Doanh thu bị mất</span>
         </div>
         <div class="dept reveal">
           <div class="dept-ico">💰</div>
-          <h3>Định giá & Buy Box</h3>
-          <p>Giám sát đối thủ, giữ tỷ lệ thắng Buy Box, tính biên lợi nhuận sau phí FBA/referral, phê duyệt chiến lược giá theo SOP.</p>
-          <span class="dept-kpi">KPI hằng ngày: % Buy Box · SKU mất Buy Box · Biên lợi nhuận</span>
+          <h3>Giá & Buy Box</h3>
+          <p>Giám sát giá đối thủ, tỷ lệ thắng Buy Box, tính biên lợi nhuận thực sau phí FBA và phí giới thiệu Amazon. Duyệt tăng/giảm giá theo quy trình.</p>
+          <span class="dept-kpi">Mỗi ngày: % Buy Box · SKU mất Buy Box · Biên lợi nhuận</span>
         </div>
         <div class="dept reveal">
           <div class="dept-ico">📦</div>
-          <h3>Kho vận & FBA</h3>
-          <p>Dự báo days-of-cover, cảnh báo sắp hết hàng xếp theo doanh thu, theo dõi inbound shipment, tồn kho lâu ngày.</p>
-          <span class="dept-kpi">KPI hằng ngày: SKU sắp hết · Giá trị tồn kho · Nhập hàng đang vận chuyển</span>
+          <h3>Tồn kho FBA & Nhập hàng</h3>
+          <p>Dự báo số ngày bán còn lại (Days of Cover), cảnh báo hết hàng theo doanh thu, theo dõi lô hàng inbound, tồn kho lâu ngày và phí lưu kho FBA.</p>
+          <span class="dept-kpi">Mỗi ngày: SKU sắp hết · Giá trị tồn kho · Lô hàng đang vận chuyển</span>
         </div>
         <div class="dept reveal">
           <div class="dept-ico">📈</div>
-          <h3>Quảng cáo PPC</h3>
-          <p>Quản lý Sponsored Products/SB/SD, ngân sách, bid, phân tích search term, đề xuất phủ định (Negative Exact/Phrase) theo SOP-04.</p>
-          <span class="dept-kpi">KPI hằng ngày: ACOS · TACOS · Campaign vượt ngân sách</span>
+          <h3>Quảng cáo Amazon Ads</h3>
+          <p>Quản lý Sponsored Products, Sponsored Brands, Sponsored Display, ngân sách, giá thầu, báo cáo Search Term, gợi ý từ khóa phủ định để giảm ACOS.</p>
+          <span class="dept-kpi">Mỗi ngày: ACOS · TACOS · Campaign cạn ngân sách</span>
         </div>
         <div class="dept reveal">
           <div class="dept-ico">💬</div>
-          <h3>Đơn hàng & CSKH</h3>
-          <p>Hàng đợi FBM với deadline giao hàng, tin nhắn buyer theo SLA 24h, xử lý return/refund, theo dõi feedback.</p>
-          <span class="dept-kpi">KPI hằng ngày: Tin nhắn chưa trả lời · Đơn FBM quá hạn · Tỷ lệ hoàn</span>
+          <h3>Đơn hàng & Chăm sóc khách hàng</h3>
+          <p>Theo dõi đơn FBM sắp quá hạn giao hàng, tin nhắn của người mua (Buyer Message) cần trả lời trong 24h, xử lý trả hàng & hoàn tiền, theo dõi Feedback.</p>
+          <span class="dept-kpi">Mỗi ngày: Tin nhắn chưa trả lời · Đơn FBM quá hạn · Tỷ lệ trả hàng</span>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- MODULES -->
   <section id="modules">
     <div class="wrap">
       <div class="sec-head">
-        <div class="kicker">Hệ thống module — khớp 100% luồng vận hành thực tế</div>
-        <h2>Không phải công cụ rời rạc, mà là hệ điều hành cho Amazon</h2>
-        <p>30+ route được thiết kế theo hành trình vận hành: từ CEO nhìn toàn cảnh → từng phòng ban xử lý chi tiết → đối soát tài chính → cổng khách hàng minh bạch.</p>
+        <div class="kicker">Tất cả công việc bán hàng Amazon trong một nền tảng</div>
+        <h2>Không phải công cụ rời rạc, mà là hệ điều hành cho gian hàng Amazon</h2>
+        <p>Từ CEO nhìn toàn cảnh đến từng đội xử lý chi tiết: doanh thu, Buy Box, FBA, quảng cáo, đơn hàng và lợi nhuận — tất cả liên thông với nhau.</p>
       </div>
       <div class="modules-grid">
         <div class="module-card reveal">
           <div class="m-ico">📊</div>
-          <div><h3>Dashboard CEO</h3><p>Doanh thu, đơn hàng, TACOS, shop cần xử lý gấp, biểu đồ 14 ngày, cảnh báo đỏ/vàng/xanh theo tác động doanh thu.</p></div>
+          <div><h3>Dashboard tổng quan</h3><p>Doanh thu, đơn hàng, lợi nhuận, TACOS, tỷ lệ Buy Box, top SKU bán chạy, cảnh báo đỏ/vàng/xanh theo tác động doanh thu.</p></div>
         </div>
         <div class="module-card reveal">
           <div class="m-ico">🛡️</div>
-          <div><h3>Sức khỏe tài khoản</h3><p>AHR, ODR, Late Shipment, vi phạm IP, nhiệm vụ KYC — đồng bộ qua Account Health API & notification.</p></div>
+          <div><h3>Sức khỏe tài khoản</h3><p>Account Health Rating, ODR, Late Shipment Rate, vi phạm thương hiệu, listing bị gỡ — không bỏ lỡ cảnh báo quan trọng từ Amazon.</p></div>
         </div>
         <div class="module-card reveal">
           <div class="m-ico">🏷️</div>
-          <div><h3>Listing</h3><p>Listings Items API + Catalog, hàng đợi lỗi theo doanh thu, editor tuân thủ giới hạn ký tự, quy trình duyệt.</p></div>
+          <div><h3>Quản lý Listing</h3><p>Theo dõi trạng thái listing, lỗi suppressed, stranded inventory, giá bán, tồn kho FBA, Buy Box — chỉnh sửa hàng loạt và duyệt thay đổi.</p></div>
         </div>
         <div class="module-card reveal">
           <div class="m-ico">💲</div>
-          <div><h3>Định giá & Phê duyệt</h3><p>Product Pricing & Fees API, so sánh đối thủ, tính P&L theo SKU, luồng phê duyệt giá 2 cấp.</p></div>
+          <div><h3>Giá & Lợi nhuận thực</h3><p>So sánh giá đối thủ, tính lợi nhuận thực sau phí FBA, phí referral, quảng cáo. Xem P&L theo SKU, theo ngày, theo gian hàng.</p></div>
         </div>
         <div class="module-card reveal">
           <div class="m-ico">📦</div>
-          <div><h3>Tồn kho & Nhập hàng</h3><p>FBA Inventory API, dự báo tiêu thụ, cảnh báo hết hàng, tạo inbound shipment (2024-03-20), theo dõi FC allocation.</p></div>
+          <div><h3>Tồn kho FBA & Nhập hàng</h3><p>Tồn kho theo kho FBA, dự báo hết hàng, đề xuất nhập hàng, theo dõi inbound shipment, tồn kho lâu ngày và phí lưu kho.</p></div>
         </div>
         <div class="module-card reveal">
           <div class="m-ico">🎯</div>
-          <div><h3>PPC & Search Term</h3><p>Ads API v3, chi tiết campaign → ad group → keyword, báo cáo search term, hàng đợi duyệt Negative, ghi ngược lên Amazon có audit & revert 1 chạm.</p></div>
+          <div><h3>Quảng cáo & Từ khóa khách tìm</h3><p>Campaign → Ad Group → Keyword, báo cáo Search Term thực tế khách tìm kiếm, gợi ý thêm từ khóa và phủ định để giảm chi phí, điều chỉnh ngân sách & bid.</p></div>
         </div>
         <div class="module-card reveal">
           <div class="m-ico">🧾</div>
-          <div><h3>Đơn hàng FBM & Returns</h3><p>Orders API, countdown SLA giao hàng, tin nhắn buyer, xử lý hoàn hàng — không bỏ sót đơn quá hạn.</p></div>
+          <div><h3>Đơn hàng FBM & Trả hàng</h3><p>Đơn hàng FBA/FBM, đếm ngược thời hạn giao hàng, tin nhắn người mua, xử lý hoàn hàng — không bỏ sót đơn quá hạn.</p></div>
         </div>
         <div class="module-card reveal">
           <div class="m-ico">💰</div>
-          <div><h3>Tài chính & Đối soát</h3><p>Settlement, Financial Events, FBA reimbursements, profit theo SKU, chi phí quảng cáo — đối soát append-only.</p></div>
+          <div><h3>Tài chính & Đối soát Amazon</h3><p>Báo cáo Settlement, phí FBA, bồi hoàn FBA (Reimbursement), lợi nhuận theo SKU, chi phí quảng cáo — đối soát rõ ràng, lưu lịch sử không xóa được.</p></div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- SECURITY -->
   <section id="security">
     <div class="wrap">
       <div class="sec-head">
-        <div class="kicker">Bảo mật & Tuân thủ — chuẩn duyệt Amazon Developer</div>
-        <h2>Dữ liệu gian hàng được đối xử như tài sản</h2>
-        <p>Thiết kế tuân thủ Amazon Data Protection Policy và các quy định bảo vệ dữ liệu hiện hành. Không scraping, không nguồn dữ liệu bên thứ ba.</p>
+        <div class="kicker">An toàn & Tin cậy</div>
+        <h2>Dữ liệu gian hàng được bảo vệ như tài sản</h2>
+        <p>Chỉ kết nối chính thức với Amazon, không scraping, không dùng nguồn dữ liệu ngoài. Tuân thủ chính sách bảo vệ dữ liệu của Amazon.</p>
       </div>
       <div class="sec-grid">
         <div class="sec-item reveal">
           <div class="s-ico">✓</div>
-          <div><h3>Chỉ tích hợp API chính thức</h3><p>Toàn bộ dữ liệu lấy từ SP-API & Advertising API qua TLS. Không cào dữ liệu, không chia sẻ chéo giữa các seller (multi-tenant RLS).</p></div>
+          <div><h3>Chỉ kết nối chính thức Amazon</h3><p>Dữ liệu lấy trực tiếp từ Seller Central qua API chính thức của Amazon. Không cào dữ liệu, không chia sẻ chéo giữa các gian hàng.</p></div>
         </div>
         <div class="sec-item reveal">
           <div class="s-ico">🔑</div>
-          <div><h3>Uỷ quyền & thu hồi minh bạch</h3><p>Shop kết nối qua OAuth 2.0 của Amazon, có thể thu hồi trong Seller Central bất kỳ lúc nào. Token hết hạn 1 năm — hệ thống nhắc gia hạn trước 30 ngày.</p></div>
+          <div><h3>Kết nối an toàn, thu hồi dễ dàng</h3><p>Kết nối bằng tài khoản Amazon, có thể ngắt kết nối bất kỳ lúc nào trong Seller Central. Tự động nhắc gia hạn khi sắp hết hạn.</p></div>
         </div>
         <div class="sec-item reveal">
           <div class="s-ico">🔒</div>
-          <div><h3>Mã hoá & tối thiểu hoá PII</h3><p>Mã hoá in-transit & at-rest, LWA token lưu trong Supabase Vault. Dữ liệu người mua chỉ dùng để thực hiện đơn hàng — không bán, không dùng cho quảng cáo.</p></div>
+          <div><h3>Bảo mật & mã hóa</h3><p>Mã hóa toàn bộ dữ liệu, không lưu thông tin nhạy cảm của người mua. Chỉ dùng dữ liệu để vận hành đơn hàng — không bán, không dùng cho quảng cáo.</p></div>
         </div>
         <div class="sec-item reveal">
           <div class="s-ico">🧑‍💻</div>
-          <div><h3>RBAC & Nhật ký kiểm toán</h3><p>6 vai trò, phân quyền theo phòng ban & shop, mọi thao tác ghi (giá, listing, campaign) đều lưu before/after trong <code>iam.audit_logs</code> — không xoá được.</p></div>
+          <div><h3>Phân quyền rõ ràng</h3><p>Mỗi nhân viên chỉ thấy gian hàng và công việc được giao. Mọi thay đổi giá, listing, quảng cáo đều lưu lịch sử trước/sau — không xóa được.</p></div>
         </div>
         <div class="sec-item reveal">
           <div class="s-ico">🗑️</div>
-          <div><h3>Xoá dữ liệu khi thu hồi</h3><p>Khi seller thu hồi uỷ quyền, token bị xoá ngay lập tức và dữ liệu gian hàng được thanh lọc theo chính sách lưu trữ — đúng cam kết với Amazon.</p></div>
+          <div><h3>Xóa dữ liệu khi ngắt kết nối</h3><p>Khi bạn ngắt kết nối gian hàng, dữ liệu được xóa theo chính sách lưu trữ đã cam kết với Amazon — đúng cam kết bảo vệ dữ liệu.</p></div>
         </div>
         <div class="sec-item reveal">
           <div class="s-ico">🛠️</div>
-          <div><h3>Vận hành bởi đội ngũ chịu trách nhiệm</h3><p>Quyền production giới hạn cho nhân sự VEXIM đã đào tạo, xác thực đa yếu tố, nguyên tắc đặc quyền tối thiểu (least-privilege).</p></div>
+          <div><h3>Vận hành bởi đội ngũ chuyên nghiệp</h3><p>Đội ngũ VEXIM đã vận hành hàng chục gian hàng Amazon, hiểu rõ nỗi đau hết hàng, mất Buy Box, đốt tiền quảng cáo và cách xử lý.</p></div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- ABOUT + CONTACT -->
   <section id="about">
     <div class="wrap split">
       <div class="about">
         <div class="kicker">Về VEXIM</div>
-        <h2>Đối tác vận hành, không chỉ là công cụ</h2>
-        <p>VEXIM là agency vận hành marketplace có trụ sở tại Việt Nam, quản lý gian hàng Amazon cho các doanh nghiệp tăng trưởng. Chúng tôi vận hành listing, quảng cáo, tồn kho, đơn hàng và tài chính cho hàng chục đối tác bán hàng.</p>
-        <p><b>VEXIM Ops</b> là nền tảng chúng tôi xây cho chính mình — để mọi gian hàng được vận hành với cùng một kỷ luật: <b>số liệu rõ ràng, người chịu trách nhiệm rõ ràng, hành động hằng ngày rõ ràng</b>.</p>
+        <h2>Đối tác vận hành Amazon, không chỉ là công cụ</h2>
+        <p>VEXIM là agency vận hành Amazon có trụ sở tại Việt Nam, quản lý gian hàng cho các thương hiệu tăng trưởng. Chúng tôi vận hành listing, quảng cáo, tồn kho FBA, đơn hàng và tài chính cho hàng chục đối tác.</p>
+        <p><b>VEXIM Ops</b> là nền tảng chúng tôi xây cho chính mình — để mọi gian hàng được vận hành với cùng một kỷ luật: <b>doanh số rõ ràng, lợi nhuận rõ ràng, hành động mỗi ngày rõ ràng</b>.</p>
         <ul>
-          <li>✅ <b>Giảm thất thoát doanh thu:</b> chống hết hàng, mất Buy Box, đốt ngân sách QC, listing “tàng hình”.</li>
-          <li>✅ <b>Tăng biên lợi nhuận:</b> tính P&L theo SKU sau phí, tối ưu ACOS/TACOS, đòi bồi hoàn FBA.</li>
-          <li>✅ <b>Chuẩn hoá SOP:</b> 12 quy trình vận hành chuẩn, từ cảnh báo đến phê duyệt & revert 1 chạm.</li>
-          <li>✅ <b>Minh bạch cho khách hàng:</b> cổng client portal xem doanh thu, tồn kho, báo cáo — không cần hỏi qua chat.</li>
+          <li>✅ <b>Giữ doanh thu:</b> chống hết hàng FBA, mất Buy Box, listing bị suppressed, campaign cạn ngân sách.</li>
+          <li>✅ <b>Tăng lợi nhuận thực:</b> tính P&L sau phí FBA, phí giới thiệu, quảng cáo, đòi bồi hoàn FBA từ Amazon.</li>
+          <li>✅ <b>Tiết kiệm thời gian:</b> không còn Excel rời rạc, cảnh báo tự động, duyệt thay đổi nhanh, hoàn tác 1 chạm.</li>
+          <li>✅ <b>Minh bạch cho khách hàng:</b> cổng báo cáo riêng xem doanh thu, tồn kho, quảng cáo — không cần hỏi qua chat.</li>
         </ul>
       </div>
       <div class="contact-card" id="contact">
         <h3>Trò chuyện cùng chúng tôi</h3>
-        <p>Xem demo live trên dữ liệu marketplace thật và lộ trình để gian hàng của bạn được vận hành bằng VEXIM Ops.</p>
+        <p>Xem demo live trên dữ liệu Amazon thật và lộ trình để gian hàng của bạn được vận hành bằng VEXIM Ops.</p>
         <div class="contact-row"><span class="c-ico">✉️</span><div><b>Email</b><span>ops@vexim.vn</span></div></div>
         <div class="contact-row"><span class="c-ico">📞</span><div><b>Hotline</b><span>+84 28 1234 5678</span></div></div>
         <div class="contact-row"><span class="c-ico">📍</span><div><b>Văn phòng</b><span>TP. Hồ Chí Minh, Việt Nam</span></div></div>
@@ -440,7 +413,7 @@
     <a href="/login">Đăng nhập</a>
   </div>
   <div class="wrap" style="margin-top:10px;font-size:12px;line-height:1.6">
-    VEXIM Ops là sản phẩm độc lập, không được chứng thực bởi hay liên kết với Amazon.com, Inc. “Amazon” và “Selling Partner API” là nhãn hiệu của Amazon.com, Inc. Nền tảng tuân thủ SP-API Acceptable Use Policy & Data Protection Policy.
+    VEXIM Ops là sản phẩm độc lập, không liên kết với Amazon.com, Inc. “Amazon”, “Buy Box”, “FBA”, “Sponsored Products” là nhãn hiệu của Amazon.com, Inc. Nền tảng tuân thủ chính sách API và bảo vệ dữ liệu của Amazon.
   </div>
 </footer>
 
