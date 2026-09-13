@@ -1,8 +1,13 @@
 /**
- * GET /api/oauth/amazon/start?seller=<uuid>
+ * GET /api/oauth/amazon/start?seller=<uuid>&confirm=1
  *
  * Bước 1 của luồng authorize LWA (SOP-11): sinh `state` dùng-một-lần rồi đưa chủ
  * shop sang Seller Central để bấm Authorize.
+ *
+ * FIX UX SOP-11 (09/2026):
+ *   - Trước: seed 8 dòng, dễ bấm nhầm [Kết nối] ghi đè token sai shop
+ *   - Nay: thêm ?confirm=1 để chống ghi đè nhầm, và kiểm tra token cũ để cảnh báo
+ *   - UI mới có modal xác nhận hiển thị rõ Seller ID, Marketplace, trạng thái token cũ
  *
  * VÌ SAO `state` NẰM Ở DB (không phải cookie): callback là request KHÁC, có thể
  * do Amazon mở trên máy khác/trình duyệt khác, và phải chống CSRF. Ghi state vào
@@ -13,8 +18,6 @@
  * cho shop bất kỳ thì họ có thể khiến shop đó authorize lại vào tài khoản của
  * người khác. Ở đây: chỉ người ĐỌC ĐƯỢC shop đó (qua RLS `vexim_shops`) mới được
  * bắt đầu luồng.
- *
- * Route chỉ ĐỌC/GHI quyền truy cập — không tự đổi dữ liệu shop nào.
  */
 import { NextResponse } from "next/server";
 
@@ -69,6 +72,7 @@ async function adminRpc(
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const sellerId = (url.searchParams.get("seller") ?? "").trim();
+  const confirmOverwrite = (url.searchParams.get("confirm") ?? "").trim() === "1";
 
   const session = await getAppSession();
   if (!session) return NextResponse.redirect(new URL("/login", url.origin));
@@ -106,9 +110,9 @@ export async function GET(req: Request) {
   const supa = await createClient();
   const { data: shops, error: shopErr } = (await supa!
     .from("vexim_shops")
-    .select("seller_account_id")
+    .select("seller_account_id, shop, marketplace, data_source")
     .eq("seller_account_id", sellerId)) as {
-    data: { seller_account_id: string }[] | null;
+    data: { seller_account_id: string; shop: string; marketplace: string; data_source: string | null }[] | null;
     error: { message: string } | null;
   };
   if (shopErr) {
@@ -119,6 +123,30 @@ export async function GET(req: Request) {
       oauth: "error",
       msg: "Bạn không có quyền với shop này (hoặc shop không tồn tại).",
     });
+  }
+
+  // FIX UX: kiểm tra token cũ để cảnh báo ghi đè nhầm
+  // Nếu shop đã có token và chưa có ?confirm=1 thì trả về trang connect với cảnh báo
+  try {
+    const { data: tokenRows } = (await supa!
+      .from("vexim_oauth_connections")
+      .select("seller_account_id, is_active, days_left")
+      .eq("seller_account_id", sellerId)
+      .limit(1)) as {
+      data: { seller_account_id: string; is_active: boolean; days_left: number | null }[] | null;
+      error: unknown;
+    };
+    const hasToken = tokenRows && tokenRows.length > 0;
+    if (hasToken && !confirmOverwrite) {
+      // Trả về trang connect với warn để UI modal hiện lại (tránh bấm nhầm)
+      return backTo(req, {
+        warn: `Gian hàng ${shops[0].shop} (${shops[0].marketplace}) ĐÃ có token. Nếu kết nối lại, token cũ sẽ bị GHI ĐÈ. Bấm lại nút Kết nối và xác nhận trong modal để tiếp tục.`,
+        oauth: "error",
+        msg: `Cần xác nhận ghi đè token cho ${shops[0].shop}`,
+      });
+    }
+  } catch {
+    // Nếu view chưa tồn tại hoặc lỗi, bỏ qua check — vẫn cho kết nối
   }
 
   // redirect_to: quay lại màn Kết nối shop sau khi Amazon trả code.

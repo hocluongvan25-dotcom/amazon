@@ -1,20 +1,27 @@
 /**
- * Module 0 → Kết nối shop (SOP-11).
+ * Module 0 → Kết nối shop (SOP-11) — FIX UX 09/2026.
  *
- * Trang này có HAI chế độ, và chúng KHÁC NHAU về bản chất:
- *   • SUPABASE MODE — công cụ thật: danh sách shop + tình trạng token (còn mấy
- *     ngày, có cần authorize lại không) + nút Kết nối chạy luồng OAuth thật.
- *   • DEMO MODE — chỉ là bản mô tả trình tự kết nối (không có gì để bấm).
+ * VẤN ĐỀ CŨ:
+ *   - Seed cố định 8 dòng (A1·US, C2·US, P1·US...) → người vận hành dễ bấm nhầm [Kết nối] ghi đè Refresh Token sai shop/marketplace
+ *   - Mã A1/B1/P1 mang tính kỹ thuật, khách không nhận biết gian hàng nào
+ *   - Nhiều dòng "Chưa kết nối" gây rối mắt
  *
- * Vì sao phải hiện hạn token ngay ở đây: LWA refresh token sống 365 ngày và
- * Amazon KHÔNG báo khi nó hết hạn. Nhìn thấy "còn 12 ngày" trước khi mọi thứ
- * ngừng đồng bộ là khác biệt giữa "chủ động authorize lại" và "sáng ra thấy
- * dashboard trống".
+ * PHƯƠNG ÁN MỚI:
+ *   1. Nhóm theo seller_id: P1·US + P2·CA cùng seller AQMVYI4HJTI4C → 1 card, không còn 8 dòng rời rạc
+ *   2. Hiển thị tên thân thiện + cờ marketplace (🇺🇸 US, 🇨🇦 CA) thay cho mã kỹ thuật
+ *   3. Tách production vs mock: production hiện chính, mock ẩn trong collapsible để tránh bấm nhầm
+ *   4. Thêm modal xác nhận trước khi ghi đè token: hiện rõ Seller ID, Marketplace ID, trạng thái hiện tại, cảnh báo ghi đè
+ *   5. Cho phép đổi display_name thân thiện trong DB (thay vì A1/B1/P1)
+ *
+ * Trang này có HAI chế độ:
+ *   • SUPABASE MODE — công cụ thật: danh sách shop + tình trạng token + nút Kết nối
+ *   • DEMO MODE — chỉ là bản mô tả trình tự kết nối
  */
-import { Chip, NoAccess, PageHeader, Panel, tableCls } from "@/components/ui";
+import { Chip, NoAccess, PageHeader, Panel } from "@/components/ui";
 import { requireSession } from "@/lib/auth/session";
-import { connectStatusOf, readConnectShops, type ConnectShopRow } from "@/lib/data/oauth";
+import { readConnectShops, type ConnectShopRow } from "@/lib/data/oauth";
 import type { PersonaKey } from "@/lib/roles";
+import { ShopConnectTable } from "./ShopConnectTable";
 
 const ALLOWED: PersonaKey[] = ["ceo"];
 
@@ -22,7 +29,7 @@ const STEPS = [
   {
     n: 1,
     title: "Bấm Kết nối shop",
-    detail: "Hệ thống sinh link authorize (OAuth LWA) theo app SP-API của VEXIM.",
+    detail: "Hệ thống sinh link authorize (OAuth LWA) theo app SP-API của VEXIM. Có modal xác nhận chống bấm nhầm.",
     live: (s: ConnectShopRow) => s.hasToken,
   },
   {
@@ -52,7 +59,6 @@ const STEPS = [
 ];
 
 function EnvPanel() {
-  // Chỉ hiện CÓ/KHÔNG — không bao giờ in giá trị biến môi trường ra HTML.
   const rows: { label: string; ok: boolean; hint: string }[] = [
     {
       label: "AMAZON_SP_API_APP_ID (amzn1.sp.solution…)",
@@ -98,72 +104,6 @@ function EnvPanel() {
   );
 }
 
-function ShopTable({ shops }: { shops: ConnectShopRow[] }) {
-  if (shops.length === 0) {
-    return (
-      <div className="rounded-[10px] border border-dashed border-line px-3 py-6 text-center text-[13px] text-soft">
-        Bạn chưa được gán shop nào. Nhờ quản trị viên gán shop ở màn Người dùng &amp; phân quyền.
-      </div>
-    );
-  }
-  return (
-    <table className={tableCls.table}>
-      <thead>
-        <tr>
-          <th className={tableCls.th}>Shop</th>
-          <th className={tableCls.th}>Marketplace</th>
-          <th className={tableCls.th}>Trạng thái token</th>
-          <th className={`${tableCls.th} text-right`}>Còn lại</th>
-          <th className={tableCls.th}>Authorize lần cuối</th>
-          <th className={tableCls.th}>Profile Ads</th>
-          <th className={tableCls.th} />
-        </tr>
-      </thead>
-      <tbody>
-        {shops.map((s) => {
-          const st = connectStatusOf(s);
-          const label = s.hasToken ? "Kết nối lại" : "Kết nối";
-          return (
-            <tr key={s.sellerAccountId}>
-              <td className={`${tableCls.td} font-bold`}>{s.shop}</td>
-              <td className={tableCls.td}>{s.marketplace}</td>
-              <td className={tableCls.td}>
-                <Chip tone={st.tone}>{st.label}</Chip>
-                <div className="mt-1 text-[11.5px] text-soft">{st.hint}</div>
-                {s.rotateReminderSent && s.needsReauth ? (
-                  <div className="mt-0.5 text-[11.5px] text-soft">
-                    đã nhắc lúc {s.noticeSentAt ? s.noticeSentAt.slice(0, 10) : "—"}
-                  </div>
-                ) : null}
-              </td>
-              <td className={`${tableCls.td} text-right tabular-nums`}>
-                {s.daysLeft === null ? "—" : `${s.daysLeft} ngày`}
-              </td>
-              <td className={tableCls.td}>
-                {s.authorizedAt ? s.authorizedAt.slice(0, 10) : "chưa từng"}
-                {s.refreshCount && s.refreshCount > 1 ? (
-                  <span className="text-soft"> · lần {s.refreshCount}</span>
-                ) : null}
-              </td>
-              <td className={`${tableCls.td} text-right tabular-nums`}>
-                {s.adsProfiles > 0 ? s.adsProfiles : "—"}
-              </td>
-              <td className={`${tableCls.td} text-right`}>
-                <a
-                  href={`/api/oauth/amazon/start?seller=${encodeURIComponent(s.sellerAccountId)}`}
-                  className="inline-flex items-center rounded-[8px] bg-accent px-3 py-1.5 text-[12.5px] font-extrabold text-white hover:opacity-90"
-                >
-                  {label}
-                </a>
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
-  );
-}
-
 export default async function ConnectPage({
   searchParams,
 }: {
@@ -194,7 +134,6 @@ export default async function ConnectPage({
         : null;
 
   if (session.mode !== "supabase") {
-    // DEMO MODE — chưa có Supabase thì chưa lưu được token ở đâu cả.
     return (
       <>
         <div className="mb-3 text-sm font-bold text-amber">DEMO · Chưa cấu hình Supabase</div>
@@ -233,13 +172,14 @@ export default async function ConnectPage({
 
   const needing = shops.filter((s) => s.hasToken && (s.needsReauth || s.isExpired)).length;
   const notConnected = shops.filter((s) => !s.hasToken).length;
+  const prodCount = shops.filter((s) => (s.dataSource ?? "mock") !== "mock").length;
 
   return (
     <>
       <PageHeader
         title="Kết nối shop Amazon"
-        sub={`Trình kết nối · SOP-11 · ${shops.length} shop`}
-        desc="Refresh token lưu trong DB (không nằm trong biến môi trường). Amazon không báo khi token hết hạn — trang này nhắc trước."
+        sub={`SOP-11 · ${prodCount} gian hàng chính · ${shops.length} tổng (có ${shops.filter((s) => (s.dataSource ?? "mock") === "mock").length} demo)`}
+        desc="Refresh token lưu trong DB (không nằm trong env). Đã nhóm theo Seller ID để tránh bấm nhầm ghi đè token. Tên kỹ thuật A1/B1/P1 nên đổi thành tên thân thiện như 'VEXIM US' trong DB."
       />
 
       {banner ? (
@@ -267,16 +207,16 @@ export default async function ConnectPage({
       ) : null}
 
       <Panel
-        title="Shop đã cấp quyền cho VEXIM"
+        title="Gian hàng Amazon — đã nhóm theo Seller để chống ghi đè"
         hint={
           needing > 0
             ? `${needing} shop cần authorize lại`
             : notConnected > 0
-              ? `${notConnected} shop chưa kết nối`
+              ? `${notConnected} shop chưa kết nối · ${prodCount} production`
               : "tất cả token còn hiệu lực"
         }
       >
-        <ShopTable shops={shops} />
+        <ShopConnectTable shops={shops} />
       </Panel>
 
       <Panel title="Trình tự kết nối" hint="đúng luồng OAuth 2.0 / Login with Amazon">
@@ -308,6 +248,33 @@ export default async function ConnectPage({
       </Panel>
 
       <EnvPanel />
+
+      <Panel title="Đề xuất đổi tên thân thiện (thay A1/B1/P1)" hint="chạy 1 lần trong Supabase SQL">
+        <div className="text-[12.5px] leading-relaxed">
+          <div className="mb-2 text-soft">
+            Mã kỹ thuật A1/B1/P1 không giúp người vận hành nhận biết gian hàng. Đề xuất đổi{" "}
+            <code>display_name</code> thành tên thân thiện trong DB:
+          </div>
+          <pre className="overflow-x-auto rounded-[8px] bg-[#f6f7f9] p-3 text-[11.5px]">
+{`-- Đổi tên P1·US / P2·CA thành tên dễ hiểu
+update connections.seller_accounts
+set display_name = case
+  when marketplace = 'ATVPDKIKX0DER' then 'VEXIM US - Chính'
+  when marketplace = 'A2EUQ1WTGCTBG2' then 'VEXIM CA - Canada'
+  else display_name
+end
+where seller_id = 'AQMVYI4HJTI4C';
+
+-- Ẩn shop mock khỏi production view (hoặc xóa)
+update connections.seller_accounts set status='revoked' where data_source='mock';
+-- hoặc: delete from connections.seller_accounts where data_source='mock';`}
+          </pre>
+          <div className="mt-2 text-[11.5px] text-soft">
+            Sau khi đổi, UI sẽ hiện &quot;VEXIM US - Chính 🇺🇸 US&quot; thay vì &quot;P1 · US&quot;, giảm nhầm lẫn.
+            View <code>vexim_shops</code> cần thêm cột <code>seller_id, display_name</code> (migration 0021).
+          </div>
+        </div>
+      </Panel>
     </>
   );
 }
