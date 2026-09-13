@@ -22,6 +22,14 @@ const BYPASS_AUTH_PATHS = [
   "/api/webhooks",
   "/api/whoami",
   "/api/amazon/whoami",
+  /**
+   * Luồng OAuth (Module 0): /start và /callback PHẢI chạy được khi người bấm là
+   * CHỦ SHOP (không có tài khoản VEXIM, không cookie phiên). Hai route đó tự
+   * bảo vệ bằng chữ ký: /start đòi session HOẶC `sig` HMAC; /callback đòi `state`
+   * có chữ ký + chỉ dùng được MỘT lần (vexim_oauth_consume_state).
+   * /import tự kiểm phiên trong route (không dựa middleware).
+   */
+  "/api/amazon/oauth",
 ];
 
 const MW_HEADER = "x-vexim-middleware";

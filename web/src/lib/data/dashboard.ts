@@ -1,10 +1,13 @@
 /**
  * Supabase reader cho Dashboard CEO — tổng hợp KPI từ nhiều views.
  * Đọc: vexim_orders, vexim_inventory_latest, vexim_listings, vexim_pricing,
- *       vexim_settlements, vexim_shop_health, ops.my_alerts
+ *       vexim_settlements, vexim_shop_health, ops.my_alerts,
+ *       vexim_ads_kpis (Module 5 — spend/ACOS/TACOS)
  */
 
 import { createClient } from "@/lib/supabase/server";
+import { readAdsKpis } from "./ads";
+import { summarizeAdsForDashboard, type AdsDashboardSummary } from "./ads-model";
 
 export type DashboardStats = {
   // Orders
@@ -172,4 +175,31 @@ export async function readDashboardStats(): Promise<DashboardStats> {
     healthShopsTotal,
     openAlerts: alertCount,
   };
+}
+
+
+/* ------------------------------------------------------------------ */
+/* KPI Ads (Module 5) — đọc riêng để KHÔNG kéo sập cả Dashboard       */
+/* ------------------------------------------------------------------ */
+
+export type DashboardAds = {
+  /** null khi chưa cấu hình Supabase HOẶC chưa đọc được KPI Ads. */
+  summary: AdsDashboardSummary | null;
+  /** Lý do không đọc được (vd: migration 0020 chưa chạy) — hiện thẳng lên UI. */
+  error: string | null;
+};
+
+/**
+ * KPI Ads cho Dashboard. KHÔNG ném lỗi: view `vexim_ads_kpis` chỉ tồn tại sau
+ * migration 0020, mà Dashboard thì phải chạy được cả trước đó — nên lỗi được trả
+ * về như dữ liệu (`error`) để UI nói rõ "chưa đọc được vì X" thay vì trắng trang.
+ */
+export async function readDashboardAds(): Promise<DashboardAds> {
+  try {
+    const kpis = await readAdsKpis();
+    if (kpis === null) return { summary: null, error: null };
+    return { summary: summarizeAdsForDashboard(kpis), error: null };
+  } catch (e) {
+    return { summary: null, error: e instanceof Error ? e.message : "Không đọc được KPI Ads" };
+  }
 }

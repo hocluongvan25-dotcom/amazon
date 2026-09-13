@@ -32,6 +32,23 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { screens } from "../../web/src/lib/data/operations-model.ts";
+// Hợp đồng cột web ↔ DB cho Module 5: web đọc bằng select CỐ ĐỊNH, sai một tên cột
+// là PostgREST trả 400 ngay trên production nên phải chốt ở đây (chạy trên PG thật).
+import {
+  ADS_BUDGET_SELECT,
+  ADS_CAMPAIGN_SELECT,
+  ADS_DAILY_SELECT,
+  ADS_KPI_SELECT,
+  ADS_PROFILE_SELECT,
+  ADS_REPORT_REQUEST_SELECT,
+  ADS_SEARCH_TERM_SELECT,
+} from "../../web/src/lib/data/ads-model.ts";
+import {
+  PPC_NEGATIVE_SELECT,
+  PPC_POLICY_SELECT,
+  PPC_REQUEST_SELECT,
+  PPC_SUGGESTION_SELECT,
+} from "../../web/src/lib/data/ppc-write-model.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const rd = (p) => readFileSync(join(ROOT, p), "utf8");
@@ -2758,6 +2775,2022 @@ await cmp(
      ('uq_storage_fees_key','uq_inbound_noncompliance_key','uq_report_requests_key')`,
   3,
 );
+
+// Toàn bộ phần 0020 nằm TRONG KHỐI {} riêng: biến fixture (t1, cv, bu, over…)
+// không đụng tên biến của các BƯỚC trước ở phạm vi module.
+{
+// ============================================================================
+console.log("\n=== BƯỚC 21: 0020 — Module 0 OAuth multi-tenant · Module 5 PPC (đọc/phân tích) ===");
+// ============================================================================
+ok(
+  await ex(rd("migrations/0020_module0_oauth_module5_ppc_read.sql"), "0020_module0_oauth_module5_ppc_read.sql"),
+  "0020 chạy sạch (DO-block tự soát: RLS · index unique · token không lộ · RPC · view · hợp đồng cột)",
+);
+
+// ---- 0. Hợp đồng cột: web đọc bằng select cố định → chốt tại đây --------------
+ok(
+  (await colsOf("vexim_connections")) ===
+    "seller_account_id,shop,seller_id,marketplace,shop_status,data_source,service,connected," +
+    "token_status,token_source,scope,client_id,selling_partner_id,ads_account_id,authorized_at," +
+    "reauthorize_at,reminder_days,reminder_sent_at,last_refresh_at,last_used_at,last_error," +
+    "days_to_reauth,reauth_state,needs_connect",
+  "0020: vexim_connections đúng hợp đồng cột (2 service/shop, KHÔNG có cột token)",
+);
+ok(
+  (await colsOf("vexim_oauth_events")) ===
+    "id,seller_account_id,shop,service,event,status,detail,created_at",
+  "0020: vexim_oauth_events đúng hợp đồng cột (audit luồng OAuth)",
+);
+ok(
+  (await colsOf("vexim_ads_profiles")) ===
+    "seller_account_id,shop,ads_profile_id,marketplace,country_code,currency,timezone,account_id," +
+    "account_type,account_name,daily_budget,is_default,source,first_seen_at,last_synced_at," +
+    "campaigns_known,last_metrics_day",
+  "0020: vexim_ads_profiles đúng hợp đồng cột (profileId = scope của mọi call Ads)",
+);
+ok(
+  (await colsOf("vexim_ads_campaigns")).startsWith(
+    "seller_account_id,shop,ads_profile_id,campaign_id,campaign_name,campaign_type,state," +
+    "targeting_type,cost_type,daily_budget,budget_type,currency,start_date,end_date,portfolio_id," +
+    "last_metrics_day,metrics_last_day,days_with_data,spend_yesterday,impressions_yesterday," +
+    "clicks_yesterday,spend7,sales7,ad_orders7,ad_units7,impressions7,clicks7,acos7,roas7,ctr7,cpc7," +
+    "acos_prev7,acos_trend_pts,budget_used_pct,budget_usage_day,budget_usage_spend," +
+    "budget_usage_budget,usage_captured_at,exhausted_at_estimate,budget_exhausted," +
+    "over_acos_target,acos_target,first_seen_at,last_synced_at,source"),
+  "0020: vexim_ads_campaigns đúng hợp đồng cột (A1: cấu hình + 7 ngày + cờ cảnh báo)",
+);
+ok(
+  (await colsOf("vexim_ads_kpis")) ===
+    "seller_account_id,shop,shop_status,currency,metrics_day,spend_yesterday,clicks_yesterday," +
+    "spend7,ad_sales7,ad_orders7,clicks7,impressions7,acos7,roas7,ctr7,cpc7,total_sales7," +
+    "total_orders7,tacos7,tacos_unknown,campaigns_enabled,campaigns_over_target," +
+    "campaigns_exhausted,budget_daily_total,last_metrics_day,last_imported_at,hours_since_import,is_stale",
+  "0020: vexim_ads_kpis đúng hợp đồng cột (KPI PPC + TACOS theo shop × currency)",
+);
+ok(
+  (await colsOf("vexim_ads_search_terms")) ===
+    "seller_account_id,shop,search_term,is_placement_without_keyword,campaign_id,campaign_name," +
+    "ad_group_name,keyword_text,match_type,keyword_type,currency,impressions,clicks,spend,sales7," +
+    "ad_orders7,ctr,cpc,acos7,days_with_data,first_day,last_day,bid,ad_keyword_status," +
+    "wasted_spend_signal",
+  "0020: vexim_ads_search_terms đúng hợp đồng cột (A3)",
+);
+ok(
+  (await colsOf("vexim_ads_targeting")) ===
+    "seller_account_id,shop,day,campaign_id,campaign_name,ad_group_id,ad_group_name,target_label," +
+    "keyword_id,keyword_text,match_type,keyword_type,is_product_targeting,targeting_expression,bid," +
+    "currency,impressions,clicks,spend,sales7d,ad_orders7d,units_sold7d,acos7d,roas7d,report_id," +
+    "imported_at",
+  "0020: vexim_ads_targeting đúng hợp đồng cột (A2)",
+);
+ok(
+  (await colsOf("vexim_ads_budget_usage")) ===
+    "seller_account_id,shop,day,campaign_id,campaign_name,campaign_state,ads_profile_id,budget_type," +
+    "currency,budget,spend,percentage_used,delivered_clicks,delivered_impressions,last_captured_at," +
+    "source,exhausted_at_estimate,snapshots_over_100pct,budget_exhausted,exhausted_note",
+  "0020: vexim_ads_budget_usage đúng hợp đồng cột (giờ cạn = ƯỚC LƯỢNG, có nhãn)",
+);
+ok(
+  (await colsOf("vexim_ads_report_requests")) ===
+    "id,seller_account_id,shop,ads_profile_id,report_type_id,ad_product,group_by,time_unit," +
+    "date_start,date_end,ads_report_id,status,failure_reason,rows_imported,attempts,last_error," +
+    "requested_at,completed_at,imported_at,age_minutes,is_stale",
+  "0020: vexim_ads_report_requests đúng hợp đồng cột (không phơi download_url)",
+);
+ok(
+  (await colsOf("vexim_ads_campaign_daily")) ===
+    "seller_account_id,shop,day,campaign_id,campaign_name,campaign_type,currency,impressions," +
+    "clicks,spend,sales7d,ad_orders7d,units_sold7d,acos7d,roas7d,ctr,cpc,budget_amount," +
+    "campaign_status,ads_profile_id,report_id,imported_at",
+  "0020: vexim_ads_campaign_daily đúng hợp đồng cột (chuỗi ngày cho biểu đồ)",
+);
+
+// ---- 1. Metadata: web KHÔNG ghi được, token KHÔNG lộ -------------------------
+await cmp(
+  "0020: bảng Ads mới chỉ cho web ĐỌC (không policy ghi nào)",
+  `select count(*) n from pg_policies where schemaname='ads'
+     and tablename in ('targeting_metrics_daily','advertised_product_daily','budget_usage','report_requests')
+     and cmd <> 'SELECT'`,
+  0,
+);
+await cmp(
+  "0020: 1 shop giữ được 2 token (SP-API + Ads) — unique theo (shop, service)",
+  `select count(*) n from pg_indexes where indexname='uq_oauth_tokens_shop_service'
+     and indexdef like '%UNIQUE%' and indexdef like '%service%'`,
+  1,
+);
+await cmp(
+  "0020: alert khử trùng theo entity_key (1 alert MỞ / luật / đối tượng)",
+  `select count(*) n from pg_indexes where indexname='uq_alerts_open_entity'
+     and indexdef like '%UNIQUE%' and indexdef like '%open%'`,
+  1,
+);
+await cmp(
+  "0020: không view public nào phơi cột token",
+  `select count(*) n from information_schema.columns where table_schema='public'
+     and (column_name ilike '%refresh_token%' or column_name ilike '%access_token%'
+          or column_name ilike '%encrypted%' or column_name='download_url')`,
+  0,
+);
+await cmp(
+  "0020: ngưỡng budget_exhausted đã có số (100%) để RPC tự nổ alert",
+  `select count(*) n from ops.alert_rules
+     where rule_code='budget_exhausted' and threshold=100 and comparator='gte'`,
+  1,
+);
+
+// ---- 2. Fixture: 1 user được gán shop + 1 người lạ ---------------------------
+await ex("begin");
+await ex("reset role;");
+const oUser     = "d2000000-0000-4000-8000-000000000001";
+const oStranger = "d2000000-0000-4000-8000-000000000002";
+ok(
+  await ex(`insert into auth.users(id,email) values
+     ('${oUser}','local-e-ads@example.test'),
+     ('${oStranger}','local-e-stranger@example.test');
+   insert into iam.user_profiles(id,display_name,email,vexim_employee) values
+     ('${oUser}','Vận hành Ads','local-e-ads@example.test',true),
+     ('${oStranger}','Người lạ','local-e-stranger@example.test',true);
+   insert into iam.assignments(user_id,seller_account_id,module,can_write,created_at) values
+     ('${oUser}','${cShop}','ads',false, now() - interval '1 day');
+   insert into iam.role_assignments(user_id,role) values ('${oUser}','operator');
+   update connections.seller_accounts set data_source='production' where id='${cShop}';
+   delete from ads.ad_metrics_daily      where seller_account_id='${cShop}';
+   delete from ads.campaigns             where seller_account_id='${cShop}';
+   delete from ads.budget_usage          where seller_account_id='${cShop}';
+   delete from ads.search_terms          where seller_account_id='${cShop}';
+   delete from ads.ad_profiles           where seller_account_id='${cShop}';
+   delete from ads.report_requests       where seller_account_id='${cShop}';
+   delete from connections.oauth_tokens  where seller_account_id='${cShop}'`),
+  "0020 fixture: user vận hành Ads + người lạ + shop production + dọn dữ liệu Ads cũ (số đếm xác định)",
+);
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role service_role;");
+
+// ---- 3. MODULE 0 — token: CHẶN plaintext, nhận bản đã mã hoá -----------------
+const ENC = (tag) => `enc:v1:${Buffer.from(`demo-iv|${tag}`).toString("base64")}`;
+const iso = (daysAgo) => new Date(Date.now() - daysAgo * 86400000).toISOString();
+const upToken = (o) =>
+  one(`select * from public.vexim_oauth_upsert_token('${JSON.stringify(o)}'::jsonb)`);
+
+ok(
+  await mustBlock(`select * from public.vexim_oauth_upsert_token(
+     '{"sellerAccountId":"${cShop}","service":"spapi","encryptedRefreshToken":"Atzr|PLAINTEXT"}'::jsonb)`),
+  "0020 CHẶN: refresh token PLAINTEXT (Atzr…) không được lưu — bắt buộc tiền tố enc:v1:",
+);
+ok(
+  await mustBlock(`select * from public.vexim_oauth_upsert_token(
+     '{"sellerAccountId":"${cShop}","service":"spapi"}'::jsonb)`),
+  "0020 CHẶN: thiếu encryptedRefreshToken → từ chối (không lưu token rỗng)",
+);
+
+const t1 = await upToken({
+  sellerAccountId: cShop, service: "spapi", encryptedRefreshToken: ENC("spapi-340d"),
+  authorizedAt: iso(340), expiresAt: iso(-25), clientId: "amzn1.application-oa2-client.demo",
+  scope: "sellingpartnerapi::all", sellingPartnerId: "A2XYZUSDEMO", tokenSource: "oauth",
+  authorizedBy: oUser,
+});
+ok(
+  t1?.service === "spapi" && t1?.status === "active" && Number(t1?.days_to_reauth) >= 24
+    && Number(t1?.days_to_reauth) <= 26,
+  `0020: token SP-API lưu được, hạn re-authorize = authorized + 365 ngày (còn ${t1?.days_to_reauth} ngày)`,
+);
+const t1row = await one(`select encrypted_refresh_token, authorized_at, reauthorize_at, reminder_days,
+     rotate_reminder_sent, token_source, selling_partner_id
+     from connections.oauth_tokens where seller_account_id='${cShop}' and service='spapi'`);
+ok(
+  String(t1row?.encrypted_refresh_token).startsWith("enc:v1:")
+    && Number(t1row?.reminder_days) === 30 && t1row?.rotate_reminder_sent === false
+    && t1row?.token_source === "oauth",
+  `0020: token lưu DẠNG MÃ HOÁ + reminder 30 ngày (giống email Amazon gửi chủ shop) — ${JSON.stringify(t1row)}`,
+);
+ok(
+  (await one(`select (reauthorize_at - authorized_at) as span,
+       ((reauthorize_at - authorized_at) = interval '365 days') as exact365
+       from connections.oauth_tokens where seller_account_id='${cShop}' and service='spapi'`)).exact365 === true,
+  "0020: reauthorize_at - authorized_at = ĐÚNG 365 ngày (chu kỳ Amazon)",
+);
+
+const t2 = await upToken({
+  sellerAccountId: cShop, service: "ads", encryptedRefreshToken: ENC("ads-350d"),
+  authorizedAt: iso(350), clientId: "amzn1.application-oa2-client.ads",
+  scope: "ads::campaign_management", adsAccountId: "1234567890", tokenSource: "env",
+});
+ok(t2?.service === "ads" && Number(t2?.days_to_reauth) <= 16,
+   `0020: token Ads là DÒNG RIÊNG của cùng shop (còn ${t2?.days_to_reauth} ngày → sắp đỏ)`);
+await cmp(
+  "0020: 1 shop = 2 token (SP-API + Ads), không đè nhau",
+  `select count(*) n from connections.oauth_tokens where seller_account_id='${cShop}'`,
+  2,
+);
+
+// re-authorize lại → hạn lùi 365 ngày, alert cũ tự đóng
+const t3 = await upToken({
+  sellerAccountId: cShop, service: "spapi", encryptedRefreshToken: ENC("spapi-fresh"),
+  authorizedAt: iso(0), clientId: "amzn1.application-oa2-client.demo",
+  scope: "sellingpartnerapi::all", tokenSource: "oauth",
+});
+await cmp(
+  "0020: upsert lại = UPDATE đúng dòng (không nhân bản token)",
+  `select count(*) n from connections.oauth_tokens where seller_account_id='${cShop}'`,
+  2,
+);
+ok(Number(t3?.days_to_reauth) >= 364,
+   `0020: vừa re-authorize → hạn mới còn ${t3?.days_to_reauth} ngày (hết cảnh báo)`);
+
+// ---- 4. MODULE 0 — audit event + state chống CSRF/replay --------------------
+await one(`select public.vexim_oauth_record_event(
+   '{"sellerAccountId":"${cShop}","service":"ads","event":"token_refresh","status":"ok",
+     "detail":"LWA refresh 200, expires_in 3600"}'::jsonb)`);
+await one(`select public.vexim_oauth_record_event(
+   '{"sellerAccountId":"${cShop}","service":"ads","event":"report_throttled","status":"error",
+     "detail":"429 QuotaExceeded, Retry-After 30 — KHÔNG retry dồn"}'::jsonb)`);
+await cmp(
+  "0020: audit luồng OAuth ghi vào connections.oauth_events",
+  `select count(*) n from connections.oauth_events where seller_account_id='${cShop}'`,
+  2,
+);
+const stRes = await one(`select public.vexim_oauth_set_state(
+   '{"state":"state-demo-0020","service":"ads","sellerAccountId":"${cShop}",
+     "redirectUri":"/ppc","scope":"ads::campaign_management","sellerHint":"A2XYZUSDEMO"}'::jsonb) s`);
+ok(stRes?.s === "state-demo-0020", `0020: state ghi nhận cho lượt authorize (${stRes?.s})`);
+const cs1 = await one(`select * from public.vexim_oauth_consume_state('state-demo-0020','ok')`);
+ok(
+  cs1?.service === "ads" && cs1?.seller_account_id === cShop && cs1?.redirect_uri === "/ppc"
+    && cs1?.expired === false && cs1?.already_used === false,
+  `0020: consume state lần 1 → đúng shop + redirect — ${JSON.stringify(cs1)}`,
+);
+const cs2 = await one(`select * from public.vexim_oauth_consume_state('state-demo-0020','ok')`);
+ok(cs2?.already_used === true,
+   "0020: state dùng LẦN 2 → already_used=true (chống replay/CSRF: 1 code chỉ đổi 1 lần)");
+
+// ---- 5. MODULE 0 — quét re-authorize 365 ngày + dedupe alert -----------------
+const scan1 = await rows19(`select * from public.vexim_oauth_reauth_scan(30)`);
+const scanAds = scan1.find((r) => r.shop_id === cShop && r.token_service === "ads");
+ok(
+  scanAds && scanAds.token_service === "ads" && scanAds.alert_severity === "amber"
+    && scanAds.next_action === "send_reauth_link" && scanAds.alert_id,
+  `0020: quét re-auth thấy token Ads còn ~15 ngày → amber + gửi link — ${JSON.stringify(scanAds)}`,
+);
+const scanSpapi = scan1.filter((r) => r.shop_id === cShop && r.token_service === "spapi")[0];
+ok(
+  scanSpapi?.alert_severity === null && scanSpapi?.next_action === "none",
+  `0020: token SP-API vừa re-authorize → không cảnh báo (${scanSpapi?.days_to_reauth} ngày)`,
+);
+await cmp(
+  "0020: alert reauth_required nổ đúng 1 cái cho shop",
+  `select count(*) n from ops.alerts a join ops.alert_rules r on r.id=a.rule_id
+    where a.seller_account_id='${cShop}' and r.rule_code='reauth_required' and a.status='open'`,
+  1,
+);
+const scan2 = await rows19(`select * from public.vexim_oauth_reauth_scan(30)`);
+ok(
+  scan2.filter((r) => r.shop_id === cShop && r.token_service === "ads")[0]?.alert_id
+    === scanAds?.alert_id,
+  "0020: quét LẦN 2 → cùng alert_id (dedupe, không spam chuông)",
+);
+await cmp(
+  "0020: quét 2 lần vẫn 1 alert mở (entity_key = token:<service>)",
+  `select count(*) n from ops.alerts a join ops.alert_rules r on r.id=a.rule_id
+    where a.seller_account_id='${cShop}' and r.rule_code='reauth_required' and a.status='open'`,
+  1,
+);
+ok(
+  (await one(`select reminder_sent_at is not null as sent, rotate_reminder_sent
+     from connections.oauth_tokens where seller_account_id='${cShop}' and service='ads'`)).sent === true,
+  "0020: đã đánh dấu reminder_sent_at (không gửi nhắc lại mỗi ngày)",
+);
+
+// quá hạn → token chuyển expired để worker KHÔNG gọi API bằng token chết
+await upToken({
+  sellerAccountId: cShop, service: "ads", encryptedRefreshToken: ENC("ads-400d"),
+  authorizedAt: iso(400), tokenSource: "oauth",
+});
+const scan3 = await rows19(`select * from public.vexim_oauth_reauth_scan(30,'ads')`);
+const over = scan3.find((r) => r.shop_id === cShop);
+ok(
+  over && over.alert_severity === "red" && over.next_action === "reauthorize_now"
+    && Number(over.days_to_reauth) < 0,
+  `0020: quá hạn 365 ngày → ĐỎ + reauthorize_now (${over?.days_to_reauth} ngày)`,
+);
+const dead = await one(`select status, last_error from connections.oauth_tokens
+   where seller_account_id='${cShop}' and service='ads'`);
+ok(
+  dead?.status === "expired" && /quá hạn/.test(String(dead?.last_error ?? "")),
+  `0020: token quá hạn tự chuyển EXPIRED — worker dừng gọi API bằng token chết (${dead?.last_error})`,
+);
+
+// ---- 6. MODULE 5 — profiles (GET /v2/profiles, bản NESTED thật của Amazon) ----
+const prof = await one(`select * from public.vexim_worker_upsert_ads_profiles('${cShop}', '[
+  {"profileId":"1234567890","countryCode":"US","currencyCode":"USD","timezone":"America/Los_Angeles",
+   "marketplaceStringId":"ATVPDKIKX0DER","accountId":"amzn1.account.ABC",
+   "accountInfo":{"id":"A2XYZUSDEMO","type":"seller","name":"VEXIM Demo US"},
+   "dailyBudget":{"currency":"USD","amount":500},"isDefault":true},
+  {"profileId":"9876543210","countryCode":"CA","currencyCode":"CAD","timezone":"America/Toronto",
+   "accountInfo":{"id":"A2XYZCADEMO","type":"seller","name":"VEXIM Demo CA"},"isDefault":false},
+  {"profileId":"5555555555","countryCode":"US","currencyCode":"USD",
+   "accountInfo":{"id":"VENDOR-DEMO","type":"vendor","name":"VEXIM Vendor"}},
+  {"countryCode":"US","accountInfo":{"id":"no-profile","type":"seller"}}
+]'::jsonb)`);
+ok(
+  Number(prof?.inserted) === 3 && Number(prof?.updated) === 0 && Number(prof?.skipped) === 1
+    && Number(prof?.profiles) === 3 && Number(prof?.merged) === 0,
+  `0020 profiles: 3 profile (bỏ 1 dòng không có profileId) — ${JSON.stringify(prof)}`,
+);
+const profRow = await one(`select account_id, account_type, account_name, daily_budget, currency,
+     is_default, marketplace from public.vexim_ads_profiles
+     where seller_account_id='${cShop}' and ads_profile_id='1234567890'`);
+ok(
+  profRow?.account_type === "seller" && profRow?.account_name === "VEXIM Demo US"
+    && profRow?.account_id === "A2XYZUSDEMO" && Number(profRow?.daily_budget) === 500
+    && profRow?.is_default === true,
+  `0020 profiles: đọc được accountInfo{} + dailyBudget{} NESTED của Amazon — ${JSON.stringify(profRow)}`,
+);
+const profVendor = await one(`select account_type from public.vexim_ads_profiles
+   where seller_account_id='${cShop}' and ads_profile_id='5555555555'`);
+ok(profVendor?.account_type === "vendor",
+   "0020 profiles: profile VENDOR vẫn lưu + gắn nhãn (worker tự chọn profile seller, không xoá dữ liệu)");
+const profAgain = await one(`select * from public.vexim_worker_upsert_ads_profiles('${cShop}', '[
+  {"profileId":"1234567890","countryCode":"US","currencyCode":"USD",
+   "accountInfo":{"id":"A2XYZUSDEMO","type":"seller","name":"VEXIM Demo US (đổi tên)"},"isDefault":true}
+]'::jsonb)`);
+ok(Number(profAgain?.inserted) === 0 && Number(profAgain?.updated) === 1,
+   `0020 profiles: nhập lại = UPDATE — ${JSON.stringify(profAgain)}`);
+
+// ---- 7. MODULE 5 — campaigns (POST /sp/campaigns/list v3, budget NESTED) -----
+const camp = await one(`select * from public.vexim_worker_upsert_ads_campaigns('${cShop}', '[
+  {"campaignId":"C1","name":"SP - Mat ong 500ml","state":"ENABLED","costType":"CPC",
+   "targetingType":"MANUAL","startDate":"20260801","adsProfileId":"1234567890",
+   "budget":{"budget":25.00,"currencyCode":"USD","budgetType":"DAILY"}},
+  {"campaignId":"C2","name":"SP - ROAS tot","state":"ENABLED","costType":"CPC",
+   "targetingType":"AUTO","startDate":"20260715","adsProfileId":"1234567890",
+   "budget":{"budget":40,"currencyCode":"USD","budgetType":"DAILY"}},
+  {"campaignId":"C3","name":"SP - CAD","state":"PAUSED","adsProfileId":"9876543210",
+   "budget":{"budget":15,"currencyCode":"CAD","budgetType":"DAILY"}},
+  {"name":"thieu campaignId","state":"ENABLED"}
+]'::jsonb)`);
+ok(
+  Number(camp?.inserted) === 3 && Number(camp?.skipped) === 1 && Number(camp?.campaigns) === 3
+    && Number(camp?.merged) === 0,
+  `0020 campaigns: 3 campaign (bỏ 1 dòng không campaignId) — ${JSON.stringify(camp)}`,
+);
+const c1 = await one(`select daily_budget, budget_currency, budget_type, start_date, state, targeting_type
+   from ads.campaigns where seller_account_id='${cShop}' and campaign_id='C1'`);
+ok(
+  Number(c1?.daily_budget) === 25 && c1?.budget_currency === "USD" && c1?.budget_type === "DAILY"
+    && d10(c1?.start_date) === "2026-08-01",
+  `0020 campaigns: budget{} NESTED + startDate "20260801" (yyyyMMdd) đọc đúng — ${JSON.stringify({ ...c1, start_date: d10(c1?.start_date) })}`,
+);
+await one(`select * from public.vexim_worker_upsert_ads_campaigns('${cShop}', '[
+  {"campaignId":"C3","name":"SP - CAD","state":"PAUSED","adsProfileId":"9876543210",
+   "budget":{"budget":0,"currencyCode":"CAD","budgetType":"DAILY"}}]'::jsonb)`);
+ok(
+  Number((await one(`select daily_budget from ads.campaigns
+     where seller_account_id='${cShop}' and campaign_id='C3'`)).daily_budget) === 0,
+  "0020 campaigns: ngân sách về 0 được GHI ĐÈ (0 là thông tin thật, không phải 'thiếu dữ liệu')",
+);
+
+// ---- 8. MODULE 5 — metrics ngày (Reporting v3, spCampaigns) ------------------
+const M_DAYS = ["2026-09-05","2026-09-06","2026-09-07","2026-09-08","2026-09-09","2026-09-10"];
+const metricRows = [
+  // C1 lỗ (ACOS 50%): Amazon KHÔNG trả ctr/cpc/acos → DB phải tự tính
+  ...M_DAYS.map((d) => ({ date: d, campaignId: "C1", campaignName: "SP - Mat ong 500ml",
+    impressions: 1000, clicks: 10, cost: 10, sales7d: 20, purchases7d: 2,
+    unitsSoldClicks7d: 2, currencyCode: "USD", campaignStatus: "enabled", reportId: "rep-c1" })),
+  { date: "2026-09-11", campaignId: "C1", campaignName: "SP - Mat ong 500ml", impressions: 1200,
+    clicks: 12, cost: 12, sales7d: 25, purchases7d: 3, unitsSoldClicks7d: 3, currencyCode: "USD",
+    campaignStatus: "enabled", campaignBudgetAmount: "25.00", reportId: "rep-c1b" },
+  // trùng ngày (report chồng khoảng) → KHÔNG được cộng dồn tiền
+  { date: "2026-09-11", campaignId: "C1", impressions: 1200, clicks: 12, cost: 12, sales7d: 25,
+    purchases7d: 3, currencyCode: "USD", reportId: "rep-c1c" },
+  // C2 lãi (ACOS ~7%)
+  ...M_DAYS.map((d) => ({ date: d, campaignId: "C2", campaignName: "SP - ROAS tot", impressions: 2000,
+    clicks: 20, cost: 5, sales7d: 70, purchases7d: 5, currency: "USD" })),
+  { date: "2026-09-11", campaignId: "C2", impressions: 2000, clicks: 20, cost: 5, sales7d: 70,
+    purchases7d: 5, currency: "USD" },
+  // C3 = CAD → KHÔNG cộng chung với USD
+  { date: "2026-09-11", campaignId: "C3", impressions: 100, clicks: 4, cost: 8, sales7d: 40,
+    purchases7d: 1, currencyCode: "CAD" },
+  // rác: thiếu ngày / thiếu campaignId
+  { campaignId: "C1", cost: 99, currencyCode: "USD" },
+  { date: "2026-09-11", cost: 99, currencyCode: "USD" },
+];
+const m1 = await one(`select * from public.vexim_worker_upsert_ads_metrics('${cShop}', '${JSON.stringify(metricRows)}'::jsonb)`);
+ok(
+  Number(m1?.inserted) === 15 && Number(m1?.updated) === 0 && Number(m1?.skipped) === 2
+    && Number(m1?.merged) === 1 && Number(m1?.days) === 7 && m1?.currencies === "CAD,USD",
+  `0020 metrics: 15 dòng mới · 1 cặp trùng ngày GỘP bằng max (không cộng dồn tiền) · bỏ 2 rác · tiền tệ CAD,USD — ${JSON.stringify(m1)}`,
+);
+const dup = await one(`select * from public.vexim_worker_upsert_ads_metrics('${cShop}', '${JSON.stringify(metricRows)}'::jsonb)`);
+ok(Number(dup?.inserted) === 0 && Number(dup?.updated) === 15 && Number(dup?.skipped) === 2,
+   `0020 metrics: nhập LẠI cùng lô → 15 update / 0 insert (không nhân đôi tiền) — ${JSON.stringify(dup)}`);
+await cmp(
+  "0020 metrics: 2 lần nhập vẫn 15 dòng, ngày 09-11 của C1 không bị cộng dồn",
+  `select count(*) n from ads.ad_metrics_daily where seller_account_id='${cShop}'`,
+  15,
+);
+const d11 = await one(`select spend, sales7d, orders, clicks, impressions, ctr, cpc, acos7d, roas7d,
+     budget_amount, currency from ads.ad_metrics_daily
+     where seller_account_id='${cShop}' and campaign_id='C1' and day='2026-09-11'`);
+ok(
+  Number(d11?.spend) === 12 && Number(d11?.sales7d) === 25 && Number(d11?.orders) === 3
+    && Number(d11?.ctr) === 1 && Number(d11?.cpc) === 1 && Number(d11?.acos7d) === 48
+    && Number(d11?.roas7d) === 2.0833 && Number(d11?.budget_amount) === 25,
+  `0020 metrics: Amazon không trả ctr/cpc/acos/roas → DB TỰ TÍNH (ctr 1% · cpc 1 · ACOS 48% · ROAS 2.08) — ${JSON.stringify(d11)}`,
+);
+
+// ---- 9. A1 — view campaign: cửa sổ 7 ngày + cờ vượt ngưỡng + ngân sách -------
+const cv = await rows19(`select campaign_id, currency, state, daily_budget, spend_yesterday, spend7,
+     sales7, acos7, roas7, ctr7, cpc7, ad_orders7, days_with_data, over_acos_target, acos_target,
+     budget_used_pct, budget_exhausted, last_metrics_day
+     from public.vexim_ads_campaigns where seller_account_id='${cShop}' order by campaign_id`);
+ok(cv.length === 3, `0020 view campaign: 3 dòng (nhận ${cv.length})`);
+const cvOf = (id) => cv.find((r) => r.campaign_id === id);
+ok(
+  Number(cvOf("C1")?.spend7) === 72 && Number(cvOf("C1")?.sales7) === 145
+    && Number(cvOf("C1")?.acos7) === 49.66 && Number(cvOf("C1")?.roas7) === 2.01
+    && Number(cvOf("C1")?.days_with_data) === 7 && Number(cvOf("C1")?.spend_yesterday) === 12,
+  `0020 view campaign: C1 gộp 7 ngày spend 72 / sales 145 → ACOS 49.66% · ROAS 2.01 — ${JSON.stringify(cvOf("C1"))}`,
+);
+ok(
+  cvOf("C1")?.over_acos_target === true && Number(cvOf("C1")?.acos_target) === 25
+    && cvOf("C2")?.over_acos_target === false,
+  "0020 view campaign: C1 vượt ngưỡng ACOS 25% (cờ đỏ cho UI) · C2 thì không",
+);
+ok(
+  Number(cvOf("C1")?.ctr7) === 1 && Number(cvOf("C1")?.cpc7) === 1
+    && Number(cvOf("C2")?.acos7) === 7.14,
+  `0020 view campaign: ctr7/cpc7 gộp từ tổng (không trung bình của trung bình) · C2 ACOS 7.14% — ${JSON.stringify(cvOf("C2"))}`,
+);
+ok(
+  cvOf("C3")?.currency === "CAD" && Number(cvOf("C3")?.spend7) === 8
+    && Number(cvOf("C1")?.spend7) === 72,
+  "0020 view campaign: CAD và USD là 2 DÒNG RIÊNG — không cộng tiền khác tiền tệ",
+);
+
+// ---- 10. Budget usage: % đã dùng + GIỜ CẠN (ước lượng) ----------------------
+const bu = await one(`select * from public.vexim_worker_upsert_ads_budget_usage('${cShop}', '[
+  {"date":"2026-09-11","campaignId":"C1","campaignName":"SP - Mat ong 500ml","budget":25,
+   "spend":12.5,"percentageUsed":50,"currency":"USD","deliveredClicks":12,
+   "capturedAt":"2026-09-11T10:05:00Z","adsProfileId":"1234567890"},
+  {"date":"2026-09-11","campaignId":"C1","budget":25,"spend":25,"percentageUsed":100,
+   "currency":"USD","capturedAt":"2026-09-11T14:05:00Z"},
+  {"date":"2026-09-11","campaignId":"C1","budget":25,"spend":25,"percentageUsed":100,
+   "currency":"USD","capturedAt":"2026-09-11T14:35:00Z"},
+  {"date":"2026-09-11","campaignId":"C2","budget":40,"spend":5,"percentageUsed":12.5,
+   "currency":"USD","capturedAt":"2026-09-11T14:05:00Z"},
+  {"date":"khong hop le","campaignId":"C9","percentageUsed":10}
+]'::jsonb)`);
+ok(
+  Number(bu?.rows_written) === 3 && Number(bu?.skipped) === 1 && Number(bu?.merged) === 1
+    && Number(bu?.exhausted) === 1,
+  `0020 budget: 3 lần chụp ghi được (2 lần cùng GIỜ gộp còn 1) · bỏ 1 rác · 1 campaign đã cạn — ${JSON.stringify(bu)}`,
+);
+await cmp(
+  "0020 budget: 2 lần chụp CÙNG GIỜ → 1 dòng (khoá theo giờ, bảng không phình)",
+  `select count(*) n from ads.budget_usage where seller_account_id='${cShop}' and campaign_id='C1'`,
+  2,
+);
+const bv = await one(`select campaign_id, percentage_used, budget, spend, budget_exhausted,
+     snapshots_over_100pct, exhausted_note,
+     to_char(exhausted_at_estimate at time zone 'UTC','YYYY-MM-DD HH24') as exhausted_hour
+     from public.vexim_ads_budget_usage
+     where seller_account_id='${cShop}' and campaign_id='C1'`);
+ok(
+  bv?.budget_exhausted === true && bv?.exhausted_hour === "2026-09-11 14"
+    && Number(bv?.snapshots_over_100pct) === 1 && Number(bv?.percentage_used) === 100,
+  `0020 budget view: C1 cạn lúc ~14h (ƯỚC LƯỢNG từ lần chụp đầu ≥100%) — ${JSON.stringify(bv)}`,
+);
+ok(String(bv?.exhausted_note).includes("Ước lượng"),
+   `0020 budget view: có nhãn nói rõ đây là ước lượng ("${bv?.exhausted_note}")`);
+ok(
+  Number(cvOf("C1")?.budget_used_pct) === 50
+    || Number((await one(`select budget_used_pct from public.vexim_ads_campaigns
+         where seller_account_id='${cShop}' and campaign_id='C1'`)).budget_used_pct) === 100,
+  "0020 view campaign: budget_used_pct lấy từ Budget Usage (lần chụp mới nhất)",
+);
+
+// ---- 11. Alert ACOS / BUDGET tự nổ + tự đóng khi hết vi phạm ----------------
+const al1 = await rows19(`select * from public.vexim_ads_raise_alerts('${cShop}','2026-09-11')`);
+const alAcos = al1.find((r) => r.rule_code === "acos_over_target");
+const alBudget = al1.find((r) => r.rule_code === "budget_exhausted");
+ok(
+  alAcos?.severity === "amber" && alAcos?.entity_key === "campaign:C1"
+    && Number(alAcos?.metric) === 49.66 && Number(alAcos?.threshold) === 25 && alAcos?.alert_id,
+  `0020 alert: ACOS 49.66% > 25% → nổ amber cho campaign C1 — ${JSON.stringify(alAcos)}`,
+);
+ok(
+  alBudget?.severity === "amber" && alBudget?.entity_key === "budget:C1" && alBudget?.alert_id,
+  `0020 alert: cạn ngân sách → nổ amber — ${JSON.stringify(alBudget)}`,
+);
+ok(
+  !al1.some((r) => r.entity_key === "campaign:C2"),
+  "0020 alert: C2 (ACOS 7.14%) KHÔNG bị cảnh báo — ngưỡng đọc từ ops.alert_rules",
+);
+await cmp(
+  "0020 alert: đúng 2 alert PPC mở cho shop",
+  `select count(*) n from ops.alerts a join ops.alert_rules r on r.id=a.rule_id
+    where a.seller_account_id='${cShop}' and a.status='open'
+      and r.rule_code in ('acos_over_target','budget_exhausted')`,
+  2,
+);
+const al2 = await rows19(`select * from public.vexim_ads_raise_alerts('${cShop}','2026-09-11')`);
+ok(
+  al2.find((r) => r.rule_code === "acos_over_target")?.alert_id === alAcos?.alert_id,
+  "0020 alert: chạy LẠI → cùng alert_id (dedupe theo entity_key, không spam)",
+);
+
+// C1 được tối ưu: sales tăng → ACOS về 4.97% → alert phải TỰ ĐÓNG
+const goodRows = [
+  ...M_DAYS.map((d) => ({ date: d, campaignId: "C1", impressions: 1000, clicks: 10, cost: 10,
+    sales7d: 200, purchases7d: 20, currencyCode: "USD" })),
+  { date: "2026-09-11", campaignId: "C1", impressions: 1200, clicks: 12, cost: 12, sales7d: 250,
+    purchases7d: 25, currencyCode: "USD" },
+];
+await one(`select * from public.vexim_worker_upsert_ads_metrics('${cShop}', '${JSON.stringify(goodRows)}'::jsonb)`);
+const al3 = await rows19(`select * from public.vexim_ads_raise_alerts('${cShop}','2026-09-11')`);
+ok(
+  al3.find((r) => r.rule_code === "acos_over_target")?.next_action === "resolved",
+  `0020 alert: ACOS về 4.97% (< 25%) → TỰ ĐÓNG alert — ${JSON.stringify(al3.find((r) => r.rule_code === "acos_over_target"))}`,
+);
+await cmp(
+  "0020 alert: alert ACOS chuyển resolved (chuông hết reo)",
+  `select count(*) n from ops.alerts a join ops.alert_rules r on r.id=a.rule_id
+    where a.seller_account_id='${cShop}' and r.rule_code='acos_over_target' and a.status='resolved'`,
+  1,
+);
+ok(
+  (await one(`select over_acos_target from public.vexim_ads_campaigns
+     where seller_account_id='${cShop}' and campaign_id='C1'`)).over_acos_target === false,
+  "0020 view campaign: cờ over_acos_target tắt theo dữ liệu mới",
+);
+
+// ---- 12. A3 — search term (giữ term "*", gộp 7 ngày, tín hiệu đốt tiền) -----
+const stRows = [
+  { date: "2026-09-11", searchTerm: "mat ong 500ml", campaignId: "C1", adGroupId: "AG1",
+    keywordId: "K1", keywordText: "mat ong", matchType: "BROAD", keywordType: "BROAD",
+    impressions: 100, clicks: 4, cost: 4, sales7d: 40, purchases7d: 2, keywordBid: 1.0,
+    currencyCode: "USD", campaignName: "SP - Mat ong 500ml", adGroupName: "Ad group 1" },
+  { date: "2026-09-10", searchTerm: "mat ong 500ml", campaignId: "C1", adGroupId: "AG1",
+    keywordId: "K1", matchType: "BROAD", impressions: 50, clicks: 2, cost: 2, sales7d: 20,
+    purchases7d: 1, currencyCode: "USD" },
+  { date: "2026-09-11", searchTerm: "sua rua mat re tien", campaignId: "C1", adGroupId: "AG1",
+    keywordId: "K2", matchType: "BROAD", impressions: 80, clicks: 5, cost: 7.5, sales7d: 0,
+    purchases7d: 0, currencyCode: "USD" },
+  { date: "2026-09-11", searchTerm: "*", campaignId: "C1", adGroupId: "AG1", impressions: 30,
+    clicks: 1, cost: 1, sales7d: 10, purchases7d: 1, currencyCode: "USD" },
+  { date: "2026-09-11", campaignId: "C1", clicks: 1, cost: 0.5 },
+];
+const st = await one(`select * from public.vexim_worker_upsert_ads_search_terms('${cShop}', '${JSON.stringify(stRows)}'::jsonb)`);
+ok(
+  Number(st?.rows_written) === 4 && Number(st?.skipped) === 1 && Number(st?.terms) === 3
+    && Number(st?.merged) === 0,
+  `0020 search term: 4 dòng · 3 term · bỏ 1 dòng thiếu term — ${JSON.stringify(st)}`,
+);
+const stv = await rows19(`select search_term, is_placement_without_keyword, clicks, spend, sales7,
+     acos7, days_with_data, wasted_spend_signal
+     from public.vexim_ads_search_terms where seller_account_id='${cShop}' order by spend desc`);
+const stOf = (t) => stv.find((r) => r.search_term === t);
+ok(
+  Number(stOf("mat ong 500ml")?.clicks) === 6 && Number(stOf("mat ong 500ml")?.spend) === 6
+    && Number(stOf("mat ong 500ml")?.sales7) === 60 && Number(stOf("mat ong 500ml")?.acos7) === 10
+    && Number(stOf("mat ong 500ml")?.days_with_data) === 2
+    && stOf("mat ong 500ml")?.wasted_spend_signal === false,
+  `0020 search term view: gộp 2 ngày (6 click · 6$ · sales 60$ · ACOS 10%) — ${JSON.stringify(stOf("mat ong 500ml"))}`,
+);
+ok(
+  stOf("sua rua mat re tien")?.wasted_spend_signal === true
+    && Number(stOf("sua rua mat re tien")?.clicks) === 5
+    && Number(stOf("sua rua mat re tien")?.sales7) === 0,
+  `0020 search term view: 5 click · 0 đơn → cờ "đốt tiền" cho gợi ý negative (Phần 2 mới có luồng duyệt) — ${JSON.stringify(stOf("sua rua mat re tien"))}`,
+);
+ok(
+  stOf("*")?.is_placement_without_keyword === true && Number(stOf("*")?.spend) === 1,
+  '0020 search term view: term "*" = placement không gắn từ khoá → GIỮ LẠI (bỏ là thiếu spend)',
+);
+
+// ---- 13. A2 — targeting (keyword vs target ASIN/category) -------------------
+const tg = await one(`select * from public.vexim_worker_upsert_ads_targeting('${cShop}', '[
+  {"date":"2026-09-11","campaignId":"C1","adGroupId":"AG1","adGroupName":"Ad group 1",
+   "keywordId":"K1","keywordText":"mat ong","matchType":"BROAD","keywordType":"BROAD",
+   "impressions":100,"clicks":4,"cost":4,"sales7d":40,"purchases7d":2,"keywordBid":1.0,
+   "currencyCode":"USD","adsProfileId":"1234567890","reportId":"rep-tg"},
+  {"date":"2026-09-11","campaignId":"C1","adGroupId":"AG1",
+   "targetingExpression":"b0demoasin9","keywordType":"TARGETING_EXPRESSION_PREDEFINED",
+   "impressions":50,"clicks":2,"cost":2,"sales7d":0,"purchases7d":0,"currencyCode":"USD"},
+  {"date":"2026-09-11","campaignId":"C1","adGroupId":"AG1","impressions":10,"clicks":1,"cost":1}
+]'::jsonb)`);
+ok(Number(tg?.rows_written) === 2 && Number(tg?.skipped) === 1 && Number(tg?.merged) === 0,
+   `0020 targeting: 2 dòng (keyword + target ASIN) · bỏ 1 dòng không khoá được — ${JSON.stringify(tg)}`);
+const tgv = await rows19(`select target_label, keyword_text, is_product_targeting, clicks, spend, acos7d
+   from public.vexim_ads_targeting where seller_account_id='${cShop}' order by target_label`);
+ok(
+  tgv.find((r) => r.target_label === "b0demoasin9")?.is_product_targeting === true
+    && tgv.find((r) => r.target_label === "mat ong")?.is_product_targeting === false,
+  `0020 targeting view: phân biệt keyword với target ASIN/category — ${JSON.stringify(tgv)}`,
+);
+
+// ---- 14. F4 — lấp ads_spend THẬT (cột riêng, KHÔNG trừ vào lãi gộp) ----------
+await one(`select * from public.vexim_worker_upsert_profit('${cShop}', '[
+  {"sku":"ADS-SKU-1","day":"2026-09-11","currency":"USD","units":5,"revenue":250,
+   "amazonFees":40,"cogs":100,"grossProfit":110,"feeSource":"settled"}]'::jsonb)`);
+await ex("reset role;");
+ok(
+  await ex(`insert into catalog.listings(seller_account_id,sku,asin,title,status,currency)
+     values ('${cShop}','ADS-SKU-2','B0ADSDEMO02','Demo ASIN 0020','active','USD')
+     on conflict (seller_account_id,sku) do update set asin=excluded.asin`),
+  "0020 fixture: listing ADS-SKU-2 ↔ B0ADSDEMO02 (để test suy SKU qua ASIN)",
+);
+await ex("set role service_role;");
+const adv = await one(`select * from public.vexim_worker_upsert_ads_advertised('${cShop}', '[
+  {"date":"2026-09-11","campaignId":"C1","adGroupId":"AG1","advertisedAsin":"B0ADSDEMO01",
+   "advertisedSku":"ADS-SKU-1","impressions":100,"clicks":5,"cost":6.50,"sales7d":60,
+   "purchases7d":3,"currencyCode":"USD","adsProfileId":"1234567890","reportId":"rep-adv"},
+  {"date":"2026-09-11","campaignId":"C1","adGroupId":"AG1","advertisedAsin":"B0ADSDEMO02",
+   "cost":3.25,"currencyCode":"USD"},
+  {"date":"2026-09-11","campaignId":"C1","adGroupId":"AG1","advertisedAsin":"B0CHUACO",
+   "cost":2.00,"currencyCode":"USD"},
+  {"date":"2026-09-11","campaignId":"C1","adGroupId":"AG1","cost":9.99,"currencyCode":"USD"}
+]'::jsonb)`);
+ok(
+  Number(adv?.rows_written) === 3 && Number(adv?.skipped) === 1 && Number(adv?.days) === 1
+    && Number(adv?.merged) === 0,
+  `0020 advertised product: 3 dòng · bỏ 1 dòng không ASIN không SKU — ${JSON.stringify(adv)}`,
+);
+const fill = await one(`select * from public.vexim_worker_fill_profit_ads_spend('${cShop}','2026-09-01','2026-09-30')`);
+ok(
+  Number(fill?.rows_updated) === 1 && Number(fill?.days) === 1 && Number(fill?.skus) === 2
+    && Number(fill?.unmatched) === 1 && fill?.currencies === "USD",
+  `0020 F4: lấp ads_spend 1 dòng · suy được 2 SKU (1 qua advertisedSku, 1 qua ASIN) · 1 dòng CHƯA khớp (báo ra, không bỏ qua) — ${JSON.stringify(fill)}`,
+);
+const f4 = await one(`select ads_spend, gross_profit, revenue from finance.sku_profit_daily
+   where seller_account_id='${cShop}' and sku='ADS-SKU-1' and day='2026-09-11'`);
+ok(
+  Number(f4?.ads_spend) === 6.5 && Number(f4?.gross_profit) === 110,
+  `0020 F4: ads_spend=6.5 là CỘT RIÊNG — gross_profit vẫn 110 (không trừ ads vào lãi gộp) — ${JSON.stringify(f4)}`,
+);
+await cmp(
+  "0020 F4: SKU chưa có dòng lợi nhuận thì KHÔNG bịa (không insert hộ)",
+  `select count(*) n from finance.sku_profit_daily where seller_account_id='${cShop}'`,
+  1,
+);
+
+// ---- 15. Report Ads bất đồng bộ: ghi trạng thái → cron sau POLL tiếp --------
+const rr1 = await one(`select * from public.vexim_worker_set_ads_report_request('${cShop}',
+  '{"reportTypeId":"spCampaigns","adProduct":"SPONSORED_PRODUCTS","groupBy":"campaign",
+    "timeUnit":"DAILY","dateStart":"2026-09-05","dateEnd":"2026-09-11","adsProfileId":"1234567890",
+    "adsReportId":"amzn-rid-1","status":"PROCESSING","requestedAt":"2026-09-11T20:00:00Z"}'::jsonb)`);
+ok(rr1?.status === "processing" && rr1?.ads_report_id === "amzn-rid-1",
+   `0020 report Ads: yêu cầu report → ghi trạng thái PROCESSING — ${JSON.stringify(rr1)}`);
+const pend = await one(`select public.vexim_worker_pending_ads_reports('${cShop}') items`);
+ok(
+  Array.isArray(pend?.items) && pend.items.length === 1
+    && pend.items[0].ads_report_id === "amzn-rid-1" && pend.items[0].report_type_id === "spCampaigns",
+  `0020 report Ads: cron lần sau tìm đúng report đang chờ để POLL tiếp (không xin report mới) — ${JSON.stringify(pend?.items)}`,
+);
+const rr2 = await one(`select * from public.vexim_worker_set_ads_report_request('${cShop}',
+  '{"reportTypeId":"spCampaigns","groupBy":"campaign","timeUnit":"DAILY","dateStart":"2026-09-05",
+    "dateEnd":"2026-09-11","adsProfileId":"1234567890","adsReportId":"amzn-rid-1",
+    "status":"COMPLETED","downloadUrl":"https://advertising.amazon.com/download?token=SECRET",
+    "rowsImported":15,"completedAt":"2026-09-11T20:05:00Z"}'::jsonb)`);
+ok(rr2?.status === "completed", `0020 report Ads: poll thấy COMPLETED → cập nhật cùng dòng — ${JSON.stringify(rr2)}`);
+await cmp(
+  "0020 report Ads: cùng khoá (shop×profile×loại×groupBy×timeUnit×khoảng ngày) = 1 dòng",
+  `select count(*) n from ads.report_requests where seller_account_id='${cShop}'`,
+  1,
+);
+const rrv = await one(`select status, attempts, rows_imported, is_stale,
+     (select count(*) from information_schema.columns c
+       where c.table_schema='public' and c.table_name='vexim_ads_report_requests'
+         and c.column_name='download_url') as url_exposed
+     from public.vexim_ads_report_requests where seller_account_id='${cShop}'`);
+ok(
+  rrv?.status === "completed" && Number(rrv?.attempts) === 2 && Number(rrv?.rows_imported) === 15
+    && Number(rrv?.url_exposed) === 0,
+  `0020 report Ads view: 2 lần chạm · 15 dòng nhập · KHÔNG phơi download_url (URL có token) — ${JSON.stringify(rrv)}`,
+);
+await cmp(
+  "0020 report Ads: hết report chờ → cron sau không poll thừa",
+  `select jsonb_array_length(public.vexim_worker_pending_ads_reports('${cShop}')) n`,
+  0,
+);
+
+// ---- 16. KPI + TACOS: chưa có doanh thu tổng → NULL, không bịa 0% -----------
+const kpi0 = await rows19(`select currency, spend_yesterday, spend7, ad_sales7, acos7, roas7, ctr7,
+     cpc7, total_sales7, tacos7, tacos_unknown, campaigns_enabled, campaigns_over_target,
+     campaigns_exhausted, budget_daily_total, is_stale, metrics_day
+     from public.vexim_ads_kpis where seller_account_id='${cShop}' order by currency`);
+ok(kpi0.length === 2, `0020 KPI: 2 dòng = 2 tiền tệ (CAD, USD) — nhận ${kpi0.length}`);
+const kOf = (rows, c) => rows.find((r) => r.currency === c);
+ok(
+  kOf(kpi0, "USD")?.tacos_unknown === true && kOf(kpi0, "USD")?.tacos7 === null,
+  `0020 KPI: chưa đồng bộ doanh thu tổng → TACOS NULL + cờ tacos_unknown (KHÔNG bịa 0%) — ${JSON.stringify(kOf(kpi0, "USD"))}`,
+);
+ok(
+  Number(kOf(kpi0, "USD")?.spend_yesterday) === 17 && Number(kOf(kpi0, "USD")?.spend7) === 107
+    && Number(kOf(kpi0, "USD")?.ad_sales7) === 1940 && Number(kOf(kpi0, "USD")?.acos7) === 5.52
+    && Number(kOf(kpi0, "USD")?.roas7) === 18.13 && Number(kOf(kpi0, "USD")?.campaigns_enabled) === 2
+    && Number(kOf(kpi0, "USD")?.campaigns_exhausted) === 1
+    && Number(kOf(kpi0, "USD")?.budget_daily_total) === 65,
+  `0020 KPI USD: spend hôm qua 17 · 7 ngày 107 · sales ads 1940 · ACOS 5.52% · ROAS 18.13 — ${JSON.stringify(kOf(kpi0, "USD"))}`,
+);
+ok(
+  Number(kOf(kpi0, "CAD")?.spend7) === 8 && Number(kOf(kpi0, "CAD")?.acos7) === 20
+    && kOf(kpi0, "CAD")?.is_stale === false,
+  `0020 KPI CAD: tách riêng (spend 8 · ACOS 20%) — ${JSON.stringify(kOf(kpi0, "CAD"))}`,
+);
+await ex(`insert into sales.order_daily(seller_account_id,day,orders_count,units,sales_amount,currency)
+   select '${cShop}', d, 6, 8, 142.86, 'USD'
+   from generate_series(date '2026-09-05', date '2026-09-11', interval '1 day') d
+   on conflict (seller_account_id, day) do update
+     set sales_amount = excluded.sales_amount, orders_count = excluded.orders_count`);
+const kpi1 = await one(`select total_sales7, tacos7, tacos_unknown from public.vexim_ads_kpis
+   where seller_account_id='${cShop}' and currency='USD'`);
+ok(
+  Number(kpi1?.total_sales7) === 1000.02 && Number(kpi1?.tacos7) === 10.7 && kpi1?.tacos_unknown === false,
+  `0020 TACOS: có doanh thu tổng 1000.02 USD → TACOS = 107/1000.02 = 10.7% (đúng định nghĩa TACOS) — ${JSON.stringify(kpi1)}`,
+);
+
+// ---- 17. RLS: user được gán shop đọc được, người lạ 0 dòng, token KHÔNG đọc được
+await ex("reset role;");
+await ex(`select set_config('request.jwt.claim.sub','${oUser}',false);`);
+await ex("set role authenticated;");
+await cmp(
+  "0020 RLS: user vận hành Ads thấy KPI của shop mình",
+  `select count(*) n from public.vexim_ads_kpis where seller_account_id='${cShop}'`,
+  2,
+);
+await cmp(
+  "0020 RLS: user vận hành Ads thấy campaign + search term + targeting",
+  `select (select count(*) from public.vexim_ads_campaigns where seller_account_id='${cShop}')
+        + (select count(*) from public.vexim_ads_search_terms where seller_account_id='${cShop}')
+        + (select count(*) from public.vexim_ads_targeting where seller_account_id='${cShop}') n`,
+  8,
+);
+const conn = await rows19(`select service, connected, token_status, token_source, days_to_reauth,
+     reauth_state, needs_connect from public.vexim_connections
+     where seller_account_id='${cShop}' order by service`);
+ok(
+  conn.length === 2 && conn.every((r) => !("encrypted_refresh_token" in r))
+    && conn.find((r) => r.service === "ads")?.connected === true
+    && conn.find((r) => r.service === "ads")?.token_status === "expired"
+    && conn.find((r) => r.service === "ads")?.reauth_state === "expired"
+    && conn.find((r) => r.service === "spapi")?.reauth_state === "ok",
+  `0020 RLS: view kết nối trả 2 service + trạng thái re-auth, KHÔNG lộ cột token — ${JSON.stringify(conn)}`,
+);
+await cmp(
+  "0020 RLS: authenticated thấy 0 token (bảng KHÔNG có policy SELECT cho client)",
+  `select count(*) n from connections.oauth_tokens`,
+  0,
+);
+await cmp(
+  "0020 RLS: authenticated thấy 0 oauth_states",
+  `select count(*) n from connections.oauth_states`,
+  0,
+);
+ok(
+  await mustBlock(`insert into connections.oauth_tokens(seller_account_id,service,encrypted_refresh_token,expires_at)
+     values ('${cShop}','spapi','enc:v1:x', now() + interval '365 days')`),
+  "0020 CHẶN: authenticated không ghi được oauth_tokens",
+);
+ok(
+  await mustBlock(`select * from public.vexim_oauth_upsert_token('{}'::jsonb)`),
+  "0020 CHẶN: RPC lưu token chỉ dành cho service_role",
+);
+ok(
+  await mustBlock(`select * from public.vexim_worker_upsert_ads_metrics('${cShop}','[]'::jsonb)`),
+  "0020 CHẶN: RPC nhập metrics Ads chỉ dành cho service_role",
+);
+ok(
+  await mustBlock(`select * from public.vexim_ads_raise_alerts('${cShop}',null)`),
+  "0020 CHẶN: RPC nổ alert PPC chỉ dành cho service_role",
+);
+ok(
+  await mustBlock(`select * from public.vexim_worker_fill_profit_ads_spend('${cShop}',null,null)`),
+  "0020 CHẶN: RPC lấp ads_spend vào F4 chỉ dành cho service_role",
+);
+ok(
+  await mustBlock(`insert into ads.ad_metrics_daily(seller_account_id,day,campaign_id)
+     values ('${cShop}','2026-09-11','C1')`),
+  "0020 CHẶN: authenticated không ghi thẳng bảng metrics Ads",
+);
+
+await ex("reset role;");
+await ex(`select set_config('request.jwt.claim.sub','${oStranger}',false);`);
+await ex("set role authenticated;");
+await cmp(
+  "0020 RLS: người lạ không thấy KPI PPC của shop",
+  `select count(*) n from public.vexim_ads_kpis where seller_account_id='${cShop}'`,
+  0,
+);
+await cmp(
+  "0020 RLS: người lạ không thấy campaign / search term / trạng thái report Ads",
+  `select (select count(*) from public.vexim_ads_campaigns where seller_account_id='${cShop}')
+        + (select count(*) from public.vexim_ads_search_terms where seller_account_id='${cShop}')
+        + (select count(*) from public.vexim_ads_report_requests where seller_account_id='${cShop}') n`,
+  0,
+);
+await cmp(
+  "0020 RLS: người lạ không thấy kết nối OAuth của shop",
+  `select count(*) n from public.vexim_connections where seller_account_id='${cShop}'`,
+  0,
+);
+await ex("rollback;");
+await ex("reset role;");
+
+// ---- 17b. HỢP ĐỒNG CỘT web ↔ DB (Module 5): mọi cột trong select của web phải tồn tại ----
+{
+  const webSelects = {
+    vexim_ads_kpis: ADS_KPI_SELECT,
+    vexim_ads_campaigns: ADS_CAMPAIGN_SELECT,
+    vexim_ads_campaign_daily: ADS_DAILY_SELECT,
+    vexim_ads_search_terms: ADS_SEARCH_TERM_SELECT,
+    vexim_ads_budget_usage: ADS_BUDGET_SELECT,
+    vexim_ads_report_requests: ADS_REPORT_REQUEST_SELECT,
+    vexim_ads_profiles: ADS_PROFILE_SELECT,
+  };
+  for (const [view, select] of Object.entries(webSelects)) {
+    const wanted = select.split(",").map((c) => c.trim()).filter(Boolean);
+    const have = new Set((await colsOf(view)).split(","));
+    const missing = wanted.filter((c) => !have.has(c));
+    ok(
+      missing.length === 0,
+      `0020: ${view} đủ ${wanted.length} cột mà web select` +
+        (missing.length > 0 ? ` — THIẾU: ${missing.join(", ")}` : ""),
+    );
+  }
+  // Cột mà reader web dùng để ORDER BY / lọc (ads.ts) — cũng phải tồn tại, vì
+  // PostgREST trả 400 cho order trên cột không có, và lỗi này chỉ nổ lúc chạy thật.
+  const webOrderFilters = {
+    vexim_ads_kpis: ["currency", "spend7"],
+    vexim_ads_campaigns: ["spend7", "campaign_name", "seller_account_id"],
+    vexim_ads_campaign_daily: ["day", "seller_account_id"],
+    vexim_ads_search_terms: ["spend", "seller_account_id", "wasted_spend_signal"],
+    vexim_ads_budget_usage: ["percentage_used", "seller_account_id"],
+    vexim_ads_report_requests: ["requested_at", "seller_account_id"],
+    vexim_ads_profiles: ["shop", "is_default", "seller_account_id"],
+  };
+  for (const [view, wanted] of Object.entries(webOrderFilters)) {
+    const have = new Set((await colsOf(view)).split(","));
+    const missing = wanted.filter((c) => !have.has(c));
+    ok(
+      missing.length === 0,
+      `0020: ${view} có đủ cột web dùng để sắp xếp/lọc` +
+        (missing.length > 0 ? ` — THIẾU: ${missing.join(", ")}` : ""),
+    );
+  }
+
+  // Ngược lại: cột mới thêm vào view mà web KHÔNG đọc → không fail, chỉ nhắc
+  // (để biết UI đang bỏ sót thông tin Amazon đã trả).
+  const kpiCols = (await colsOf("vexim_ads_kpis")).split(",");
+  const kpiRead = new Set(ADS_KPI_SELECT.split(",").map((c) => c.trim()));
+  const kpiUnused = kpiCols.filter((c) => !kpiRead.has(c));
+  ok(
+    kpiUnused.length <= 1,
+    `0020: vexim_ads_kpis gần như được web đọc hết (bỏ qua: ${kpiUnused.join(", ") || "không"})`,
+  );
+}
+
+// ---- 18. idempotent ----------------------------------------------------------
+ok(
+  await ex(rd("migrations/0020_module0_oauth_module5_ppc_read.sql"), "0020 lần 2"),
+  "0020 idempotent (chạy lại không lỗi, không đổi hợp đồng)",
+);
+ok(
+  (await colsOf("vexim_ads_kpis")).endsWith("hours_since_import,is_stale"),
+  "0020 lần 2: hợp đồng cột view KPI giữ nguyên",
+);
+await cmp(
+  "0020 lần 2: index unique không bị tạo trùng",
+  `select count(*) n from pg_indexes where indexname in
+     ('uq_oauth_tokens_shop_service','uq_search_terms_key','uq_budget_usage_hour',
+      'uq_ads_report_requests_key','uq_alerts_open_entity')`,
+  5,
+);
+await cmp(
+  "0020 lần 2: alert rule re-auth vẫn đúng ngưỡng (30 ngày nhắc, 365 ngày hạn)",
+  `select count(*) n from ops.alert_rules
+     where rule_code='reauth_required' and threshold=30 and is_active`,
+  1,
+);
+}
+
+
+// ===========================================================================
+{
+console.log("\n=== BƯỚC 22: 0021 — Module 5 Phần 2&3: PPC chiều GHI (hàng đợi duyệt · guardrail · audit) ===");
+// ===========================================================================
+ok(
+  await ex(rd("migrations/0021_module5_ppc_write.sql"), "0021_module5_ppc_write.sql"),
+  "0021 chạy sạch (DO-block tự soát: RLS · policy · view · RPC · trigger · alert rule · hợp đồng cột)",
+);
+
+const rows = async (sql) => {
+  try { return (await db.query(sql)).rows; } catch (e) { return [{ error: e.message.split("\n")[0] }]; }
+};
+/** gọi RPC trả jsonb: select fn(…) as r → object (PGlite có thể trả string) */
+const rpc = async (fn, arg) => {
+  const r = await one(`select public.${fn}(${arg}) as r`);
+  if (r && r.error) return { error: r.error };
+  const v = r ? r.r : null;
+  if (v === null || v === undefined) return {};
+  return typeof v === "string" ? JSON.parse(v) : v;
+};
+/**
+ * Gọi RPC MONG ĐỢI THẤT BẠI mà không phá transaction đang test.
+ * Vì sao không dùng rpc(): một exception trong transaction làm PG abort cả txn;
+ * helper ex() thấy lỗi sẽ `rollback` → mất fixture. Ở đây bọc savepoint rồi
+ * rollback đúng về savepoint đó, và vẫn đọc được thông báo lỗi để assert.
+ */
+const rpcFail = async (fn, arg) => {
+  await db.exec("savepoint sp_expect_fail");
+  const r = await one(`select public.${fn}(${arg}) as r`);
+  await db.exec("rollback to savepoint sp_expect_fail");
+  return { error: r && r.error ? r.error : null, value: r ? r.r : null };
+};
+
+const asUser = async (uid) => {
+  await ex("reset role;");
+  await ex(`select set_config('request.jwt.claim.sub','${uid ?? ""}',false);`);
+  await ex("set role authenticated;");
+};
+const asWorker = async () => {
+  await ex("reset role;");
+  await ex("select set_config('request.jwt.claim.sub','',false);");
+  await ex("set role service_role;");
+};
+
+// ---- 1. Hợp đồng cột của 4 view mới (web đọc bằng select cố định) -------------
+ok(
+  (await colsOf("vexim_ppc_policies")) ===
+    "seller_account_id,shop,marketplace,shop_status,has_policy_row,auto_apply,require_approval_state," +
+    "max_bid_change_pct,max_budget_change_pct,bid_floor,bid_ceiling,budget_floor,budget_ceiling," +
+    "daily_change_cap,max_open_requests,proposal_ttl_hours,suggestion_min_clicks,suggestion_min_spend," +
+    "suggestion_acos_lower_pct,bid_step_pct,currency,notes,policy_updated_at,proposed_count," +
+    "approved_count,applying_count,applied_today,failed_24h,open_count,cap_left_today,can_edit_policy",
+  "0021: vexim_ppc_policies đúng hợp đồng cột (guardrail hiệu lực + trạng thái hàng đợi)",
+);
+ok(
+  (await colsOf("vexim_ppc_change_requests")) ===
+    "id,seller_account_id,shop,ads_profile_id,entity_type,change_type,amazon_entity_id,campaign_id," +
+    "campaign_name,campaign_type,ad_group_id,label,match_type,currency,before_value,after_value," +
+    "before_number,after_number,delta_pct,delta_label,summary,entity_label,requires_approval,reason," +
+    "source,suggestion_key,status,status_label,is_open,is_terminal,batch_id,proposed_by," +
+    "proposed_by_name,proposed_at,age_hours,decided_by,decided_by_name,decided_at,decision_note," +
+    "expires_at,expires_in_hours,expired,attempts,applied_at,last_error,amazon_response,created_at," +
+    "updated_at,can_decide,is_mine",
+  "0021: vexim_ppc_change_requests đúng hợp đồng cột (summary/status_label/can_decide cho UI)",
+);
+ok(
+  (await colsOf("vexim_ppc_suggestions")) ===
+    "seller_account_id,shop,kind,priority,suggestion_key,entity_type,change_type,campaign_id," +
+    "campaign_name,ad_group_id,ad_group_name,amazon_entity_id,label,match_type,keyword_type," +
+    "currency,before_value,after_value,current_number,proposed_number,delta_pct,impressions7," +
+    "clicks7,spend7,sales7,ad_orders7,acos7,acos_target,waste7,days_with_data,window_end,reason," +
+    "requires_approval,has_open_request,kind_label,can_decide,can_propose",
+  "0021: vexim_ppc_suggestions đúng hợp đồng cột (gợi ý trả sẵn before/after/reason)",
+);
+ok(
+  (await colsOf("vexim_ads_negative_keywords")) ===
+    "id,seller_account_id,shop,ads_profile_id,campaign_id,campaign_name,ad_group_id,ad_group_name," +
+    "level,keyword_text,keyword_norm,match_type,match_label,amazon_negative_id,state,source," +
+    "change_request_id,request_status,created_at,last_synced_at,updated_at",
+  "0021: vexim_ads_negative_keywords đúng hợp đồng cột",
+);
+
+// ---- 2. Chốt an toàn về quyền ----------------------------------------------
+await cmp(
+  "0021: 3 bảng mới bật RLS",
+  `select count(*) n from pg_class c join pg_namespace ns on ns.oid=c.relnamespace
+    where (ns.nspname,c.relname) in (('ads','ppc_policies'),('ads','change_requests'),
+                                     ('ads','negative_keywords')) and c.relrowsecurity`,
+  3,
+);
+await cmp(
+  "0021: KHÔNG có policy ghi nào cho client trên bảng PPC chiều ghi (mọi đường ghi qua RPC)",
+  `select count(*) n from pg_policies where schemaname='ads'
+     and tablename in ('ppc_policies','change_requests','negative_keywords') and cmd <> 'SELECT'`,
+  0,
+);
+await cmp(
+  "0021: 2 trigger trên hàng đợi (guard máy trạng thái + audit)",
+  `select count(*) n from pg_trigger t join pg_class c on c.oid=t.tgrelid
+    where c.relname='change_requests' and not t.tgisinternal
+      and t.tgname in ('trg_change_request_guard','trg_change_request_audit')`,
+  2,
+);
+await cmp(
+  "0021: khoá chống đề xuất trùng là unique index CÓ ĐIỀU KIỆN (chỉ chặn đề xuất đang mở)",
+  `select count(*) n from pg_indexes where schemaname='ads'
+     and indexname='uq_change_requests_open' and indexdef like '%UNIQUE%' and indexdef like '%WHERE%'`,
+  1,
+);
+await cmp(
+  "0021: khoá khử trùng negative keyword (1 từ / campaign / ad group / match type)",
+  `select count(*) n from pg_indexes where schemaname='ads'
+     and indexname='uq_negative_keywords_key' and indexdef like '%UNIQUE%' and indexdef like '%lower%'`,
+  1,
+);
+await cmp(
+  "0021: 4 RPC người dùng = security definer, authenticated gọi được, anon thì KHÔNG",
+  `select count(*) n from pg_proc p join pg_namespace ns on ns.oid=p.pronamespace
+    where ns.nspname='public' and p.proname in
+      ('vexim_ppc_propose_changes','vexim_ppc_decide_change','vexim_ppc_decide_bulk',
+       'vexim_ppc_set_policy')
+      and p.prosecdef
+      and has_function_privilege('authenticated', p.oid, 'EXECUTE')
+      and not has_function_privilege('anon', p.oid, 'EXECUTE')`,
+  4,
+);
+await cmp(
+  "0021: 3 RPC worker CHỈ service_role (client không gọi được)",
+  `select count(*) n from pg_proc p join pg_namespace ns on ns.oid=p.pronamespace
+    where ns.nspname='public' and p.proname in
+      ('vexim_worker_ppc_pending_changes','vexim_worker_ppc_set_result','vexim_ppc_raise_alerts')
+      and p.prosecdef
+      and has_function_privilege('service_role', p.oid, 'EXECUTE')
+      and not has_function_privilege('authenticated', p.oid, 'EXECUTE')`,
+  3,
+);
+await cmp(
+  "0021: 2 alert rule mới đã seed đúng ngưỡng (chờ duyệt 24 giờ · thất bại ≥ 1 lần)",
+  `select count(*) n from ops.alert_rules where is_active
+     and ((rule_code='ppc_pending_approval' and threshold=24 and severity='amber')
+       or (rule_code='ppc_change_failed' and threshold=1 and severity='red'))`,
+  2,
+);
+
+// ---- 3. Policy mặc định (shop CHƯA có dòng policy vẫn được bảo vệ) ------------
+{
+  const d = await one(`select (ads.ppc_policy(null::uuid)) as p`);
+  const p = typeof d.p === "string" ? JSON.parse(d.p) : d.p;
+  ok(
+    p.has_row === false && p.auto_apply === false && p.require_approval_state === true
+      && Number(p.max_bid_change_pct) === 20 && Number(p.max_budget_change_pct) === 30
+      && Number(p.daily_change_cap) === 50 && Number(p.proposal_ttl_hours) === 72
+      && Number(p.suggestion_min_clicks) === 3 && Number(p.suggestion_acos_lower_pct) === 50
+      && Number(p.bid_step_pct) === 15 && p.currency === "USD",
+    `0021: shop chưa có policy → mặc định AN TOÀN (auto_apply=false, bid ±20%, budget ±30%, 50 thay đổi/ngày, TTL 72h) — ${JSON.stringify(p)}`,
+  );
+}
+
+// ---- 4. Fixture: user + dữ liệu Ads (campaign/keyword/search term/budget) -----
+await ex("begin");
+await ex("reset role;");
+const wShop = (await one("select id, org_id from connections.seller_accounts order by seller_id limit 1")).id;
+const wProposer = "d2100000-0000-4000-8000-000000000001";
+const wApprover = "d2100000-0000-4000-8000-000000000002";
+const wStranger = "d2100000-0000-4000-8000-000000000003";
+const wReadOnly = "d2100000-0000-4000-8000-000000000004";
+ok(
+  await ex(`insert into auth.users(id,email) values
+     ('${wProposer}','local-w-ppc@example.test'),
+     ('${wApprover}','local-w-lead@example.test'),
+     ('${wStranger}','local-w-stranger@example.test'),
+     ('${wReadOnly}','local-w-readonly@example.test')
+     on conflict (id) do nothing;
+   insert into iam.user_profiles(id,display_name,email,vexim_employee) values
+     ('${wProposer}','Nhân viên PPC','local-w-ppc@example.test',true),
+     ('${wApprover}','Trưởng phòng PPC','local-w-lead@example.test',true),
+     ('${wStranger}','Người lạ','local-w-stranger@example.test',true),
+     ('${wReadOnly}','Chỉ xem','local-w-readonly@example.test',true)
+     on conflict (id) do nothing;
+   insert into iam.assignments(user_id,seller_account_id,module,can_write) values
+     ('${wProposer}','${wShop}','ads',true),
+     ('${wApprover}','${wShop}','ads',true),
+     ('${wReadOnly}','${wShop}','ads',false)
+     on conflict (user_id,seller_account_id,module) do update set can_write=excluded.can_write;
+   insert into iam.role_assignments(user_id,role) values ('${wProposer}','operator')
+     on conflict do nothing;
+   insert into iam.role_assignments(user_id,role,department_id)
+     values ('${wApprover}','dept_lead',(select id from iam.departments where code='ppc'))
+     on conflict do nothing;
+   delete from ads.change_requests          where seller_account_id='${wShop}';
+   delete from ads.negative_keywords        where seller_account_id='${wShop}';
+   delete from ads.ppc_policies             where seller_account_id='${wShop}';
+   delete from ads.targeting_metrics_daily  where seller_account_id='${wShop}';
+   delete from ads.search_terms             where seller_account_id='${wShop}';
+   delete from ads.budget_usage             where seller_account_id='${wShop}';
+   delete from ads.ad_metrics_daily         where seller_account_id='${wShop}';
+   delete from ads.campaigns                where seller_account_id='${wShop}';
+   delete from ads.ad_profiles              where seller_account_id='${wShop}';
+   delete from iam.audit_logs               where seller_account_id='${wShop}' and module='ads';
+   delete from ops.alerts                   where seller_account_id='${wShop}'`),
+  "0021 fixture: người đề xuất (can_write) · trưởng phòng PPC (dept_lead) · người lạ · người chỉ xem + dọn dữ liệu cũ",
+);
+ok(
+  (await one(`select iam.is_ppc_approver() as a from (select 1) x`)) !== undefined,
+  "0021: iam.is_ppc_approver() gọi được (superuser = true)",
+);
+await ex("reset role;");
+await asWorker();
+
+// profiles + campaigns (v3: budget NESTED)
+await one(`select * from public.vexim_worker_upsert_ads_profiles('${wShop}', '[
+  {"profileId":"1234567890","countryCode":"US","currencyCode":"USD","timezone":"America/Los_Angeles",
+   "accountInfo":{"id":"A2XYZUSDEMO","type":"seller","name":"VEXIM Demo US"},"isDefault":true}]'::jsonb)`);
+await one(`select * from public.vexim_worker_upsert_ads_campaigns('${wShop}', '[
+  {"campaignId":"W1","name":"SP - Mat ong 500ml","state":"ENABLED","costType":"CPC","targetingType":"MANUAL",
+   "startDate":"20260801","adsProfileId":"1234567890","budget":{"budget":25,"currencyCode":"USD","budgetType":"DAILY"}},
+  {"campaignId":"W2","name":"SP - ROAS tot","state":"ENABLED","costType":"CPC","targetingType":"AUTO",
+   "adsProfileId":"1234567890","budget":{"budget":40,"currencyCode":"USD","budgetType":"DAILY"}},
+  {"campaignId":"W3","name":"SP - dang tat","state":"PAUSED","adsProfileId":"1234567890",
+   "budget":{"budget":20,"currencyCode":"USD","budgetType":"DAILY"}},
+  {"campaignId":"W5","name":"SP - dot tien","state":"ENABLED","adsProfileId":"1234567890",
+   "budget":{"budget":20,"currencyCode":"USD","budgetType":"DAILY"}}]'::jsonb)`);
+// campaign Sponsored Brands: chiều ghi CHƯA mở → worker phải tự skip
+await ex(`insert into ads.campaigns(seller_account_id,ads_profile_id,campaign_id,campaign_type,name,state,daily_budget,budget_currency)
+   values ('${wShop}','1234567890','W9','sb','SB - Video','ENABLED',30,'USD')
+   on conflict (seller_account_id,campaign_id) do update set campaign_type='sb'`);
+
+// metrics 7 ngày
+const WD = ["2026-09-05","2026-09-06","2026-09-07","2026-09-08","2026-09-09","2026-09-10","2026-09-11"];
+const wMetrics = [
+  ...WD.map((d) => ({ date: d, campaignId: "W1", campaignName: "SP - Mat ong 500ml", impressions: 1000,
+    clicks: 10, cost: 10, sales7d: 200, purchases7d: 20, currencyCode: "USD", campaignStatus: "enabled" })),
+  ...WD.map((d) => ({ date: d, campaignId: "W2", campaignName: "SP - ROAS tot", impressions: 2000,
+    clicks: 20, cost: 5, sales7d: 70, purchases7d: 5, currencyCode: "USD" })),
+  ...WD.map((d) => ({ date: d, campaignId: "W5", campaignName: "SP - dot tien", impressions: 500,
+    clicks: 8, cost: 12, sales7d: 0, purchases7d: 0, currencyCode: "USD" })),
+];
+await one(`select * from public.vexim_worker_upsert_ads_metrics('${wShop}', '${JSON.stringify(wMetrics)}'::jsonb)`);
+// budget usage: W1 CẠN (100%) mà ACOS thấp → gợi ý tăng ngân sách
+await one(`select * from public.vexim_worker_upsert_ads_budget_usage('${wShop}', '[
+  {"date":"2026-09-11","campaignId":"W1","budget":25,"spend":25,"percentageUsed":100,"currency":"USD",
+   "capturedAt":"2026-09-11T14:05:00Z","adsProfileId":"1234567890"},
+  {"date":"2026-09-11","campaignId":"W2","budget":40,"spend":5,"percentageUsed":12.5,"currency":"USD",
+   "capturedAt":"2026-09-11T14:05:00Z"}]'::jsonb)`);
+// search terms: 1 term đốt tiền, 1 term tốt, 1 term TRÙNG keyword, "*", 1 term ít click
+await one(`select * from public.vexim_worker_upsert_ads_search_terms('${wShop}', '[
+  {"date":"2026-09-11","searchTerm":"free sample","campaignId":"W1","adGroupId":"AG1","keywordId":"K1",
+   "keywordText":"mat ong","matchType":"BROAD","impressions":80,"clicks":5,"cost":7.5,"sales7d":0,
+   "purchases7d":0,"currencyCode":"USD","campaignName":"SP - Mat ong 500ml","adGroupName":"Ad group 1"},
+  {"date":"2026-09-11","searchTerm":"mat ong 500ml","campaignId":"W1","adGroupId":"AG1","keywordId":"K1",
+   "keywordText":"mat ong","matchType":"BROAD","impressions":100,"clicks":6,"cost":6,"sales7d":60,
+   "purchases7d":3,"currencyCode":"USD"},
+  {"date":"2026-09-11","searchTerm":"mat ong","campaignId":"W1","adGroupId":"AG1","keywordId":"K1",
+   "keywordText":"mat ong","matchType":"BROAD","impressions":90,"clicks":5,"cost":5,"sales7d":0,
+   "purchases7d":0,"currencyCode":"USD"},
+  {"date":"2026-09-11","searchTerm":"*","campaignId":"W1","adGroupId":"AG1","impressions":30,"clicks":1,
+   "cost":1,"sales7d":10,"purchases7d":1,"currencyCode":"USD"},
+  {"date":"2026-09-11","searchTerm":"re qua","campaignId":"W1","adGroupId":"AG1","keywordId":"K1",
+   "impressions":20,"clicks":2,"cost":2,"sales7d":0,"purchases7d":0,"currencyCode":"USD"},
+  {"date":"2026-09-11","searchTerm":"gift set","campaignId":"W1","adGroupId":"AG1","keywordId":"K1",
+   "impressions":60,"clicks":4,"cost":4,"sales7d":0,"purchases7d":0,"currencyCode":"USD"}]'::jsonb)`);
+// targeting: K1 ổn · K2 ACOS cao (hạ bid) · K3 nhiều click 0 đơn (tắt) · K4 ít click · 1 target ASIN
+await one(`select * from public.vexim_worker_upsert_ads_targeting('${wShop}', '[
+  {"date":"2026-09-11","campaignId":"W1","adGroupId":"AG1","adGroupName":"Ad group 1","keywordId":"K1",
+   "keywordText":"mat ong","matchType":"BROAD","keywordType":"BROAD","impressions":100,"clicks":4,
+   "cost":4,"sales7d":40,"purchases7d":2,"keywordBid":1.0,"currencyCode":"USD","adsProfileId":"1234567890"},
+  {"date":"2026-09-11","campaignId":"W1","adGroupId":"AG1","keywordId":"K2","keywordText":"sua rua mat",
+   "matchType":"BROAD","keywordType":"BROAD","impressions":300,"clicks":5,"cost":25,"sales7d":30,
+   "purchases7d":1,"keywordBid":2.0,"currencyCode":"USD","adsProfileId":"1234567890"},
+  {"date":"2026-09-11","campaignId":"W1","adGroupId":"AG1","keywordId":"K3","keywordText":"dau goi free",
+   "matchType":"PHRASE","keywordType":"PHRASE","impressions":400,"clicks":8,"cost":12,"sales7d":0,
+   "purchases7d":0,"keywordBid":1.5,"currencyCode":"USD","adsProfileId":"1234567890"},
+  {"date":"2026-09-11","campaignId":"W1","adGroupId":"AG1","keywordId":"K4","keywordText":"it click",
+   "matchType":"EXACT","keywordType":"EXACT","impressions":50,"clicks":1,"cost":1,"sales7d":0,
+   "purchases7d":0,"keywordBid":1.0,"currencyCode":"USD"},
+  {"date":"2026-09-11","campaignId":"W1","adGroupId":"AG1","targetingExpression":"b0demoasin9",
+   "keywordType":"TARGETING_EXPRESSION_PREDEFINED","impressions":50,"clicks":2,"cost":2,"sales7d":0,
+   "purchases7d":0,"currencyCode":"USD"}]'::jsonb)`);
+// "gift set" ĐÃ được phủ định từ trước (do đồng bộ Amazon về) → gợi ý không được lặp lại
+await ex(`insert into ads.negative_keywords(seller_account_id,ads_profile_id,campaign_id,ad_group_id,
+     keyword_text,match_type,level,amazon_negative_id,source)
+   values ('${wShop}','1234567890','W1','AG1','gift set','NEGATIVE_EXACT','ad_group','nk-999','api')`);
+
+// ---- 5. VIEW GỢI Ý — sinh từ số liệu, không ghi gì ---------------------------
+await asUser(wProposer);
+const sug = await rows(`select kind, priority, suggestion_key, entity_type, change_type, campaign_id,
+     ad_group_id, amazon_entity_id, label, match_type, currency, before_value, after_value,
+     current_number, proposed_number, delta_pct, clicks7, spend7, sales7, acos7, acos_target, waste7,
+     reason, requires_approval, has_open_request, kind_label, can_propose, can_decide
+   from public.vexim_ppc_suggestions where seller_account_id='${wShop}' order by priority, spend7 desc`);
+ok(sug.length === 5, `0021 gợi ý: đúng 5 gợi ý từ fixture (nhận ${sug.length}) — ${JSON.stringify(sug.map((s) => s.kind))}`);
+const sg = (k) => sug.find((s) => s.kind === k);
+ok(
+  sg("negative_keyword")?.label === "free sample"
+    && sg("negative_keyword")?.entity_type === "negative_keyword"
+    && sg("negative_keyword")?.change_type === "create"
+    && sg("negative_keyword")?.match_type === "NEGATIVE_EXACT"
+    && sg("negative_keyword")?.after_value?.keyword_text === "free sample"
+    && sg("negative_keyword")?.after_value?.level === "ad_group"
+    && Number(sg("negative_keyword")?.waste7) === 7.5
+    && Number(sg("negative_keyword")?.clicks7) === 5
+    && sg("negative_keyword")?.requires_approval === true,
+  `0021 gợi ý negative: "free sample" 5 click · 7.5$ · 0 đơn → phủ định NEGATIVE_EXACT cấp ad group, cần duyệt — ${JSON.stringify(sg("negative_keyword"))}`,
+);
+ok(
+  String(sg("negative_keyword")?.reason).includes("KHÔNG có đơn")
+    && String(sg("negative_keyword")?.reason).includes("mat ong"),
+  `0021 gợi ý negative: reason nói rõ vì sao + keyword nào đã khớp ("${sg("negative_keyword")?.reason}")`,
+);
+ok(
+  !sug.some((s) => s.kind === "negative_keyword" && ["mat ong", "*", "re qua", "gift set"].includes(s.label)),
+  "0021 gợi ý negative: LOẠI term trùng keyword đang chạy, term \"*\", term dưới ngưỡng click, và term ĐÃ phủ định",
+);
+ok(
+  sg("lower_bid")?.amazon_entity_id === "K2" && Number(sg("lower_bid")?.current_number) === 2
+    && Number(sg("lower_bid")?.proposed_number) === 1.7 && Number(sg("lower_bid")?.delta_pct) === -15
+    && Number(sg("lower_bid")?.before_value?.bid) === 2
+    && sg("lower_bid")?.after_value?.bid === 1.7
+    && Number(sg("lower_bid")?.acos7) === 83.33,
+  `0021 gợi ý hạ bid: K2 ACOS 83.33% > 50% → bid 2.00 → 1.70 (-15% = bước của policy) — ${JSON.stringify(sg("lower_bid"))}`,
+);
+ok(
+  sg("pause_keyword")?.amazon_entity_id === "K3"
+    && sg("pause_keyword")?.after_value?.state === "PAUSED"
+    && sg("pause_keyword")?.change_type === "state"
+    && Number(sg("pause_keyword")?.clicks7) === 8,
+  `0021 gợi ý tắt keyword: K3 8 click · 0 đơn → state PAUSED — ${JSON.stringify(sg("pause_keyword"))}`,
+);
+ok(
+  sg("pause_campaign")?.campaign_id === "W5" && sg("pause_campaign")?.after_value?.state === "PAUSED"
+    && Number(sg("pause_campaign")?.spend7) === 84,
+  `0021 gợi ý tắt campaign: W5 spend 84$ · 0 đơn (7 ngày) → PAUSED — ${JSON.stringify(sg("pause_campaign"))}`,
+);
+ok(
+  sg("raise_budget")?.campaign_id === "W1" && Number(sg("raise_budget")?.current_number) === 25
+    && Number(sg("raise_budget")?.proposed_number) === 28.75
+    && Number(sg("raise_budget")?.delta_pct) === 15
+    && sg("raise_budget")?.before_value?.budget === 25
+    && sg("raise_budget")?.after_value?.budget === 28.75,
+  `0021 gợi ý tăng ngân sách: W1 CẠN budget (100%) mà ACOS 5% ≤ mục tiêu 25% → 25 → 28.75 (+15% = nửa trần policy) — ${JSON.stringify(sg("raise_budget"))}`,
+);
+ok(
+  !sug.some((s) => s.campaign_id === "W2" && s.kind === "raise_budget")
+    && !sug.some((s) => s.campaign_id === "W3")
+    && !sug.some((s) => s.campaign_id === "W9"),
+  "0021 gợi ý: KHÔNG tăng ngân sách cho campaign chưa cạn (W2) · bỏ qua campaign đang TẮT (W3) · bỏ qua Sponsored Brands (W9)",
+);
+ok(
+  sug.every((s) => s.can_propose === true) && sug.every((s) => s.can_decide === false)
+    && sug.every((s) => s.has_open_request === false),
+  "0021 gợi ý: nhân viên PPC thấy can_propose=true nhưng can_decide=false (không tự duyệt được)",
+);
+ok(
+  new Set(sug.map((s) => s.currency)).size === 1 && sg("negative_keyword").currency === "USD"
+    && ["nk|W1|AG1|free sample", "bid|K2", "pause|K3", "pausecamp|W5", "budget|W1"]
+      .every((k) => sug.some((s) => s.suggestion_key === k)),
+  `0021 gợi ý: suggestion_key ổn định để chống đề xuất trùng — ${JSON.stringify(sug.map((s) => s.suggestion_key))}`,
+);
+
+// ---- 6. RPC ĐỀ XUẤT — phân quyền + validate ngưỡng ---------------------------
+await asUser(wStranger);
+const badItem = `jsonb_build_object('seller_account_id','${wShop}','items',
+   jsonb_build_array(jsonb_build_object('entity_type','campaign','change_type','state',
+     'amazon_entity_id','W1','campaign_id','W1','after_value',jsonb_build_object('state','PAUSED'))))`;
+ok(
+  String((await rpcFail("vexim_ppc_propose_changes", badItem)).error).includes("quyền") === true,
+  "0021 CHẶN: người lạ không đề xuất được thay đổi PPC",
+);
+await asUser(wReadOnly);
+ok(
+  String((await rpcFail("vexim_ppc_propose_changes", badItem)).error).includes("quyền ghi") === true,
+  "0021 CHẶN: người CHỈ XEM (assignment can_write=false) không đề xuất được",
+);
+
+await asUser(wProposer);
+// (a) gửi thẳng 2 gợi ý từ view (đúng luồng UI: chọn gợi ý → tạo đề xuất)
+const sgNk = sg("negative_keyword");
+const sgBid = sg("lower_bid");
+const itemOf = (s) => ({
+  entity_type: s.entity_type, change_type: s.change_type, amazon_entity_id: s.amazon_entity_id,
+  campaign_id: s.campaign_id, ad_group_id: s.ad_group_id ?? "", label: s.label,
+  match_type: s.match_type ?? null, currency: s.currency, before_value: s.before_value ?? null,
+  after_value: s.after_value, reason: s.reason, suggestion_key: s.suggestion_key,
+});
+const pr1 = await rpc("vexim_ppc_propose_changes", `'${JSON.stringify({
+  seller_account_id: wShop, ads_profile_id: "1234567890", source: "suggestion",
+  reason: "Dọn từ khoá đốt tiền và hạ bid keyword lỗ",
+  items: [itemOf(sgNk), itemOf(sgBid)],
+}).replace(/'/g, "''")}'::jsonb`);
+ok(
+  Number(pr1.inserted) === 2 && Number(pr1.duplicates) === 0 && Number(pr1.blocked) === 0
+    && Array.isArray(pr1.ids) && pr1.ids.length === 2 && pr1.auto_applied === false,
+  `0021 đề xuất: gửi 2 gợi ý → 2 đề xuất chờ duyệt (auto_apply=false) — ${JSON.stringify(pr1).slice(0, 300)}`,
+);
+const idNk = pr1.ids[0];
+const idBid = pr1.ids[1];
+ok(
+  pr1.policy?.max_bid_change_pct === 20 && Number(pr1.policy?.daily_change_cap) === 50
+    && pr1.expires_at,
+  `0021 đề xuất: trả kèm policy hiệu lực + hạn duyệt (TTL 72h) để UI hiện countdown — ${pr1.expires_at}`,
+);
+await cmp(
+  "0021 đề xuất: delta_pct tự tính từ before/after (K2: 2.00 → 1.70 = -15%)",
+  `select count(*) n from ads.change_requests where id='${idBid}'
+     and delta_pct = -15 and requires_approval = true and status='proposed'
+     and (before_value->>'bid')::numeric = 2 and (after_value->>'bid')::numeric = 1.7`,
+  1,
+);
+await cmp(
+  "0021 đề xuất: negative keyword được chuẩn hoá match_type + level + đủ khoá",
+  `select count(*) n from ads.change_requests where id='${idNk}'
+     and entity_type='negative_keyword' and change_type='create' and match_type='NEGATIVE_EXACT'
+     and campaign_id='W1' and ad_group_id='AG1' and amazon_entity_id=''
+     and after_value->>'keyword_text'='free sample' and source='suggestion'
+     and suggestion_key='nk|W1|AG1|free sample'`,
+  1,
+);
+await cmp(
+  "0021 audit: tạo đề xuất ghi iam.audit_logs (module=ads, action=ppc.propose, có after_value)",
+  `select count(*) n from iam.audit_logs where seller_account_id='${wShop}' and module='ads'
+     and action='ppc.propose' and actor_id='${wProposer}' and after_value->>'change_type' is not null`,
+  2,
+);
+
+// (b) gửi LẠI đúng 2 gợi ý đó → không nhân đôi (khoá unique theo đề xuất đang mở)
+const pr2 = await rpc("vexim_ppc_propose_changes", `'${JSON.stringify({
+  seller_account_id: wShop, source: "suggestion", items: [itemOf(sgNk), itemOf(sgBid)],
+}).replace(/'/g, "''")}'::jsonb`);
+ok(
+  Number(pr2.inserted) === 0 && Number(pr2.duplicates) === 2 && (pr2.ids ?? []).length === 0
+    && pr2.warnings?.length === 2,
+  `0021 đề xuất trùng: 0 insert · 2 duplicates · KHÔNG gọi Amazon hai lần cho cùng một việc — ${JSON.stringify(pr2.warnings)}`,
+);
+ok(
+  (await rows(`select has_open_request from public.vexim_ppc_suggestions
+     where seller_account_id='${wShop}' and suggestion_key in ('nk|W1|AG1|free sample','bid|K2')`))
+    .every((r) => r.has_open_request === true),
+  "0021 gợi ý: has_open_request bật TRUE sau khi đã đề xuất (UI disable nút, không gửi lại)",
+);
+
+// (c) validate: sai cặp entity×change, thiếu id Amazon, bid vượt trần, negative trùng
+await asUser(wApprover);
+const polRes1 = await rpc("vexim_ppc_set_policy", `'${JSON.stringify({
+  seller_account_id: wShop, policy: { bid_ceiling: 3.0, bid_floor: 0.05, daily_change_cap: 50 },
+}).replace(/'/g, "''")}'::jsonb`);
+ok(
+  polRes1.ok === true && Number(polRes1.policy?.bid_ceiling) === 3
+    && Number(polRes1.policy?.bid_floor) === 0.05 && polRes1.policy?.has_row === true
+    && polRes1.before?.has_row === false,
+  `0021 policy: trưởng phòng PPC đặt sàn/trần bid (0.05..3.00) — before/after trả đủ để UI hiện diff — ${JSON.stringify(polRes1.policy).slice(0, 200)}`,
+);
+await asUser(wProposer);
+const prBad = await rpc("vexim_ppc_propose_changes", `'${JSON.stringify({
+  seller_account_id: wShop,
+  items: [
+    { entity_type: "keyword", change_type: "budget", amazon_entity_id: "K1", campaign_id: "W1",
+      after_value: { budget: 10 } },                                    // cặp sai
+    { entity_type: "campaign", change_type: "budget", campaign_id: "W1",
+      after_value: { budget: 30 } },                                    // thiếu amazon_entity_id
+    { entity_type: "keyword", change_type: "bid", amazon_entity_id: "K2", campaign_id: "W1",
+      label: "sua rua mat", before_value: { bid: 2 }, after_value: { bid: 4.5 } }, // vượt trần 3.0
+    { entity_type: "keyword", change_type: "bid", amazon_entity_id: "K1", campaign_id: "W1",
+      label: "mat ong", before_value: { bid: 1 }, after_value: { bid: 1 } },        // không đổi gì
+    { entity_type: "keyword", change_type: "state", amazon_entity_id: "K1", campaign_id: "W1",
+      label: "mat ong", after_value: { state: "DELETED" } },            // state lạ
+    { entity_type: "negative_keyword", change_type: "create", campaign_id: "W1",
+      ad_group_id: "AG1", label: "gift set", match_type: "NEGATIVE_EXACT",
+      after_value: {} },                                                // đã phủ định rồi
+    { entity_type: "negative_keyword", change_type: "create", campaign_id: "W1",
+      label: "thieu ad group", match_type: "NEGATIVE_EXACT", after_value: {} }, // thiếu adGroupId
+  ],
+}).replace(/'/g, "''")}'::jsonb`);
+ok(
+  Number(prBad.inserted) === 0 && Number(prBad.blocked) === 5 && Number(prBad.duplicates) === 2
+    && prBad.warnings?.length === 7,
+  `0021 validate: 7 đề xuất rác → 0 insert · 5 blocked · 2 duplicate — ${JSON.stringify(prBad.warnings?.map((w) => w.blocked ?? w.duplicate))}`,
+);
+ok(
+  prBad.warnings?.some((w) => String(w.blocked).includes("vượt sàn/trần"))
+    && prBad.warnings?.some((w) => String(w.blocked).includes("amazon_entity_id"))
+    && prBad.warnings?.some((w) => String(w.duplicate).includes("ĐÃ được phủ định"))
+    && prBad.warnings?.some((w) => String(w.duplicate).includes("bằng giá trị hiện tại")),
+  `0021 validate: lý do chặn NÓI RÕ bằng tiếng Việt (UI chỉ đúng dòng sai) — ${JSON.stringify(prBad.warnings)}`,
+);
+// negative match_type kiểu v2 (negativeExact) phải được CHUẨN HOÁ sang v3
+const prMt = await rpc("vexim_ppc_propose_changes", `'${JSON.stringify({
+  seller_account_id: wShop,
+  items: [{ entity_type: "campaign_negative_keyword", change_type: "create", campaign_id: "W2",
+    label: " wholesale ", match_type: "negativePhrase", after_value: {} }],
+}).replace(/'/g, "''")}'::jsonb`);
+ok(
+  Number(prMt.inserted) === 1,
+  `0021 negative cấp campaign: nhận match_type kiểu v2 ("negativePhrase") → chuẩn hoá v3 — ${JSON.stringify(prMt.warnings)}`,
+);
+await cmp(
+  "0021 negative cấp campaign: match_type = NEGATIVE_PHRASE, ad_group_id rỗng, label đã trim",
+  `select count(*) n from ads.change_requests where entity_type='campaign_negative_keyword'
+     and match_type='NEGATIVE_PHRASE' and ad_group_id='' and label='wholesale'
+     and after_value->>'level'='campaign' and after_value->>'keyword_text'='wholesale'`,
+  1,
+);
+
+// (d) auto_apply: trong ngưỡng → approved ngay; vượt ngưỡng → vẫn phải duyệt
+await asUser(wApprover);
+await rpc("vexim_ppc_set_policy", `'${JSON.stringify({
+  seller_account_id: wShop, policy: { auto_apply: true, require_approval_state: true, bid_ceiling: 3.0 },
+}).replace(/'/g, "''")}'::jsonb`);
+await asUser(wProposer);
+const prAuto = await rpc("vexim_ppc_propose_changes", `'${JSON.stringify({
+  seller_account_id: wShop,
+  items: [
+    { entity_type: "keyword", change_type: "bid", amazon_entity_id: "K4", campaign_id: "W1",
+      ad_group_id: "AG1", label: "it click", currency: "USD", before_value: { bid: 1 },
+      after_value: { bid: 0.9 } },                                      // -10% ≤ 20% → tự duyệt
+    { entity_type: "keyword", change_type: "bid", amazon_entity_id: "K3", campaign_id: "W1",
+      ad_group_id: "AG1", label: "dau goi free", currency: "USD", before_value: { bid: 1.5 },
+      after_value: { bid: 0.75 } },                                     // -50% > 20% → phải duyệt
+    { entity_type: "keyword", change_type: "state", amazon_entity_id: "K4", campaign_id: "W1",
+      ad_group_id: "AG1", label: "it click", after_value: { state: "PAUSED" } }, // state → phải duyệt
+    { entity_type: "keyword", change_type: "bid", amazon_entity_id: "K1", campaign_id: "W1",
+      ad_group_id: "AG1", label: "mat ong", currency: "USD", after_value: { bid: 0.8 } }, // không biết bid cũ
+  ],
+}).replace(/'/g, "''")}'::jsonb`);
+ok(Number(prAuto.inserted) === 4, `0021 auto_apply: 4 đề xuất ghi được — ${JSON.stringify(prAuto).slice(0, 200)}`);
+const autoRows = await rows(`select amazon_entity_id, change_type, status, requires_approval, decision_note
+   from ads.change_requests
+   where id = any (array[${prAuto.ids.map((i) => `'${i}'`).join(",")}]::uuid[])
+   order by change_type, amazon_entity_id`);
+const ar = (id, ct) => autoRows.find((r) => r.amazon_entity_id === id && r.change_type === ct);
+ok(
+  ar("K4", "bid")?.status === "approved" && ar("K4", "bid")?.requires_approval === false
+    && String(ar("K4", "bid")?.decision_note).includes("tự duyệt theo policy"),
+  `0021 auto_apply: bid -10% (trong ngưỡng 20%) → APPROVED ngay, ghi rõ lý do tự duyệt — ${JSON.stringify(ar("K4", "bid"))}`,
+);
+ok(
+  ar("K3", "bid")?.status === "proposed" && ar("K3", "bid")?.requires_approval === true,
+  "0021 auto_apply: bid -50% VƯỢT ngưỡng 20% → vẫn phải có người duyệt (auto_apply không phải toàn quyền)",
+);
+ok(
+  ar("K4", "state")?.status === "proposed" && ar("K1", "bid")?.status === "proposed",
+  "0021 auto_apply: đổi state LUÔN cần duyệt (require_approval_state) · bid mà KHÔNG biết giá hiện tại cũng cần duyệt",
+);
+// tắt auto_apply trở lại (mặc định an toàn) + siết trần 2 thay đổi/ngày cho test worker
+await asUser(wApprover);
+await rpc("vexim_ppc_set_policy", `'${JSON.stringify({
+  seller_account_id: wShop, policy: { auto_apply: false, daily_change_cap: 2, bid_ceiling: 3.0 },
+}).replace(/'/g, "''")}'::jsonb`);
+
+// ---- 7. RPC DUYỆT — chỉ approver, có audit, tự duyệt bị ghi chú --------------
+const idWholesale = prMt.ids[0];
+const idK3Bid = (await one(`select id from ads.change_requests where seller_account_id='${wShop}'
+   and amazon_entity_id='K3' and change_type='bid'`)).id;
+const idK1Bid = (await one(`select id from ads.change_requests where seller_account_id='${wShop}'
+   and amazon_entity_id='K1' and change_type='bid'`)).id;
+const idK4Bid = (await one(`select id from ads.change_requests where seller_account_id='${wShop}'
+   and amazon_entity_id='K4' and change_type='bid'`)).id;
+
+await asUser(wProposer);
+ok(
+  String((await rpcFail("vexim_ppc_decide_change", `'${idNk}','approve',null`)).error)
+    .includes("trưởng phòng PPC") === true,
+  "0021 CHẶN: người đề xuất (không phải approver) KHÔNG tự duyệt được đề xuất",
+);
+await asUser(wStranger);
+ok(
+  String((await rpcFail("vexim_ppc_decide_change", `'${idNk}','approve',null`)).error)
+    .includes("duyệt thay đổi quảng cáo") === true,
+  "0021 CHẶN: người lạ (không phải approver) không duyệt được đề xuất của shop",
+);
+await asUser(wApprover);
+const dc1 = await rpc("vexim_ppc_decide_change", `'${idNk}','approve','Đồng ý — term này đốt 7.5 USD mỗi tuần'`);
+ok(
+  dc1.ok === true && dc1.status === "approved" && dc1.label === "free sample"
+    && dc1.decided_by === wApprover && String(dc1.note).includes("Đồng ý"),
+  `0021 duyệt: approver approve đề xuất negative keyword — ${JSON.stringify(dc1)}`,
+);
+const dc2 = await rpc("vexim_ppc_decide_change", `'${idBid}','approve',null`);
+const dc3 = await rpc("vexim_ppc_decide_change", `'${idWholesale}','approve',null`);
+ok(dc2.status === "approved" && dc3.status === "approved", "0021 duyệt: approve thêm 2 đề xuất (bid K2 · negative cấp campaign W2)");
+const dc4 = await rpc("vexim_ppc_decide_change", `'${idK3Bid}','reject','Chưa đủ dữ liệu — chờ thêm 7 ngày'`);
+ok(dc4.status === "rejected", `0021 từ chối: reject đề xuất hạ bid K3 — ${JSON.stringify(dc4)}`);
+ok(
+  String((await rpcFail("vexim_ppc_decide_change", `'${idK3Bid}','approve',null`)).error).includes("rejected") === true,
+  "0021 CHẶN: đề xuất ĐÃ bị từ chối thì không duyệt lại được (máy trạng thái)",
+);
+ok(
+  String((await rpcFail("vexim_ppc_decide_change", `'${idNk}','maybe',null`)).error).includes("approve hoặc reject") === true,
+  "0021 CHẶN: p_decision lạ (maybe) bị từ chối",
+);
+// tự duyệt đề xuất của CHÍNH MÌNH → được nhưng bị ghi chú thẳng vào audit
+const selfProp = await rpc("vexim_ppc_propose_changes", `'${JSON.stringify({
+  seller_account_id: wShop, source: "manual", reason: "Tạm dừng campaign W2 để kiểm thử",
+  items: [{ entity_type: "campaign", change_type: "state", amazon_entity_id: "W2", campaign_id: "W2",
+    label: "SP - ROAS tot", currency: "USD", before_value: { state: "ENABLED", budget: 40 },
+    after_value: { state: "PAUSED" } }],
+}).replace(/'/g, "''")}'::jsonb`);
+const idSelf = selfProp.ids?.[0];
+const dcSelf = await rpc("vexim_ppc_decide_change", `'${idSelf}','approve','Can theo mùa'`);
+ok(
+  idSelf && String(dcSelf.note).includes("tự duyệt đề xuất của chính mình"),
+  `0021 tự duyệt: cho phép (team nhỏ) nhưng GHI RÕ vào decision_note — "${dcSelf.note}"`,
+);
+// duyệt theo lô: 2 dòng hợp lệ + 1 id sai + 1 dòng đã duyệt
+const idK4State = (await one(`select id from ads.change_requests where seller_account_id='${wShop}'
+   and amazon_entity_id='K4' and change_type='state'`)).id;
+const dcBulk = await rpc("vexim_ppc_decide_bulk", `'${JSON.stringify([
+  idK4State, idK1Bid, "00000000-0000-4000-8000-0000000000ff", idNk,
+]).replace(/'/g, "''")}'::jsonb,'reject','Dọn hàng đợi trước khi test worker'`);
+ok(
+  Number(dcBulk.decided) === 2 && Number(dcBulk.failed) === 2 && dcBulk.errors?.length === 2,
+  `0021 duyệt lô: 2 được · 2 lỗi (id không tồn tại + đã duyệt rồi) — lỗi KHÔNG làm hỏng cả lô — ${JSON.stringify(dcBulk.errors)}`,
+);
+await cmp(
+  "0021 audit: mỗi lần duyệt/từ chối đều có dòng trong iam.audit_logs (kèm before/after)",
+  `select count(*) n from iam.audit_logs where seller_account_id='${wShop}' and module='ads'
+     and action in ('ppc.approved','ppc.rejected')`,
+  7,
+);
+ok(
+  (await rows(`select actor_id, after_value->>'by' as by_whom, before_value->>'status' as old_status
+     from iam.audit_logs where seller_account_id='${wShop}' and action='ppc.approved'
+       and after_value->>'status'='approved' limit 3`))
+    .every((r) => r.actor_id === wApprover && r.old_status === "proposed"),
+  "0021 audit: dòng duyệt ghi ĐÚNG người duyệt (actor_id) + trạng thái trước đó (before_value)",
+);
+// view hàng đợi: chữ người đọc được
+const qv = await rows(`select id, status, status_label, summary, delta_label, entity_label, can_decide,
+     is_mine, proposed_by_name, decided_by_name, decision_note, expires_in_hours, is_open
+   from public.vexim_ppc_change_requests where seller_account_id='${wShop}'
+   order by proposed_at`);
+const qOf = (id) => qv.find((r) => r.id === id);
+ok(
+  qOf(idNk)?.status_label === "Đã duyệt — chờ cron"
+    && qOf(idNk)?.summary === 'Phủ định "free sample" (NEGATIVE_EXACT) cấp ad group'
+    && qOf(idNk)?.entity_label === "Negative keyword (ad group)"
+    && qOf(idNk)?.proposed_by_name === "Nhân viên PPC"
+    && qOf(idNk)?.decided_by_name === "Trưởng phòng PPC"
+    && qOf(idNk)?.is_open === true && Number(qOf(idNk)?.expires_in_hours) > 70,
+  `0021 view hàng đợi: summary/status_label/tên người là CHỮ đọc được (UI không phải tự ghép) — ${JSON.stringify(qOf(idNk))}`,
+);
+ok(
+  qOf(idBid)?.summary === "Bid 2 → 1.7 USD (-15%)" && qOf(idBid)?.delta_label === "-15%",
+  `0021 view hàng đợi: summary bid hiển thị đúng trước → sau + % ("${qOf(idBid)?.summary}")`,
+);
+ok(
+  qOf(idSelf)?.summary === "Trạng thái ENABLED → PAUSED"
+    && String(qOf(idSelf)?.decision_note).includes("tự duyệt đề xuất của chính mình")
+    && qOf(idSelf)?.is_mine === true,
+  `0021 view hàng đợi: summary đổi trạng thái + ghi chú tự duyệt hiện ngay trên dòng ("${qOf(idSelf)?.decision_note}")`,
+);
+ok(
+  qv.every((r) => r.can_decide === false),
+  "0021 view hàng đợi: mọi dòng ĐÃ quyết (approved/rejected) đều can_decide=false — UI ẩn nút duyệt",
+);
+
+// ---- 8. Máy trạng thái + bất biến nội dung đề xuất ---------------------------
+ok(
+  await mustBlock(`update ads.change_requests set status='applied' where id='${idK1Bid}'`),
+  "0021 CHẶN: nhảy proposed → applied (bỏ qua duyệt) — không ai tự áp dụng được",
+);
+ok(
+  await mustBlock(`update ads.change_requests set after_value='{"bid":0.01}'::jsonb where id='${idBid}'`),
+  "0021 CHẶN: sửa after_value sau khi duyệt (người duyệt phải duyệt đúng nội dung đã đề xuất)",
+);
+ok(
+  await mustBlock(`update ads.change_requests set before_value='{"bid":9}'::jsonb where id='${idBid}'`),
+  "0021 CHẶN: sửa before_value sau khi tạo",
+);
+ok(
+  await mustBlock(`update ads.change_requests set status='proposed' where id='${idNk}'`),
+  "0021 CHẶN: approved → proposed (quay ngược máy trạng thái)",
+);
+ok(
+  await mustBlock(`insert into ads.change_requests(seller_account_id,entity_type,change_type,after_value,status)
+     values ('${wShop}','campaign','state','{"state":"PAUSED"}'::jsonb,'applied')`),
+  "0021 CHẶN: insert một đề xuất sinh ra đã applied (mất dấu audit)",
+);
+ok(
+  await mustBlock(`insert into ads.change_requests(seller_account_id,entity_type,change_type,status)
+     values ('${wShop}','campaign','state','proposed')`),
+  "0021 CHẶN: insert đề xuất không có after_value (không biết đổi thành gì)",
+);
+
+// ---- 9. WORKER: lấy lô đã duyệt (trần ngày · TTL · skip SB · đòi lô kẹt) -----
+await asUser(wProposer);
+const wErr1 = String((await rpcFail("vexim_worker_ppc_pending_changes", `null, 100, 30`)).error);
+ok(
+  /permission denied|service_role/i.test(wErr1),
+  `0021 CHẶN: client không gọi được RPC worker (chỉ service_role) — "${wErr1}"`,
+);
+const wErr2 = String((await rpcFail("vexim_worker_ppc_set_result", `'{}'::jsonb`)).error);
+ok(
+  /permission denied|service_role/i.test(wErr2),
+  `0021 CHẶN: client không ghi được kết quả áp dụng — "${wErr2}"`,
+);
+ok(
+  /permission denied|service_role/i.test(String((await rpcFail("vexim_ppc_raise_alerts", `null`)).error)),
+  "0021 CHẶN: client không tự nổ/đóng alert của hàng đợi PPC",
+);
+await asWorker();
+// (a) một đề xuất QUÁ TTL và (b) một đề xuất trên campaign Sponsored Brands
+await ex(`insert into ads.change_requests(seller_account_id,ads_profile_id,entity_type,change_type,
+     amazon_entity_id,campaign_id,ad_group_id,label,currency,before_value,after_value,status,
+     proposed_by,expires_at)
+   values ('${wShop}','1234567890','keyword','bid','K9','W1','AG1','keyword het han','USD',
+           '{"bid":1}'::jsonb,'{"bid":0.8}'::jsonb,'proposed','${wProposer}',
+           now() - interval '1 hour')`);
+await ex(`insert into ads.change_requests(seller_account_id,ads_profile_id,entity_type,change_type,
+     amazon_entity_id,campaign_id,label,currency,before_value,after_value,status,proposed_by,expires_at)
+   values ('${wShop}','1234567890','campaign','state','W9','W9','SB - Video','USD',
+           '{"state":"ENABLED"}'::jsonb,'{"state":"PAUSED"}'::jsonb,'approved','${wApprover}',
+           now() + interval '72 hours')`);
+// now() của Postgres là THỜI ĐIỂM BẮT ĐẦU TRANSACTION → trong test mọi decided_at
+// bằng nhau. Đặt lại mốc duyệt cho 2 dòng để kiểm chứng đúng thứ tự ưu tiên.
+await ex(`update ads.change_requests set decided_at = now() - interval '2 hours'
+   where id='${idK4Bid}';
+   update ads.change_requests set decided_at = now() - interval '1 hour'
+   where id='${idNk}';
+   update ads.change_requests set decided_at = now() - interval '30 minutes'
+   where id='${idBid}';
+   update ads.change_requests set decided_at = now() - interval '20 minutes'
+   where id='${idWholesale}';
+   update ads.change_requests set decided_at = now() - interval '10 minutes'
+   where id='${idSelf}'`);
+const pend1 = await rpc("vexim_worker_ppc_pending_changes", `'${wShop}'::uuid, 100, 30`);
+ok(
+  Number(pend1.count) === 2 && Number(pend1.expired) === 1 && Number(pend1.skipped_unsupported) === 1
+    && pend1.batch_id && pend1.requests.length === 2,
+  `0021 worker: trần 2 thay đổi/ngày → lấy đúng 2 (dù có 4 đã duyệt) · tự expire đề xuất quá TTL · tự skip campaign Sponsored Brands — ${JSON.stringify(pend1).slice(0, 600)}`,
+);
+ok(
+  pend1.requests.every((r) => r.batch_id === pend1.batch_id)
+    && pend1.requests[0].amazon_entity_id === "K4"
+    && pend1.requests[1].label === "free sample",
+  `0021 worker: lô ưu tiên đề xuất DUYỆT TRƯỚC, cả lô cùng một batch_id — ${JSON.stringify(pend1.requests.map((r) => r.amazon_entity_id || r.label))}`,
+);
+const rqNk = pend1.requests.find((r) => r.label === "free sample");
+const rqK4 = pend1.requests.find((r) => r.amazon_entity_id === "K4");
+ok(
+  rqNk.ads_profile_id === "1234567890" && rqNk.match_type === "NEGATIVE_EXACT"
+    && rqNk.after_value?.keyword_text === "free sample" && rqNk.before_value === null
+    && Number(rqK4.after_value?.bid) === 0.9 && rqK4.campaign_type === "sp",
+  `0021 worker: trả đủ before/after + profileId + campaign_type để cron gọi Amazon mà không phải tra thêm — ${JSON.stringify(rqNk).slice(0, 200)}`,
+);
+await cmp(
+  "0021 worker: giành lô = status applying + attempts=1 (hai cron chạy song song cũng không áp dụng trùng)",
+  `select count(*) n from ads.change_requests where seller_account_id='${wShop}'
+     and status='applying' and batch_id='${pend1.batch_id}' and attempts=1`,
+  2,
+);
+const pend2 = await rpc("vexim_worker_ppc_pending_changes", `'${wShop}'::uuid, 100, 30`);
+ok(
+  Number(pend2.count) === 0 && Number(pend2.cap_left?.[0]?.daily_cap) === 2
+    && Number(pend2.cap_left?.[0]?.used_today) === 2
+    && Number(pend2.cap_left?.[0]?.waiting) === 3,
+  `0021 worker: gọi LẠI ngay → 0 dòng, và cap_left nói rõ LÝ DO (trần 2/ngày đã dùng hết 2, còn 3 việc chờ) — ${JSON.stringify(pend2.cap_left)}`,
+);
+
+// ---- 10. WORKER ghi kết quả: applied · failed · skipped ----------------------
+const resNk = await rpc("vexim_worker_ppc_set_result", `'${JSON.stringify({
+  id: rqNk.request_id, status: "applied", batch_id: pend1.batch_id,
+  created_id: "nk-2468", amazon_response: { negativeKeywordId: "nk-2468", index: 0 },
+}).replace(/'/g, "''")}'::jsonb`);
+ok(
+  resNk.ok === true && resNk.status === "applied" && resNk.created_id === "nk-2468",
+  `0021 worker: negative keyword áp dụng thành công (207 success) — ${JSON.stringify(resNk)}`,
+);
+await cmp(
+  "0021 applied: từ khoá phủ định được GƯƠNG vào ads.negative_keywords kèm id Amazon thật",
+  `select count(*) n from ads.negative_keywords where seller_account_id='${wShop}'
+     and keyword_text='free sample' and match_type='NEGATIVE_EXACT' and level='ad_group'
+     and campaign_id='W1' and ad_group_id='AG1' and amazon_negative_id='nk-2468'
+     and source='vexim' and change_request_id='${rqNk.request_id}'`,
+  1,
+);
+ok(
+  (await rows(`select keyword_norm, match_label, request_status from public.vexim_ads_negative_keywords
+     where seller_account_id='${wShop}' and keyword_text='free sample'`))
+    .every((r) => r.keyword_norm === "free sample" && r.match_label === "Phủ định chính xác"
+      && r.request_status === "applied"),
+  "0021 view negative: nhãn tiếng Việt + trạng thái của đề xuất đã sinh ra nó",
+);
+await cmp(
+  "0021 gợi ý: sau khi phủ định xong, gợi ý cho term đó BIẾN MẤT (không đề xuất lặp lại)",
+  `select count(*) n from public.vexim_ppc_suggestions
+    where seller_account_id='${wShop}' and label='free sample'`,
+  0,
+);
+const resFail = await rpc("vexim_worker_ppc_set_result", `'${JSON.stringify({
+  id: rqK4.request_id, status: "failed", batch_id: pend1.batch_id,
+  error: "400 INVALID_ARGUMENT: bid must be at least 0.02 (Amazon từ chối)",
+  amazon_response: { errors: [{ code: "INVALID_ARGUMENT", message: "bid too low" }] },
+}).replace(/'/g, "''")}'::jsonb`);
+ok(resFail.ok === false && resFail.status === "failed" && resFail.alert_id,
+   `0021 worker: áp dụng THẤT BẠI → nổ alert ngay, không im lặng — ${JSON.stringify(resFail)}`);
+await cmp(
+  "0021 alert: ppc_change_failed mở, entity_key khử trùng theo shop (chạy lại không spam)",
+  `select count(*) n from ops.alerts a join ops.alert_rules r on r.id=a.rule_id
+    where r.rule_code='ppc_change_failed' and a.seller_account_id='${wShop}' and a.status='open'
+      and a.entity_key='ppc_failed:${wShop}'`,
+  1,
+);
+await cmp(
+  "0021 audit: thất bại ghi result='error: …', actor_id NULL và after_value.by='cron' (không mạo danh người duyệt)",
+  `select count(*) n from iam.audit_logs where seller_account_id='${wShop}'
+     and action='ppc.failed' and result like 'error:%INVALID_ARGUMENT%'
+     and actor_id is null and after_value->>'by'='cron'`,
+  1,
+);
+const pend3 = await rpc("vexim_worker_ppc_pending_changes", `'${wShop}'::uuid, 100, 30`);
+ok(
+  Number(pend3.count) === 1 && pend3.requests[0].label === "sua rua mat"
+    && Number(pend3.requests[0].delta_pct) === -15,
+  `0021 worker: dòng FAILED không tính vào trần ngày → còn 1 slot cho đề xuất kế (bid K2 -15%) — ${JSON.stringify(pend3.requests.map((r) => r.label))}`,
+);
+const rqK2 = pend3.requests[0];
+// cron chết giữa chừng: dòng applying để quá 30 phút → lô sau phải lấy lại được
+await ex(`update ads.change_requests set claimed_at = now() - interval '2 hours'
+   where id='${rqK2.request_id}'`);
+const pend4 = await rpc("vexim_worker_ppc_pending_changes", `'${wShop}'::uuid, 100, 30`);
+ok(
+  Number(pend4.reclaimed) === 1 && Number(pend4.count) === 1
+    && pend4.requests[0].request_id === rqK2.request_id
+    && Number(pend4.requests[0].attempts) === 2,
+  `0021 worker: đòi lại lô kẹt (applying > 30 phút) → trả về hàng đợi rồi lấy lại, attempts=2 — ${JSON.stringify({ reclaimed: pend4.reclaimed, count: pend4.count, attempts: pend4.requests[0]?.attempts })}`,
+);
+const resSkip = await rpc("vexim_worker_ppc_set_result", `'${JSON.stringify({
+  id: rqK2.request_id, status: "skipped", batch_id: pend4.batch_id,
+  error: "Amazon đang để bid 1.85 khác before_value 2.00 — có người đã đổi tay trong Ads console, không ghi đè",
+  amazon_response: { currentBid: 1.85 },
+}).replace(/'/g, "''")}'::jsonb`);
+ok(resSkip.status === "skipped",
+   `0021 worker: before_value LỆCH Amazon → SKIP thay vì ghi đè mù — ${JSON.stringify(resSkip)}`);
+ok(
+  (await one(`select status_label, last_error from public.vexim_ppc_change_requests
+     where id='${rqK2.request_id}'`)).status_label === "Bỏ qua (lệch Amazon)",
+  "0021 view hàng đợi: skipped có nhãn rõ + lý do (người duyệt biết vì sao không áp dụng)",
+);
+ok(
+  await mustBlock(`select * from public.vexim_worker_ppc_set_result(
+     '{"id":"${rqK2.request_id}","status":"applied"}'::jsonb)`),
+  "0021 CHẶN: skipped/applied là trạng thái CUỐI — không ghi kết quả lần hai",
+);
+
+// ---- 11. Negative cấp campaign + cron áp dụng tiếp lô còn lại ----------------
+const pend5 = await rpc("vexim_worker_ppc_pending_changes", `'${wShop}'::uuid, 100, 30`);
+ok(
+  Number(pend5.count) === 1 && pend5.requests[0].label === "wholesale"
+    && pend5.requests[0].entity_type === "campaign_negative_keyword",
+  `0021 worker: lô kế tiếp là negative cấp campaign — ${JSON.stringify(pend5.requests.map((r) => r.label))}`,
+);
+const resWs = await rpc("vexim_worker_ppc_set_result", `'${JSON.stringify({
+  id: pend5.requests[0].request_id, status: "applied", batch_id: pend5.batch_id,
+  created_id: "cnk-1357",
+}).replace(/'/g, "''")}'::jsonb`);
+ok(resWs.status === "applied", `0021 worker: áp dụng negative cấp campaign — ${JSON.stringify(resWs)}`);
+await cmp(
+  "0021 applied: negative cấp CAMPAIGN lưu level='campaign', ad_group_id rỗng, id Amazon thật",
+  `select count(*) n from ads.negative_keywords where seller_account_id='${wShop}'
+     and keyword_text='wholesale' and level='campaign' and ad_group_id=''
+     and match_type='NEGATIVE_PHRASE' and amazon_negative_id='cnk-1357' and campaign_id='W2'`,
+  1,
+);
+await cmp(
+  "0021 audit: đủ 4 mốc của MỘT vòng đời (propose → approved → applying → applied)",
+  `select count(distinct action) n from iam.audit_logs where seller_account_id='${wShop}'
+     and action in ('ppc.propose','ppc.approved','ppc.applying','ppc.applied')`,
+  4,
+);
+await cmp(
+  "0021: 2 từ khoá phủ định đã thêm, không nhân đôi khi nhập lại",
+  `select count(*) n from ads.negative_keywords where seller_account_id='${wShop}'
+     and source='vexim'`,
+  2,
+);
+
+// ---- 12. Alert của hàng đợi: chờ duyệt quá 24 giờ → nổ; duyệt xong → tự đóng --
+await ex(`insert into ads.change_requests(seller_account_id,ads_profile_id,entity_type,change_type,
+     amazon_entity_id,campaign_id,ad_group_id,label,currency,before_value,after_value,status,
+     proposed_by,proposed_at,expires_at)
+   values ('${wShop}','1234567890','keyword','bid','K1','W1','AG1','mat ong','USD',
+           '{"bid":1}'::jsonb,'{"bid":0.8}'::jsonb,'proposed','${wProposer}',
+           now() - interval '30 hours', now() + interval '42 hours')`);
+await asUser(wApprover);
+await cmp(
+  "0021 view hàng đợi: dòng proposed còn hạn → approver thấy can_decide=true (nút duyệt hiện)",
+  `select count(*) n from public.vexim_ppc_change_requests
+    where seller_account_id='${wShop}' and status='proposed' and can_decide`,
+  1,
+);
+await asWorker();
+const al1 = await rows(`select * from public.vexim_ppc_raise_alerts('${wShop}')`);
+const alPend = al1.find((r) => r.rule_code === "ppc_pending_approval");
+const alFail = al1.find((r) => r.rule_code === "ppc_change_failed");
+ok(
+  alPend?.next_action === "raised" && alPend.severity === "amber"
+    && Number(alPend.threshold) === 24 && alPend.entity_key === `ppc_pending:${wShop}`
+    && String(alPend.shop_name).length > 0,
+  `0021 alert hàng đợi: đề xuất chờ duyệt 30 giờ (> ngưỡng 24) → nổ amber — ${JSON.stringify(alPend)}`,
+);
+ok(
+  alFail?.next_action === "raised" && alFail.severity === "red"
+    && String(alFail.metric) !== "" && alFail.alert_id,
+  `0021 alert hàng đợi: có thay đổi áp dụng thất bại trong 24h → nổ red — ${JSON.stringify(alFail)}`,
+);
+const al2 = await rows(`select * from public.vexim_ppc_raise_alerts('${wShop}')`);
+ok(
+  al2.find((r) => r.rule_code === "ppc_pending_approval")?.alert_id === alPend.alert_id,
+  "0021 alert hàng đợi: chạy LẠI → cùng alert_id (dedupe theo entity_key, không spam chuông)",
+);
+// duyệt nốt đề xuất cũ → alert chờ duyệt phải TỰ ĐÓNG
+await asUser(wApprover);
+const idOld = (await one(`select id from ads.change_requests where seller_account_id='${wShop}'
+   and status='proposed' and proposed_at < now() - interval '24 hours' limit 1`)).id;
+await rpc("vexim_ppc_decide_change", `'${idOld}','reject','Hết hạn dữ liệu'`);
+await asWorker();
+const al3 = await rows(`select * from public.vexim_ppc_raise_alerts('${wShop}')`);
+ok(
+  al3.find((r) => r.rule_code === "ppc_pending_approval")?.next_action === "resolved",
+  `0021 alert hàng đợi: duyệt/từ chối hết đề xuất cũ → TỰ ĐÓNG alert — ${JSON.stringify(al3.find((r) => r.rule_code === "ppc_pending_approval"))}`,
+);
+ok(
+  al3.find((r) => r.rule_code === "ppc_change_failed")?.next_action === "raised",
+  "0021 alert hàng đợi: alert thất bại VẪN mở (còn dòng failed trong 24h) — không đóng nhầm",
+);
+
+// ---- 13. View policy: guardrail hiệu lực + trạng thái hàng đợi + quyền --------
+await asUser(wApprover);
+const pol2 = await rpc("vexim_ppc_set_policy", `'${JSON.stringify({
+  seller_account_id: wShop,
+  policy: { bid_floor: 0.1, bid_ceiling: 2.5, budget_ceiling: 60, daily_change_cap: 20,
+            max_open_requests: 5, proposal_ttl_hours: 48, suggestion_min_clicks: 4,
+            suggestion_acos_lower_pct: 40, bid_step_pct: 10, currency: "usd",
+            notes: "Guardrail Q3 của VEXIM" },
+}).replace(/'/g, "''")}'::jsonb`);
+ok(
+  pol2.ok === true && Number(pol2.policy?.bid_ceiling) === 2.5
+    && pol2.policy?.currency === "USD" && pol2.policy?.notes === "Guardrail Q3 của VEXIM"
+    && Number(pol2.before?.bid_ceiling) === 3,
+  `0021 policy: sửa được guardrail (currency viết thường → CHUẨN HOÁ USD), trả before/after để UI hiện diff — ${JSON.stringify(pol2.before).slice(0, 120)}`,
+);
+await cmp(
+  "0021 policy: đổi guardrail có AUDIT (before/after toàn bộ policy)",
+  `select count(*) n from iam.audit_logs where seller_account_id='${wShop}'
+     and action='ppc.policy.update' and before_value->>'bid_ceiling' is not null
+     and after_value->>'notes'='Guardrail Q3 của VEXIM'`,
+  1,
+);
+const pv = await one(`select auto_apply, bid_floor, bid_ceiling, daily_change_cap, max_open_requests,
+     proposal_ttl_hours, suggestion_min_clicks, bid_step_pct, has_policy_row, proposed_count,
+     approved_count, applied_today, failed_24h, open_count, cap_left_today, can_edit_policy, currency
+   from public.vexim_ppc_policies where seller_account_id='${wShop}'`);
+ok(
+  pv?.has_policy_row === true && pv?.auto_apply === false && Number(pv?.bid_ceiling) === 2.5
+    && Number(pv?.daily_change_cap) === 20 && Number(pv?.applied_today) === 2
+    && Number(pv?.failed_24h) === 1 && Number(pv?.cap_left_today) === 18
+    && pv?.can_edit_policy === true && pv?.currency === "USD",
+  `0021 view policy: guardrail + trạng thái hàng đợi (đã áp dụng hôm nay 2 · thất bại 1 · trần còn 18/20) — ${JSON.stringify(pv)}`,
+);
+await asUser(wProposer);
+ok(
+  (await one(`select can_edit_policy from public.vexim_ppc_policies
+     where seller_account_id='${wShop}'`)).can_edit_policy === false,
+  "0021 view policy: nhân viên PPC thấy can_edit_policy=false (UI ẩn nút sửa guardrail)",
+);
+ok(
+  String((await rpcFail("vexim_ppc_set_policy", `'${JSON.stringify({
+    seller_account_id: wShop, policy: { auto_apply: true } }).replace(/'/g, "''")}'::jsonb`)).error)
+    .includes("guardrail") === true,
+  "0021 CHẶN: người không phải approver không tự mở auto_apply (tự duyệt thay đổi tiền bạc)",
+);
+ok(
+  await mustBlock(`select * from public.vexim_ppc_set_policy(
+     '{"seller_account_id":"${wShop}","policy":{"bid_floor":5,"bid_ceiling":1}}'::jsonb)`),
+  "0021 CHẶN: policy vô nghĩa (sàn bid 5 > trần 1) bị CHECK của bảng chặn",
+);
+// trần đề xuất đang mở: max_open_requests = 5 mà hàng đợi đang mở nhiều hơn
+await asUser(wApprover);
+await rpc("vexim_ppc_set_policy", `'${JSON.stringify({
+  seller_account_id: wShop, policy: { max_open_requests: 1 } }).replace(/'/g, "''")}'::jsonb`);
+await asUser(wProposer);
+ok(
+  String((await rpcFail("vexim_ppc_propose_changes", `'${JSON.stringify({
+    seller_account_id: wShop,
+    items: [{ entity_type: "keyword", change_type: "bid", amazon_entity_id: "K1", campaign_id: "W1",
+      ad_group_id: "AG1", label: "mat ong", currency: "USD", before_value: { bid: 1 },
+      after_value: { bid: 0.95 } }] }).replace(/'/g, "''")}'::jsonb`)).error)
+    .includes("vượt trần") === true,
+  "0021 CHẶN: quá trần đề xuất đang mở (max_open_requests) → báo rõ phải duyệt bớt, không nhận thêm",
+);
+
+// ---- 14. RLS: người lạ không thấy gì; client không ghi thẳng bảng ------------
+await asUser(wStranger);
+await cmp(
+  "0021 RLS: người lạ không thấy đề xuất / gợi ý / guardrail / negative của shop",
+  `select (select count(*) from public.vexim_ppc_change_requests where seller_account_id='${wShop}')
+        + (select count(*) from public.vexim_ppc_suggestions where seller_account_id='${wShop}')
+        + (select count(*) from public.vexim_ppc_policies where seller_account_id='${wShop}')
+        + (select count(*) from public.vexim_ads_negative_keywords where seller_account_id='${wShop}') n`,
+  0,
+);
+await asUser(wReadOnly);
+ok(
+  (await rows(`select can_propose, can_decide from public.vexim_ppc_suggestions
+     where seller_account_id='${wShop}'`)).every((r) => r.can_propose === false && r.can_decide === false),
+  "0021 RLS: người CHỈ XEM thấy gợi ý nhưng can_propose/can_decide đều false (UI ẩn nút)",
+);
+await cmp(
+  "0021 RLS: người chỉ xem vẫn ĐỌC được hàng đợi (để biết việc đang chờ)",
+  `select count(*) n from public.vexim_ppc_change_requests where seller_account_id='${wShop}'`,
+  (await rows(`select count(*) n from ads.change_requests where seller_account_id='${wShop}'`))[0].n,
+);
+await asUser(wProposer);
+ok(
+  await mustBlock(`insert into ads.change_requests(seller_account_id,entity_type,change_type,after_value)
+     values ('${wShop}','campaign','state','{"state":"PAUSED"}'::jsonb)`),
+  "0021 CHẶN: authenticated không ghi THẲNG bảng hàng đợi (phải qua RPC để còn validate + audit)",
+);
+ok(
+  await mustBlock(`update ads.change_requests set status='applied'
+     where seller_account_id='${wShop}'`),
+  "0021 CHẶN: authenticated không tự đổi trạng thái đề xuất trên bảng gốc",
+);
+ok(
+  await mustBlock(`delete from ads.change_requests where seller_account_id='${wShop}'`),
+  "0021 CHẶN: authenticated không xoá được lịch sử đề xuất (mất dấu audit)",
+);
+ok(
+  await mustBlock(`insert into ads.ppc_policies(seller_account_id,auto_apply) values ('${wShop}',true)`),
+  "0021 CHẶN: authenticated không ghi thẳng guardrail (phải qua RPC có audit)",
+);
+ok(
+  await mustBlock(`insert into ads.negative_keywords(seller_account_id,campaign_id,keyword_text)
+     values ('${wShop}','W1','tu them tay')`),
+  "0021 CHẶN: authenticated không tự thêm từ khoá phủ định vào bảng gương",
+);
+
+await ex("rollback;");
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+
+// ---- 15. Idempotent ----------------------------------------------------------
+ok(
+  await ex(rd("migrations/0021_module5_ppc_write.sql"), "0021 lần 2"),
+  "0021 idempotent (chạy lại không lỗi, không đổi hợp đồng)",
+);
+ok(
+  (await colsOf("vexim_ppc_change_requests")).endsWith("can_decide,is_mine")
+    && (await colsOf("vexim_ppc_suggestions")).endsWith("kind_label,can_decide,can_propose"),
+  "0021 lần 2: hợp đồng cột 2 view chính giữ nguyên",
+);
+await cmp(
+  "0021 lần 2: index unique không bị tạo trùng, trigger không nhân đôi",
+  `select (select count(*) from pg_indexes where schemaname='ads'
+             and indexname in ('uq_change_requests_open','uq_negative_keywords_key'))
+        + (select count(*) from pg_trigger t join pg_class c on c.oid=t.tgrelid
+             where c.relname='change_requests' and not t.tgisinternal) n`,
+  4,
+);
+await cmp(
+  "0021 lần 2: alert rule PPC không nhân đôi",
+  `select count(*) n from ops.alert_rules where rule_code in ('ppc_pending_approval','ppc_change_failed')`,
+  2,
+);
+
+// ---- 15b. HỢP ĐỒNG CỘT web ↔ DB (Module 5 Phần 2&3) --------------------------
+// ppc-write.ts đọc 4 view của 0021 bằng chuỗi select cố định. Thiếu/sai một cột là
+// PostgREST trả PGRST202/PGRST204 lúc CHẠY THẬT (build không bắt được), nên kiểm
+// thẳng vào DB đã migrate ở đây.
+{
+  const webSelects = {
+    vexim_ppc_policies: PPC_POLICY_SELECT,
+    vexim_ppc_change_requests: PPC_REQUEST_SELECT,
+    vexim_ppc_suggestions: PPC_SUGGESTION_SELECT,
+    vexim_ads_negative_keywords: PPC_NEGATIVE_SELECT,
+  };
+  for (const [view, select] of Object.entries(webSelects)) {
+    const wanted = select.split(",").map((c) => c.trim()).filter(Boolean);
+    const have = new Set((await colsOf(view)).split(","));
+    const missing = wanted.filter((c) => !have.has(c));
+    ok(
+      missing.length === 0,
+      `0021: ${view} đủ ${wanted.length} cột mà web select`
+        + (missing.length > 0 ? ` — THIẾU: ${missing.join(", ")}` : ""),
+    );
+  }
+  // Cột web dùng để ORDER BY / lọc: PostgREST trả 400 cho cột không tồn tại.
+  const webOrderFilters = {
+    vexim_ppc_policies: ["shop", "seller_account_id"],
+    vexim_ppc_change_requests: ["is_open", "proposed_at", "seller_account_id", "status"],
+    vexim_ppc_suggestions: ["priority", "waste7", "spend7", "seller_account_id", "kind", "has_open_request"],
+    vexim_ads_negative_keywords: ["last_synced_at", "keyword_text", "seller_account_id"],
+  };
+  for (const [view, wanted] of Object.entries(webOrderFilters)) {
+    const have = new Set((await colsOf(view)).split(","));
+    const missing = wanted.filter((c) => !have.has(c));
+    ok(
+      missing.length === 0,
+      `0021: ${view} có đủ cột web dùng để sắp xếp/lọc`
+        + (missing.length > 0 ? ` — THIẾU: ${missing.join(", ")}` : ""),
+    );
+  }
+  // Khoá mà db.ts đọc từ RPC vexim_worker_ppc_pending_changes (thừa khoá không sao,
+  // THIẾU khoá là mapper trả undefined âm thầm) → gọi RPC thật rồi so.
+  await asWorker();
+  const pending = await one(`select public.vexim_worker_ppc_pending_changes(null, 1, 30) as r`);
+  const pendingKeys = Object.keys((pending && pending.r) || {}).sort().join(",");
+  ok(
+    pendingKeys === "batch_id,cap_left,count,expired,ok,reclaimed,requests,skipped_unsupported",
+    `0021: RPC hàng đợi trả đúng 8 khoá mà db.ts đọc (${pendingKeys})`,
+  );
+}
+
+}
 
 console.log(`\n${"=".repeat(70)}`);
 console.log(fails === 0 ? "TẤT CẢ PASS" : `${fails} MỤC FAIL`);

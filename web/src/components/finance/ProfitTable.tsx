@@ -5,6 +5,11 @@
  *
  * Số liệu đọc thẳng từ vexim_sku_profit (worker tính bằng dòng tiền settlement
  * đã quyết toán + giá vốn VEXIM). Thiếu giá vốn → cột lãi gộp để "—".
+ *
+ * ADS + TACOS (Module 5): ads_spend là CỘT RIÊNG, KHÔNG trừ vào lãi gộp (thiết kế
+ * 0015). Nguồn thật là ads.advertised_product_daily (report spAdvertisedProduct) do
+ * cron ads-sync lấp vào finance.sku_profit_daily bằng vexim_worker_fill_profit_ads_spend.
+ * Chưa đồng bộ → null và UI hiện "—": 0 và "chưa biết" là hai chuyện khác nhau.
  */
 
 import { useMemo, useState } from "react";
@@ -18,13 +23,14 @@ import {
   type SkuProfitDbRow,
 } from "@/lib/data/finance-model";
 
-type SortKey = "gross" | "revenue" | "sku" | "units" | "margin";
+type SortKey = "gross" | "revenue" | "sku" | "units" | "margin" | "ads" | "tacos";
 
 export function ProfitTable({ rows, period }: { rows: SkuProfitDbRow[]; period: string }) {
   const [q, setQ] = useState("");
   const [shop, setShop] = useState("");
   const [lossOnly, setLossOnly] = useState(false);
   const [missingOnly, setMissingOnly] = useState(false);
+  const [adsOnly, setAdsOnly] = useState(false);
   const [sort, setSort] = useState<SortKey>("gross");
 
   const shops = useMemo(() => [...new Set(rows.map((r) => r.shop))].sort(), [rows]);
@@ -36,6 +42,7 @@ export function ProfitTable({ rows, period }: { rows: SkuProfitDbRow[]; period: 
       .filter((r) => (shop ? r.shop === shop : true))
       .filter((r) => (lossOnly ? (r.grossProfit ?? 0) < 0 : true))
       .filter((r) => (missingOnly ? !r.hasFullCost : true))
+      .filter((r) => (adsOnly ? r.adsSpend !== null : true))
       .filter((r) => (needle ? r.sku.toLowerCase().includes(needle) : true));
 
     return list.sort((a, b) => {
@@ -48,6 +55,10 @@ export function ProfitTable({ rows, period }: { rows: SkuProfitDbRow[]; period: 
           return a.sku.localeCompare(b.sku);
         case "margin":
           return (a.margin ?? Infinity) - (b.margin ?? Infinity); // biên lãi thấp trước
+        case "ads":
+          return (b.adsSpend ?? -1) - (a.adsSpend ?? -1); // tốn ads nhất trước
+        case "tacos":
+          return (b.tacos ?? -1) - (a.tacos ?? -1); // TACOS cao nhất trước
         default:
           // SKU lỗ lên đầu, thiếu giá vốn xuống cuối
           if (a.grossProfit === null && b.grossProfit === null) return a.sku.localeCompare(b.sku);
@@ -56,7 +67,7 @@ export function ProfitTable({ rows, period }: { rows: SkuProfitDbRow[]; period: 
           return a.grossProfit - b.grossProfit;
       }
     });
-  }, [rows, q, shop, lossOnly, missingOnly, sort]);
+  }, [rows, q, shop, lossOnly, missingOnly, adsOnly, sort]);
 
   const currency = rows[0]?.currency ?? "USD";
 
@@ -90,6 +101,30 @@ export function ProfitTable({ rows, period }: { rows: SkuProfitDbRow[]; period: 
               : `biên lãi gộp ${percent(kpis.margin)}`
           }
           tone={kpis.grossProfit !== null && kpis.grossProfit < 0 ? "warn" : "flat"}
+        />
+        <KpiCard
+          label="Chi phí Ads (Module 5)"
+          value={kpis.adsSpend === null ? "—" : money(kpis.adsSpend, currency)}
+          sub={
+            kpis.adsSpend === null
+              ? `chưa đồng bộ · ${kpis.rowsMissingAds} dòng chưa có số ads`
+              : kpis.adsPartial
+                ? `CHỈ ${kpis.adsRows}/${kpis.adsRows + kpis.rowsMissingAds} dòng có ads — tổng này THIẾU`
+                : `${kpis.adsRows} dòng đã lấp từ report spAdvertisedProduct`
+          }
+          tone={kpis.adsSpend === null ? "warn" : kpis.adsPartial ? "warn" : "flat"}
+        />
+        <KpiCard
+          label="TACOS (ads / doanh thu)"
+          value={percent(kpis.tacos)}
+          sub={
+            kpis.tacos === null
+              ? "chưa tính được — cần số ads (Module 5)"
+              : kpis.adsPartial
+                ? "TACOS THẤP HƠN thật vì thiếu dòng ads"
+                : "tính trên doanh thu thuần cùng kỳ"
+          }
+          tone={kpis.tacos === null ? "warn" : kpis.tacos > 0.15 ? "down" : kpis.tacos > 0.1 ? "warn" : "up"}
         />
       </KpiGrid>
 
@@ -125,6 +160,10 @@ export function ProfitTable({ rows, period }: { rows: SkuProfitDbRow[]; period: 
           <label className="flex items-center gap-1.5 text-[12.5px] font-semibold">
             <input type="checkbox" checked={missingOnly} onChange={(e) => setMissingOnly(e.target.checked)} />
             Chỉ dòng thiếu giá vốn
+          </label>
+          <label className="flex items-center gap-1.5 text-[12.5px] font-semibold">
+            <input type="checkbox" checked={adsOnly} onChange={(e) => setAdsOnly(e.target.checked)} />
+            Chỉ SKU có số ads
           </label>
         </div>
 
@@ -166,6 +205,20 @@ export function ProfitTable({ rows, period }: { rows: SkuProfitDbRow[]; period: 
                 >
                   Biên {sort === "margin" ? "▲" : ""}
                 </th>
+                <th
+                  className={`${tableCls.th} cursor-pointer text-right`}
+                  onClick={() => setSort("ads")}
+                  title="Chi phí quảng cáo — cột riêng, KHÔNG trừ vào lãi gộp"
+                >
+                  Ads {sort === "ads" ? "▼" : ""}
+                </th>
+                <th
+                  className={`${tableCls.th} cursor-pointer text-right`}
+                  onClick={() => setSort("tacos")}
+                  title="TACOS = ads / doanh thu thuần của SKU trong kỳ"
+                >
+                  TACOS {sort === "tacos" ? "▼" : ""}
+                </th>
                 <th className={tableCls.th}>Nguồn phí</th>
               </tr>
             </thead>
@@ -195,6 +248,32 @@ export function ProfitTable({ rows, period }: { rows: SkuProfitDbRow[]; period: 
                     {r.grossProfit === null ? "—" : money(r.grossProfit, r.currency)}
                   </td>
                   <td className={tableCls.tdNum}>{r.grossProfit === null ? "—" : percent(r.margin)}</td>
+                  <td className={tableCls.tdNum}>
+                    {r.adsSpend === null ? (
+                      <span className="font-semibold text-amber" title="Module 5 chưa lấp ads_spend cho SKU/kỳ này">
+                        chưa có
+                      </span>
+                    ) : (
+                      <>
+                        {money(r.adsSpend, r.currency)}
+                        {!r.hasFullAds ? (
+                          <span
+                            className="ml-1 text-[11px] font-extrabold text-amber"
+                            title={`Chỉ ${r.adsDays}/${r.days} ngày có số ads — tổng này thiếu`}
+                          >
+                            {r.adsDays}/{r.days} ngày
+                          </span>
+                        ) : null}
+                      </>
+                    )}
+                  </td>
+                  <td
+                    className={`${tableCls.tdNum} font-bold ${
+                      r.tacos === null ? "text-soft" : r.tacos > 0.15 ? "text-red" : r.tacos > 0.1 ? "text-amber" : "text-green"
+                    }`}
+                  >
+                    {percent(r.tacos)}
+                  </td>
                   <td className={tableCls.td}>
                     <Chip tone={r.feeSource === "settled" ? "green" : r.feeSource === "fees_api" ? "amber" : "gray"}>
                       {FEE_SOURCE_VI[r.feeSource] ?? r.feeSource}
@@ -204,7 +283,7 @@ export function ProfitTable({ rows, period }: { rows: SkuProfitDbRow[]; period: 
               ))}
               {aggregated.length === 0 ? (
                 <tr>
-                  <td className={tableCls.td} colSpan={10}>
+                  <td className={tableCls.td} colSpan={12}>
                     Kỳ này chưa có dòng nào — worker F4 chỉ ghi sau khi có settlement/ledger
                     và giá vốn VEXIM đã nhập.
                   </td>
@@ -214,9 +293,11 @@ export function ProfitTable({ rows, period }: { rows: SkuProfitDbRow[]; period: 
           </table>
         </div>
         <p className="mt-2 text-[11.5px] text-soft">
-          Lãi gộp = doanh thu + hoàn/khuyến mãi + phí Amazon (âm) − giá vốn. Chi phí quảng cáo là cột riêng
-          (Module 5 chưa đồng bộ nên để “—” thay vì tính 0). Cột “giá vốn/đv” lấy theo bậc hiệu lực tại đúng
-          ngày phát sinh.
+          Lãi gộp = doanh thu + hoàn/khuyến mãi + phí Amazon (âm) − giá vốn; <b>chi phí Ads là cột riêng, KHÔNG trừ
+          vào lãi gộp</b> (muốn lãi ròng thì trừ tiếp ở bước tổng hợp). TACOS = ads / doanh thu thuần. Cột Ads để
+          “chưa có” khi Module 5 chưa lấp <code>ads_spend</code> cho SKU/ngày đó — khác hẳn 0. Nhãn{" "}
+          <code>n/m ngày</code> nghĩa là chỉ một phần số ngày trong kỳ có số ads (tổng đang thiếu). Cột “giá vốn/đv”
+          lấy theo bậc hiệu lực tại đúng ngày phát sinh.
         </p>
       </Panel>
     </>

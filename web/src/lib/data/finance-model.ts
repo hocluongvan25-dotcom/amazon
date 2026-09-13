@@ -140,6 +140,16 @@ export function marginPct(grossProfit: number | null, revenue: number | null): n
   return grossProfit / revenue;
 }
 
+/**
+ * TACOS = chi phí ads / doanh thu, trả TỶ LỆ (0.124 = 12.4%) để dùng chung
+ * `percent()` với margin. Null khi chưa có số ads (Module 5 chưa đồng bộ) hoặc
+ * doanh thu ≤ 0 — KHÔNG trả 0 vì 0% TACOS nghĩa là "không tốn đồng ads nào".
+ */
+export function adsTacosPct(adsSpend: number | null, revenue: number | null): number | null {
+  if (adsSpend === null || revenue === null || revenue <= 0) return null;
+  return adsSpend / revenue;
+}
+
 /* ------------------------------------------------------------------ */
 /* F3 — hàng đợi claim                                                */
 /* ------------------------------------------------------------------ */
@@ -262,6 +272,21 @@ export type ProfitAggregate = {
   hasFullCost: boolean;
   feeSource: string;
   days: number;
+  /**
+   * Chi phí quảng cáo (Module 5). NULL khi CHƯA ngày nào có dữ liệu ads —
+   * theo thiết kế 0015, ads_spend là cột riêng và KHÔNG được mặc định 0
+   * (0 nghĩa là "đã đo và không tốn đồng nào", khác hẳn "chưa biết").
+   */
+  adsSpend: number | null;
+  /** Số ngày có ads_spend thật. */
+  adsDays: number;
+  /**
+   * true khi MỌI ngày trong kỳ đều có ads_spend. false + adsSpend khác null =
+   * con số CHỈ LÀ MỘT PHẦN (thiếu ngày) → UI phải nói rõ, không trình bày như tổng.
+   */
+  hasFullAds: boolean;
+  /** TACOS = ads_spend / doanh thu (TỶ LỆ, như margin — `percent()` sẽ nhân 100). */
+  tacos: number | null;
 };
 
 /**
@@ -270,7 +295,7 @@ export type ProfitAggregate = {
  * thiếu), để người dùng biết con số chưa đủ tin cậy thay vì thấy số sai.
  */
 export function aggregateProfit(rows: SkuProfitDbRow[]): ProfitAggregate[] {
-  const map = new Map<string, ProfitAggregate & { missingCost: boolean; feeSources: Set<string> }>();
+  const map = new Map<string, Omit<ProfitAggregate, "adsSpend" | "hasFullAds" | "tacos"> & { adsSpend: number; adsDays: number; missingCost: boolean; feeSources: Set<string> }>();
 
   for (const row of rows) {
     const key = `${row.sku}|${row.currency}`;
@@ -293,6 +318,8 @@ export function aggregateProfit(rows: SkuProfitDbRow[]): ProfitAggregate[] {
         days: 0,
         missingCost: false,
         feeSources: new Set<string>(),
+        adsSpend: 0,
+        adsDays: 0,
       };
       map.set(key, entry);
     }
@@ -304,6 +331,12 @@ export function aggregateProfit(rows: SkuProfitDbRow[]): ProfitAggregate[] {
     entry.promo += row.promo ?? 0;
     entry.days += 1;
     entry.feeSources.add(row.fee_source);
+    // ads_spend: chỉ cộng ngày CÓ số. Ngày null = Module 5 chưa đồng bộ ngày đó,
+    // cộng như 0 sẽ làm TACOS thấp hơn thật mà không ai biết.
+    if (row.ads_spend !== null && row.ads_spend !== undefined) {
+      entry.adsSpend = (entry.adsSpend ?? 0) + row.ads_spend;
+      entry.adsDays += 1;
+    }
 
     if (row.cogs === null || row.gross_profit === null) {
       entry.missingCost = true;
@@ -318,6 +351,10 @@ export function aggregateProfit(rows: SkuProfitDbRow[]): ProfitAggregate[] {
     .map((entry) => {
       const revenue = round2(entry.revenue + entry.refunds + entry.promo);
       const gross = entry.hasFullCost ? round2(entry.grossProfit ?? 0) : null;
+      // adsSpend = null khi chưa có NGÀY NÀO được Module 5 lấp (giữ đúng quy ước
+      // "chưa biết ≠ 0" của 0015).
+      const adsSpend = entry.adsDays > 0 ? round2(entry.adsSpend ?? 0) : null;
+      const hasFullAds = entry.adsDays > 0 && entry.adsDays === entry.days;
       return {
         sku: entry.sku,
         shop: entry.shop,
@@ -333,6 +370,10 @@ export function aggregateProfit(rows: SkuProfitDbRow[]): ProfitAggregate[] {
         hasFullCost: entry.hasFullCost,
         feeSource: entry.feeSources.size === 1 ? [...entry.feeSources][0] : "mixed",
         days: entry.days,
+        adsSpend,
+        adsDays: entry.adsDays,
+        hasFullAds,
+        tacos: adsTacosPct(adsSpend, revenue),
       };
     })
     // Mặc định: SKU lỗ trước (để lộ ngay khoản đang mất tiền), thiếu giá vốn xuống cuối.
@@ -349,6 +390,17 @@ export function profitKpis(rows: SkuProfitDbRow[]): {
   lossSkus: number;
   missingCostRows: number;
   skuCount: number;
+  /** Tổng chi phí ads của những dòng CÓ dữ liệu; null khi chưa dòng nào có. */
+  adsSpend: number | null;
+  /** TACOS tổng (tỷ lệ) = adsSpend / revenue; null khi chưa có ads hoặc revenue ≤ 0. */
+  tacos: number | null;
+  adsRows: number;
+  rowsMissingAds: number;
+  /**
+   * true khi CHỈ MỘT PHẦN dòng có ads_spend. Lúc đó TACOS tổng THẤP HƠN thực tế
+   * (tử số thiếu) → UI phải nói rõ thay vì để CEO tin con số.
+   */
+  adsPartial: boolean;
 } {
   let revenue = 0;
   let fees = 0;
@@ -356,11 +408,19 @@ export function profitKpis(rows: SkuProfitDbRow[]): {
   let gross = 0;
   let hasCost = false;
   let missingCostRows = 0;
+  let ads = 0;
+  let adsRows = 0;
+  let rowsMissingAds = 0;
   const perSku = new Map<string, number | null>();
 
   for (const row of rows) {
     revenue += (row.revenue ?? 0) + (row.refunds ?? 0) + (row.promo ?? 0);
     fees += row.amazon_fees ?? 0;
+    if (row.ads_spend === null || row.ads_spend === undefined) rowsMissingAds++;
+    else {
+      ads += row.ads_spend;
+      adsRows++;
+    }
     if (row.cogs === null || row.gross_profit === null) {
       missingCostRows++;
       perSku.set(row.sku, null);
@@ -375,6 +435,7 @@ export function profitKpis(rows: SkuProfitDbRow[]): {
 
   const revenueRounded = round2(revenue);
   const grossRounded = hasCost ? round2(gross) : null;
+  const adsRounded = adsRows > 0 ? round2(ads) : null;
 
   return {
     revenue: revenueRounded,
@@ -385,6 +446,11 @@ export function profitKpis(rows: SkuProfitDbRow[]): {
     lossSkus: [...perSku.values()].filter((v) => v !== null && v < 0).length,
     missingCostRows,
     skuCount: perSku.size,
+    adsSpend: adsRounded,
+    tacos: adsTacosPct(adsRounded, revenueRounded),
+    adsRows,
+    rowsMissingAds,
+    adsPartial: adsRows > 0 && rowsMissingAds > 0,
   };
 }
 
