@@ -44,6 +44,25 @@ export function marketplaceLabel(marketplaceId: string): { code: string; name: s
   return MARKETPLACE_META[id] ?? { code: id.slice(0, 2) || "??", name: id || "Không rõ", flag: "🌐" };
 }
 
+/**
+ * Lưới an toàn hiển thị tên shop (fix "tên shop dạng mã thô" 09/2026):
+ * nếu display_name trong DB rỗng, trùng mã marketplace (ATVPDKIKX0DER…),
+ * trùng UUID, hoặc dính mã marketplace thô kiểu "P1 · ATVPDKIKX0DER" thì
+ * thay bằng tên dễ đọc "Shop US 🇺🇸" theo marketplace. Nguồn sự thật vẫn là
+ * DB (migration 0026 đổi tận gốc) — đây chỉ là chốt chặn khi DB chưa migrate.
+ */
+export function friendlyShopName(row: Pick<ConnectShopRow, "displayName" | "shop" | "marketplaceId">): string {
+  const raw = (row.displayName || row.shop || "").trim();
+  const mp = marketplaceLabel(row.marketplaceId);
+  const looksLikeMarketplaceId = /^A[A-Z0-9]{8,}$/.test(raw);
+  const looksLikeUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(raw);
+  const embedsRawMarketplace = /^P?\d* ?[·-]? ?A[A-Z0-9]{10,}$/.test(raw);
+  if (raw === "" || looksLikeMarketplaceId || looksLikeUuid || embedsRawMarketplace || raw === row.marketplaceId) {
+    return `Shop ${mp.code}`;
+  }
+  return raw;
+}
+
 export function connectStatusOf(row: ConnectShopRow):
   | { label: string; tone: "green" | "amber" | "red" | "gray"; hint: string } {
   if (!row.hasToken) {

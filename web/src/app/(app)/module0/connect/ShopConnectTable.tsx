@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Chip, tableCls } from "@/components/ui";
 import {
   connectStatusOf,
+  friendlyShopName,
   groupBySeller,
   marketplaceLabel,
   type ConnectShopRow,
@@ -12,6 +13,21 @@ import {
 type Props = {
   shops: ConnectShopRow[];
 };
+
+/**
+ * Tiêu đề card nhóm seller. Trước đây lấy displayName.split("·")[0] → với tên
+ * kỹ thuật "P1 · US" ra "P1 · Seller P1" (mã thô, khó hiểu). Nay:
+ *   - 1 shop  → tên thân thiện của shop đó
+ *   - nhiều shop → phần tên chung (bỏ hậu tố nước) hoặc tên shop đầu tiên
+ */
+function groupTitle(g: { sellerId: string | null; shops: ConnectShopRow[] }): string {
+  const names = g.shops.map((s) => friendlyShopName(s));
+  if (names.length === 1) return names[0];
+  // Tìm tiền tố chung có nghĩa (vd "VEXIM US - Chính" + "VEXIM CA - Canada" → "VEXIM")
+  const first = names[0].split(/[\s·-]+/)[0];
+  if (first.length >= 3 && names.every((n) => n.startsWith(first))) return first;
+  return names[0];
+}
 
 function ConfirmModal({
   shop,
@@ -33,7 +49,7 @@ function ConfirmModal({
         <div className="text-[16px] font-extrabold">Xác nhận kết nối gian hàng</div>
         <div className="mt-3 rounded-[10px] border border-amber-soft bg-amber-soft/40 p-3 text-[13px] leading-snug">
           <div className="font-bold">
-            {mp.flag} {shop.displayName} · {mp.code} ({mp.name})
+            {mp.flag} {friendlyShopName(shop)} · {mp.code} ({mp.name})
           </div>
           <div className="mt-1 text-soft">
             Seller ID: <span className="font-mono text-[12px]">{shop.sellerId ?? "—"}</span> · Marketplace ID:{" "}
@@ -89,9 +105,9 @@ function ShopRow({ s, onConnect }: { s: ConnectShopRow; onConnect: (s: ConnectSh
         <div className="flex items-center gap-2">
           <span className="text-[16px]">{mp.flag}</span>
           <div>
-            <div className="font-bold">{s.displayName}</div>
+            <div className="font-bold">{friendlyShopName(s)}</div>
             <div className="text-[11px] text-soft">
-              {mp.code} · {mp.name} · <span className="font-mono">{s.marketplaceId.slice(0, 8)}…</span>
+              {mp.code} · {mp.name}
             </div>
           </div>
         </div>
@@ -178,8 +194,12 @@ export function ShopConnectTable({ shops }: Props) {
           <div className="flex items-center justify-between border-b border-line px-4 py-3">
             <div>
               <div className="text-[14px] font-extrabold">
-                {g.shops[0]?.displayName.split("·")[0].trim() || g.sellerKey} · Seller{" "}
-                <span className="font-mono text-[12px]">{g.sellerId ?? g.sellerKey}</span>
+                {groupTitle(g)}
+                {g.sellerId ? (
+                  <>
+                    {" "}· Seller <span className="font-mono text-[12px]">{g.sellerId}</span>
+                  </>
+                ) : null}
               </div>
               <div className="text-[11.5px] text-soft">
                 {g.shops.length} marketplace: {g.shops.map((s) => marketplaceLabel(s.marketplaceId).code).join(", ")} ·{" "}

@@ -4249,6 +4249,53 @@ ok(await mustBlock(`select * from public.vexim_worker_claim_seller_id('${pShop}'
   "0025 CHẶN: user đăng nhập không gọi được claim_seller_id");
 await ex("select set_config('request.jwt.claim.sub','',false)");
 
+// ===========================================================================
+console.log("\n=== BƯỚC 25: 0026 — tên shop thân thiện + view vexim_shops đủ cột ===");
+// ===========================================================================
+// Bối cảnh: UI hiện tên shop dạng mã thô (ATVPDKIK…) vì (1) view vexim_shops
+// bản cũ thiếu seller_id/display_name và (2) display_name còn tên kỹ thuật.
+
+// Fixture tái hiện đúng ca lỗi: shop có display_name = mã marketplace thô
+await ex(`insert into connections.seller_accounts (id, org_id, seller_id, marketplace, display_name, status, data_source)
+  select 'ab260000-0000-4000-8000-000000000001', org_id, 'ARAWNAME26', 'A1AM78C64UM0Y8', 'A1AM78C64UM0Y8', 'active', 'mock'
+  from connections.seller_accounts where id='${pShop}'`, "fixture shop 0026 tên = mã thô");
+
+ok(
+  await ex(rd("migrations/0026_shop_friendly_names.sql"), "0026_shop_friendly_names.sql"),
+  "0026 chạy sạch (DO-block tự soát: view đủ cột + hết tên mã thô)",
+);
+ok(await ex(rd("migrations/0026_shop_friendly_names.sql"), "0026 lần 2"), "0026 idempotent");
+
+// View phải có seller_id + display_name + marketplace_id (chống fallback UI)
+await cmp(
+  "0026: view vexim_shops đủ 3 cột mới (seller_id, display_name, marketplace_id)",
+  `select count(*) n from information_schema.columns
+    where table_schema='public' and table_name='vexim_shops'
+      and column_name in ('seller_id','display_name','marketplace_id')`,
+  3,
+);
+
+// Shop production VEXIM phải mang tên thân thiện
+await cmp(
+  "0026: 2 shop production AQMVYI4HJTI4C mang tên thân thiện VEXIM US/CA",
+  `select count(*) n from connections.seller_accounts
+    where seller_id='AQMVYI4HJTI4C' and display_name in ('VEXIM US - Chính','VEXIM CA - Canada')`,
+  2,
+);
+
+// Fixture tên mã thô phải được đổi thành 'Shop MX'
+const fx26 = await one(`select display_name from connections.seller_accounts where id='ab260000-0000-4000-8000-000000000001'`);
+ok(fx26.display_name === "Shop MX",
+  `0026 lưới an toàn: shop tên = mã marketplace thô đổi thành 'Shop MX' (got: ${fx26.display_name})`);
+
+// Không còn shop nào display_name = mã marketplace
+await cmp(
+  "0026: không còn shop nào có display_name = mã marketplace thô",
+  `select count(*) n from connections.seller_accounts where display_name = marketplace`,
+  0,
+);
+await ex(`delete from connections.seller_accounts where id='ab260000-0000-4000-8000-000000000001'`, "dọn fixture 0026");
+
 console.log(`\n${"=".repeat(70)}`);
 console.log(fails === 0 ? "TẤT CẢ PASS" : `${fails} MỤC FAIL`);
 console.log("=".repeat(70));
