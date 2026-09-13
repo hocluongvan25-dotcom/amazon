@@ -11,7 +11,7 @@
  *   AMAZON_SP_API_REGION (NA/EU/FE, mặc định NA)
  *   AMAZON_ADS_CLIENT_ID / AMAZON_ADS_CLIENT_SECRET / AMAZON_ADS_REFRESH_TOKEN
  *   AMAZON_ADS_REGION (NA/EU/FE) — app Ads là đăng ký riêng, không dùng chung SP-API
- *   NEXT_PUBLIC_SUPABASE_URL (hoặc SUPABASE_URL)
+ *   NEXT_PUBLIC_SUPABASE_URL
  *   SUPABASE_SERVICE_ROLE_KEY
  */
 export type DataMode = "mock" | "sandbox" | "production";
@@ -60,15 +60,17 @@ const HOSTS: Record<string, string> = {
 export function loadConfig(
   env: Record<string, string | undefined> = process.env,
 ): WorkerConfig {
-  const clientId = env.AMAZON_LWA_CLIENT_ID ?? env.SPAPI_LWA_CLIENT_ID;
-  const clientSecret = env.AMAZON_LWA_CLIENT_SECRET ?? env.SPAPI_LWA_CLIENT_SECRET;
-  const refreshToken = env.AMAZON_LWA_REFRESH_TOKEN ?? env.SPAPI_LWA_REFRESH_TOKEN;
-  const sbUrl = env.NEXT_PUBLIC_SUPABASE_URL ?? env.SUPABASE_URL;
+  // CHỈ đọc bộ biến chính thức (khớp env đã set trên Vercel) — không fallback
+  // sang tên biến cũ (SPAPI_LWA_*, ADS_LWA_*, SUPABASE_URL) để tránh lệch cấu hình.
+  const clientId = env.AMAZON_LWA_CLIENT_ID;
+  const clientSecret = env.AMAZON_LWA_CLIENT_SECRET;
+  const refreshToken = env.AMAZON_LWA_REFRESH_TOKEN;
+  const sbUrl = env.NEXT_PUBLIC_SUPABASE_URL;
   const sbKey = env.SUPABASE_SERVICE_ROLE_KEY;
 
-  const adsClientId = env.AMAZON_ADS_CLIENT_ID ?? env.ADS_LWA_CLIENT_ID;
-  const adsClientSecret = env.AMAZON_ADS_CLIENT_SECRET ?? env.ADS_LWA_CLIENT_SECRET;
-  const adsRefreshToken = env.AMAZON_ADS_REFRESH_TOKEN ?? env.ADS_LWA_REFRESH_TOKEN;
+  const adsClientId = env.AMAZON_ADS_CLIENT_ID;
+  const adsClientSecret = env.AMAZON_ADS_CLIENT_SECRET;
+  const adsRefreshToken = env.AMAZON_ADS_REFRESH_TOKEN;
   const adsRegion = (env.AMAZON_ADS_REGION ?? env.AMAZON_SP_API_REGION ?? "NA").toUpperCase();
 
   const region = (env.AMAZON_SP_API_REGION ?? "NA").toUpperCase();
