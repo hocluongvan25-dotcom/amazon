@@ -4,20 +4,20 @@
  * Bước 2 (Amazon gọi về) — đổi code lấy refresh token và lưu vào DB.
  *
  * NĂM CHỐT AN TOÀN (mỗi chốt ứng với một cách hỏng thật đã gặp):
- *   1. STATE DÙNG MỘT LẦN: `consume_oauth_state` đánh dấu used_at; state cũ/hết
- *      hạn/không tồn tại → dừng, KHÔNG lưu token.
- *   2. ĐÚNG SHOP: `selling_partner_id` Amazon trả về phải khớp seller_id của shop
- *      đang nối. Lệch ⇒ shop khác đã authorize ⇒ KHÔNG lưu (nếu lưu, token của
- *      shop A sẽ được dùng như token của shop B — sai toàn bộ số liệu).
+ *   1. STATE DÙNG MỘT LẦN: `consume_oauth_state` đánh dấu used_at; state cũ/hết hạn/không tồn tại → dừng, KHÔNG lưu token.
+ *   2. ĐÚNG SHOP: `selling_partner_id` Amazon trả về phải khớp seller_id của shop đang nối.
  *   3. TOKEN RỖNG KHÔNG LƯU: RPC set_oauth_token cũng chặn lần nữa.
- *   4. ĐỔI TOKEN XONG MỚI GHI: code chỉ dùng được một lần, nên mọi bước kiểm tra
- *      phải xong TRƯỚC khi tiêu thụ code.
- *   5. LUÔN QUAY VỀ MÀN HÌNH KÈM LÝ DO: không trả JSON trần — người dùng đang ở
- *      Seller Central, phải thấy được việc gì vừa xảy ra.
+ *   4. ĐỔI TOKEN XONG MỚI GHI: code chỉ dùng được một lần, nên mọi bước kiểm tra phải xong TRƯỚC khi tiêu thụ code.
+ *   5. LUÔN QUAY VỀ MÀN HÌNH KÈM LÝ DO: không trả JSON trần — người dùng đang ở Seller Central.
+ *
+ * FIX MD9100 09/2026:
+ *   - MD9100 thường do redirect_uri lệch 100% giữa authorize và token exchange, hoặc App Draft thiếu Test Accounts
+ *   - Thêm log chi tiết redirect_uri để đối soát
  */
+
 import { NextResponse } from "next/server";
 
-import { normalizeRegion, exchangeCodeForRefreshToken, explainLwaError } from "@/lib/spapi/oauth";
+import { normalizeRegion, exchangeCodeForRefreshToken, explainLwaError, validateRedirectUri } from "@/lib/spapi/oauth";
 
 export const dynamic = "force-dynamic";
 
@@ -73,10 +73,20 @@ export async function GET(req: Request) {
   const state = (url.searchParams.get("state") ?? "").trim();
   const sellingPartnerId = (url.searchParams.get("selling_partner_id") ?? "").trim();
   const amazonError = (url.searchParams.get("error") ?? "").trim();
+  const amazonErrorDesc = (url.searchParams.get("error_description") ?? "").trim();
 
   const redirectUri = (process.env.AMAZON_SP_API_REDIRECT_URI ?? "").trim();
   const clientId = (process.env.AMAZON_LWA_CLIENT_ID ?? "").trim();
   const clientSecret = (process.env.AMAZON_LWA_CLIENT_SECRET ?? "").trim();
+  const appId = (process.env.AMAZON_SP_API_APP_ID ?? "").trim();
+
+  console.log(`[OAuth Callback] code=${code ? "present" : "missing"} state=${state.slice(0, 8)}... sellerId from Amazon=${sellingPartnerId} error=${amazonError} redirectUri=${redirectUri} appId=${appId}`);
+
+  // Validate redirect_uri sớm để log MD9100
+  const validation = validateRedirectUri(redirectUri);
+  if (!validation.ok) {
+    console.error(`[OAuth Callback] MD9100 risk - redirect_uri validation: ${validation.hint}`);
+  }
 
   // --- 1. tiêu thụ state -------------------------------------------------------
   const consumed = await adminRest("/rest/v1/rpc/vexim_worker_consume_oauth_state", {
@@ -98,14 +108,16 @@ export async function GET(req: Request) {
   const sellerId = row.seller_account_id;
 
   if (amazonError !== "") {
+    // Amazon trả lỗi từ consent screen (ví dụ MD9100, access_denied...)
+    console.error(`[OAuth Callback] Amazon error: ${amazonError} desc=${amazonErrorDesc} seller=${sellerId}`);
     return back(req, {
       oauth: "error",
       seller: sellerId,
-      msg: explainLwaError(amazonError, url.searchParams.get("error_description")),
+      msg: explainLwaError(amazonError, amazonErrorDesc || null) + ` (Code: ${amazonError})`,
     });
   }
   if (code === "") {
-    return back(req, { oauth: "error", seller: sellerId, msg: "Amazon không trả về `code`." });
+    return back(req, { oauth: "error", seller: sellerId, msg: "Amazon không trả về `code` — có thể bấm Từ chối hoặc lỗi MD9100." });
   }
   if (redirectUri === "" || clientId === "" || clientSecret === "") {
     return back(req, {
@@ -128,7 +140,6 @@ export async function GET(req: Request) {
   const shop = (Array.isArray(shopRes.data) ? shopRes.data[0] : undefined) as ShopRow | undefined;
   if (!shop) return back(req, { oauth: "error", msg: "Shop không tồn tại trong hệ thống." });
 
-  // Chốt 2: chống nối nhầm shop.
   if (sellingPartnerId !== "" && shop.seller_id && shop.seller_id !== sellingPartnerId) {
     return back(req, {
       oauth: "error",
@@ -141,16 +152,18 @@ export async function GET(req: Request) {
   }
 
   // --- 3. đổi code lấy refresh token ------------------------------------------
+  // FIX MD9100: redirect_uri phải GIỐNG HỆT lúc authorize, lệch 1 ký tự là invalid_grant
   const exchanged = await exchangeCodeForRefreshToken({ code, redirectUri, clientId, clientSecret });
   if (!exchanged.ok) {
+    console.error(`[OAuth Callback] Token exchange failed: ${exchanged.error} desc=${exchanged.description} redirectUri=${redirectUri}`);
     return back(req, {
       oauth: "error",
       seller: sellerId,
-      msg: explainLwaError(exchanged.error, exchanged.description),
+      msg: explainLwaError(exchanged.error, exchanged.description) + ` (redirect_uri=${redirectUri})`,
     });
   }
 
-  // --- 4. lưu token (RPC 0020 chặn token rỗng + reset cờ nhắc) -----------------
+  // --- 4. lưu token ------------------------------------------------------------
   const saved = await adminRest("/rest/v1/rpc/vexim_worker_set_oauth_token", {
     method: "POST",
     body: {
@@ -171,7 +184,7 @@ export async function GET(req: Request) {
     | { days_left?: number; replaced?: boolean }
     | undefined;
 
-  // --- 5. bổ sung seller_id còn thiếu (không ghi đè giá trị đã có) -------------
+  // --- 5. bổ sung seller_id còn thiếu -----------------------------------------
   if (sellingPartnerId !== "" && !shop.seller_id) {
     const patched = await adminRest(`/rest/v1/seller_accounts?id=eq.${sellerId}`, {
       method: "PATCH",
@@ -179,7 +192,6 @@ export async function GET(req: Request) {
       prefer: "return=minimal",
     });
     if (!patched.ok) {
-      // Không phải lỗi chặn: token đã lưu xong. Chỉ ghi chú để người dùng biết.
       return back(req, {
         oauth: "ok",
         seller: sellerId,
@@ -188,6 +200,8 @@ export async function GET(req: Request) {
       });
     }
   }
+
+  console.log(`[OAuth Callback] Success seller=${sellerId} days_left=${savedRow?.days_left} replaced=${savedRow?.replaced}`);
 
   return back(req, {
     oauth: "ok",

@@ -13,10 +13,11 @@
  *   3. Refresh token chỉ trả về MỘT LẦN duy nhất (lúc đổi code). Không lưu được
  *      nghĩa là phải authorize lại từ đầu.
  *
- * FIX MD1000 09/2026:
- *   - Lỗi MD1000 khi bấm [Kết nối] P1·US/P2·CA: App ID amzn1.sp.solution.ee3dce31... published
- *   - Nguyên nhân: thiếu ?version=beta trong authorize URL, và redirect_uri không khớp 100% Allowed Return URLs
- *   - Fix: thêm version=beta, và log/validate redirect_uri khớp
+ * FIX MD1000/MD9100 09/2026:
+ *   - MD1000: thiếu ?version=beta trong authorize URL, redirect_uri không khớp Allowed Return URLs
+ *   - MD9100: This app can't connect right now — sau khi fix MD1000, nhảy sang Amazon nhưng báo MD9100
+ *     Nguyên nhân chính: redirect_uri lệch 100% (kể cả / cuối, http vs https) hoặc App Draft thiếu Test Accounts / sai Region NA
+ *   - Fix: thêm version=beta, validateRedirectUri 100% match, log chi tiết, thêm diag endpoint
  */
 
 export type SpApiRegion = "NA" | "EU" | "FE";
@@ -45,7 +46,7 @@ export function buildAuthorizeUrl(opts: {
   region?: SpApiRegion;
 }): string {
   const host = sellerCentralHost(opts.region ?? "NA");
-  // FIX 1: Thêm version=beta — Amazon yêu cầu, thiếu sẽ báo MD1000
+  // FIX MD1000: Amazon yêu cầu version=beta trong consent screen, thiếu sẽ báo MD1000
   // Docs: https://developer-docs.amazon.com/sp-api/docs/authorizing-selling-partner-api-applications
   // URL phải là: /apps/authorize/consent?application_id=...&state=...&redirect_uri=...&version=beta
   const q = new URLSearchParams({
@@ -58,36 +59,137 @@ export function buildAuthorizeUrl(opts: {
 }
 
 /**
- * FIX 2: Đối soát redirect_uri với Allowed Return URLs
- * Amazon yêu cầu redirect_uri truyền trong authorize PHẢI khớp 100% (từng ký tự, kể cả trailing slash)
+ * FIX MD1000/MD9100: Đối soát redirect_uri với Allowed Return URLs
+ * Amazon yêu cầu redirect_uri truyền trong authorize PHẢI khớp 100% (từng ký tự, kể cả trailing slash, http vs https)
  * với URL đã khai báo trong LWA Credentials → Allowed Return URLs
- * Lỗi MD1000 thường do lệch: https://example.com/callback vs https://example.com/callback/
+ * Lỗi MD1000/MD9100 thường do:
+ *   - https://example.com/callback vs https://example.com/callback/ (lệch / cuối)
+ *   - http vs https
+ *   - có port :3000 ở local nhưng production không
+ *   - URL encode khác nhau
  */
-export function validateRedirectUri(redirectUri: string, allowedUrls?: string[]): { ok: boolean; hint: string } {
+export type RedirectUriValidation = {
+  ok: boolean;
+  hint: string;
+  details: {
+    redirectUri: string;
+    hasTrailingSlash: boolean;
+    protocol: string | null;
+    host: string | null;
+    path: string | null;
+    allowedUrls: string[];
+    exactMatch: boolean;
+    closeMatches: string[]; // những URL gần giống nhưng lệch 1 ký tự
+  };
+};
+
+export function validateRedirectUri(redirectUri: string, allowedUrls?: string[]): RedirectUriValidation {
   const uri = (redirectUri ?? "").trim();
+  const allowed = (allowedUrls ?? []).map((s) => s.trim()).filter((s) => s.length > 0);
+
+  const baseDetails = {
+    redirectUri: uri,
+    hasTrailingSlash: uri.endsWith("/"),
+    protocol: null as string | null,
+    host: null as string | null,
+    path: null as string | null,
+    allowedUrls: allowed,
+    exactMatch: false,
+    closeMatches: [] as string[],
+  };
+
   if (uri === "") {
-    return { ok: false, hint: "redirect_uri rỗng — phải set AMAZON_SP_API_REDIRECT_URI" };
-  }
-  try {
-    const u = new URL(uri);
-    if (u.protocol !== "https:" && !u.hostname.includes("localhost")) {
-      return { ok: false, hint: `redirect_uri phải https (đang là ${u.protocol}) — Amazon từ chối http trừ localhost` };
-    }
-  } catch {
-    return { ok: false, hint: `redirect_uri không phải URL hợp lệ: ${uri}` };
+    return {
+      ok: false,
+      hint: "redirect_uri rỗng — phải set AMAZON_SP_API_REDIRECT_URI trên Vercel",
+      details: baseDetails,
+    };
   }
 
-  if (allowedUrls && allowedUrls.length > 0) {
-    const exactMatch = allowedUrls.some((a) => a.trim() === uri);
-    if (!exactMatch) {
+  try {
+    const u = new URL(uri);
+    baseDetails.protocol = u.protocol;
+    baseDetails.host = u.host;
+    baseDetails.path = u.pathname;
+    if (u.protocol !== "https:" && !u.hostname.includes("localhost") && !u.hostname.includes("127.0.0.1")) {
       return {
         ok: false,
-        hint: `redirect_uri [${uri}] không khớp 100% với Allowed Return URLs đã khai báo: ${allowedUrls.join(" | ")} — lệch 1 ký tự (kể cả / cuối) là MD1000`,
+        hint: `redirect_uri phải https (đang là ${u.protocol}) — Amazon từ chối http trừ localhost. Đổi env sang https.`,
+        details: baseDetails,
+      };
+    }
+  } catch {
+    return {
+      ok: false,
+      hint: `redirect_uri không phải URL hợp lệ: ${uri} — kiểm tra lại env`,
+      details: baseDetails,
+    };
+  }
+
+  // Tìm exact match
+  const exactMatch = allowed.some((a) => a === uri);
+  baseDetails.exactMatch = exactMatch;
+
+  // Tìm close matches (gần giống nhưng lệch / cuối hoặc case)
+  const closeMatches = allowed.filter((a) => {
+    if (a === uri) return false;
+    // lệch trailing slash
+    if (a.replace(/\/$/, "") === uri.replace(/\/$/, "")) return true;
+    // lệch case
+    if (a.toLowerCase() === uri.toLowerCase()) return true;
+    // lệch http vs https
+    if (a.replace(/^https:/, "http:") === uri || a.replace(/^http:/, "https:") === uri) return true;
+    return false;
+  });
+  baseDetails.closeMatches = closeMatches;
+
+  if (allowed.length > 0) {
+    if (!exactMatch) {
+      const closeHint =
+        closeMatches.length > 0
+          ? ` Gần giống nhưng lệch: ${closeMatches.join(" | ")} — kiểm tra dấu / cuối, https vs http, chữ hoa/thường.`
+          : "";
+      return {
+        ok: false,
+        hint: `MD1000/MD9100: redirect_uri [${uri}] không khớp 100% với Allowed Return URLs [${allowed.join(" | ")}]. Amazon yêu cầu khớp TỪNG KÝ TỰ.${closeHint} Vào Apps & Services → LWA Credentials → Allowed Return URLs để đối soát.`,
+        details: baseDetails,
+      };
+    }
+  } else {
+    // Không có allowed list từ env, chỉ cảnh báo chung
+    if (uri.endsWith("/") && uri !== "https://localhost/" && !uri.includes("localhost")) {
+      return {
+        ok: true,
+        hint: `redirect_uri có dấu / cuối [${uri}] — đảm bảo trong Console cũng có / cuối. Nếu Console không có /, sẽ MD9100. Khuyến nghị bỏ / cuối cho an toàn.`,
+        details: baseDetails,
       };
     }
   }
 
-  return { ok: true, hint: "redirect_uri khớp" };
+  return { ok: true, hint: "redirect_uri khớp 100% (hoặc không có allowed list để đối soát, cần check Console)", details: baseDetails };
+}
+
+/**
+ * Giải thích lỗi MD1000/MD9100 cho người vận hành
+ */
+export function explainMdError(code: string): string {
+  switch (code) {
+    case "MD1000":
+      return (
+        "MD1000: App ID sai, chưa publish, hoặc thiếu version=beta, hoặc redirect_uri không khớp Allowed Return URLs. " +
+        "Check: 1) App ID amzn1.sp.solution... đúng chưa, 2) URL có version=beta chưa, 3) redirect_uri khớp 100% từng ký tự với Console (kể cả / cuối, https)."
+      );
+    case "MD9100":
+      return (
+        "MD9100: This app can't connect right now — thường do redirect_uri lệch 100% (khả năng cao nhất) hoặc App ở Draft mà Seller không nằm trong Test Accounts, hoặc sai Region NA/EU/FE. " +
+        "Check: 1) Apps & Services → LWA Credentials → Allowed Return URLs vs env AMAZON_SP_API_REDIRECT_URI (so sánh từng ký tự), " +
+        "2) App Status Draft hay Published, nếu Draft thì Seller email phải trong Test Accounts, " +
+        "3) Region phải NA cho US/CA, " +
+        "4) Log [OAuth Start] để xem URI thực tế."
+      );
+    default:
+      return `Lỗi ${code}: kiểm tra redirect_uri và App Status trong Developer Console`;
+  }
 }
 
 export type CodeExchangeResult =
@@ -151,8 +253,6 @@ export async function exchangeCodeForRefreshToken(opts: {
 
   const refreshToken = typeof json.refresh_token === "string" ? json.refresh_token.trim() : "";
   if (refreshToken === "") {
-    // Amazon trả 200 nhưng không có refresh token khi code đã bị dùng hoặc
-    // redirect_uri không khớp — coi là lỗi, KHÔNG lưu token rỗng vào DB.
     return {
       ok: false,
       error: "missing_refresh_token",
