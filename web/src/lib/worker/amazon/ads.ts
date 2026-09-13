@@ -86,10 +86,16 @@ export type AdsLwaCredentials = {
 /** Access token cache trong bộ nhớ — token endpoint bị Amazon giới hạn tốc độ. */
 export class AdsLwaTokenManager {
   private cached: { token: string; expiresAt: number } | null = null;
-  constructor(
-    private readonly creds: AdsLwaCredentials,
-    private readonly fetchFn: typeof fetch = fetch,
-  ) {}
+  // KHÔNG dùng parameter property (`private readonly creds` trong constructor):
+  // worker test chạy bằng `node --experimental-strip-types` (strip-only) và
+  // Node từ chối cú pháp đó (ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX).
+  private readonly creds: AdsLwaCredentials;
+  private readonly fetchFn: typeof fetch;
+
+  constructor(creds: AdsLwaCredentials, fetchFn: typeof fetch = fetch) {
+    this.creds = creds;
+    this.fetchFn = fetchFn;
+  }
 
   async getAccessToken(force = false): Promise<string> {
     if (!force && this.cached && this.cached.expiresAt > Date.now() + 60_000) {

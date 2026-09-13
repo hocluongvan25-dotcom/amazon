@@ -579,6 +579,17 @@ export type AdsProfileRowInput = {
   source?: string | null;
 };
 
+/**
+ * Profile Ads đã lưu (đọc qua view `public.vexim_ads_profiles` của 0020).
+ * Runner dùng để biết profile nào + tiền tệ nào cho report (report v3 không trả
+ * cột currency, mà tiền tệ sai thì mọi con số ACOS/TACOS đều sai theo).
+ */
+export type AdsProfileRow = {
+  adsProfileId: string;
+  marketplace: string;
+  currency: string | null;
+};
+
 export type AdsCampaignRowInput = {
   campaignId: string;
   name: string;
@@ -894,6 +905,8 @@ export interface DbAdapter {
   /* ---- Module 5 phần 1 (0020): Amazon Ads ---- */
   /** /v2/profiles — 1 shop có thể có nhiều profile (mỗi marketplace một cái). */
   upsertAdsProfiles(sellerAccountId: string, rows: AdsProfileRowInput[]): Promise<AdsEntityCounts>;
+  /** Đọc lại profile đã lưu (runner cần ads_profile_id + currency cho report). */
+  listAdsProfiles(sellerAccountId: string): Promise<AdsProfileRow[]>;
   /** Campaign Management v3 `/sp/campaigns/list` */
   upsertAdsCampaigns(sellerAccountId: string, rows: AdsCampaignRowInput[]): Promise<AdsEntityCounts>;
   /** Campaign Management v3 `/sp/adGroups/list` */
@@ -1810,6 +1823,16 @@ export class MockDbAdapter implements DbAdapter {
       (r) => this.adsKey(r.sellerAccountId, [r.adsProfileId, r.marketplace]),
       (r) => r.adsProfileId !== "" && r.marketplace !== "",
     );
+  }
+
+  async listAdsProfiles(sellerAccountId: string): Promise<AdsProfileRow[]> {
+    return this.adsProfiles
+      .filter((p) => p.sellerAccountId === sellerAccountId)
+      .map((p) => ({
+        adsProfileId: p.adsProfileId,
+        marketplace: p.marketplace,
+        currency: p.currency ?? null,
+      }));
   }
 
   async upsertAdsCampaigns(

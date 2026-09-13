@@ -66,6 +66,7 @@ import type {
   AdsEntityCounts,
   AdsMetricCounts,
   AdsProductMetricRowInput,
+  AdsProfileRow,
   AdsProfileRowInput,
   AdsSearchTermRowInput,
   AdsSuggestionCounts,
@@ -1110,6 +1111,24 @@ export class SupabaseDbAdapter implements DbAdapter {
       body: { p_seller: sellerAccountId, p_rows: rows },
     });
     return this.adsCounts(result);
+  }
+
+  /**
+   * Đọc profile đã lưu qua VIEW public (schema `ads` không expose cho PostgREST
+   * — mọi đường đọc/ghi của web & worker đều đi qua view `vexim_*` + RPC).
+   */
+  async listAdsProfiles(sellerAccountId: string): Promise<AdsProfileRow[]> {
+    const rows = await this.request<Record<string, unknown>[]>("GET", "/rest/v1/vexim_ads_profiles", {
+      search: {
+        seller_account_id: `eq.${sellerAccountId}`,
+        select: "ads_profile_id,marketplace,currency",
+      },
+    });
+    return (rows ?? []).map((r) => ({
+      adsProfileId: String(r.ads_profile_id ?? ""),
+      marketplace: String(r.marketplace ?? ""),
+      currency: r.currency ? String(r.currency) : null,
+    }));
   }
 
   async upsertAdsCampaigns(

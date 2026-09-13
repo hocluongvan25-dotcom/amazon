@@ -487,7 +487,12 @@ create index if not exists idx_oauth_states_expiry
 -- ============================================================================
 insert into ops.alert_rules (rule_code, module, description, threshold, comparator, severity) values
   ('acos_over_target',  'ads', 'ACOS 7 ngày vượt mục tiêu (%) — SOP-05: xem lại bid/từ khoá', 25, 'gt',  'amber'),
-  ('budget_exhausted',  'ads', 'Ngân sách ngày bị dùng ≥ ngưỡng (%) — SOP-04: nới ngân sách hoặc siết từ khoá', 95, 'gt', 'amber')
+  ('budget_exhausted',  'ads', 'Ngân sách ngày bị dùng ≥ ngưỡng (%) — SOP-04: nới ngân sách hoặc siết từ khoá', 95, 'gt', 'amber'),
+  -- Module 0 (nền tảng token): LWA refresh token sống 365 ngày ⇒ phải nhắc
+  -- re-authorize TRƯỚC khi hết hạn, nếu không MỌI module tự dưng ngừng đồng bộ
+  -- và rất khó đoán bệnh. Xếp vào module 'account_health': hết token là vấn đề
+  -- sức khoẻ kết nối của shop, không thuộc riêng ads/orders.
+  ('oauth_reauth_due',  'account_health', 'Refresh token LWA còn ≤ notice_days ngày — SOP-11: kết nối lại shop', 30, 'lte', 'amber')
 on conflict (rule_code) do nothing;
 
 -- ============================================================================
@@ -3185,6 +3190,14 @@ begin
   where rule_code in ('acos_over_target','budget_exhausted') and module = 'ads';
   if n <> 2 then
     raise exception '[0020] FAIL: thiếu rule cảnh báo PPC (%/2)', n;
+  end if;
+
+  -- 21.10b rule nhắc re-authorize (Module 0) — module 'account_health'
+  select count(*) into n
+  from ops.alert_rules
+  where rule_code = 'oauth_reauth_due' and module = 'account_health' and comparator = 'lte';
+  if n <> 1 then
+    raise exception '[0020] FAIL: thiếu rule cảnh báo oauth_reauth_due (%/1)', n;
   end if;
 
   -- 21.11 regression: 4 bảng ads của 0001 vẫn còn policy đọc + view 0019 còn nguyên
