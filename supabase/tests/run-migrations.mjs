@@ -3337,15 +3337,16 @@ await cmp(
   5,
 );
 await cmp(
-  "0021: 3 RPC worker — CHỈ service_role gọi được",
+  "0021: 4 RPC worker — CHỈ service_role gọi được",
   `select count(*) n from pg_proc p where p.oid = any (array[
      'public.vexim_worker_claim_ads_changes(uuid, int)'::regprocedure,
      'public.vexim_worker_record_ads_change(uuid, boolean, jsonb, text)'::regprocedure,
-     'public.vexim_worker_upsert_ads_negative_keywords(uuid, jsonb)'::regprocedure])
+     'public.vexim_worker_upsert_ads_negative_keywords(uuid, jsonb)'::regprocedure,
+     'public.vexim_worker_release_ads_change(uuid, text)'::regprocedure])
    and p.prosecdef
    and not has_function_privilege('authenticated', p.oid, 'EXECUTE')
    and has_function_privilege('service_role', p.oid, 'EXECUTE')`,
-  3,
+  4,
 );
 await cmp(
   "0021 khối 0: KHÔNG còn policy nào tự tham chiếu iam.role_assignments/user_profiles (nguồn đệ quy)",
@@ -3615,6 +3616,45 @@ ok(
   "0021 khối 0: vá lỗi KHÔNG nới quyền — vẫn không sửa được hồ sơ người khác",
 );
 
+// ---- 5c. 429/5xx: worker TRẢ LẠI hàng đợi để lần sau thử tiếp (không báo thất bại oan) ----
+// Tạo một yêu cầu GIẢM bid (tự duyệt) để có dòng 'approved' cho worker claim.
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role authenticated;");
+await ex(`select set_config('request.jwt.claim.sub','${qOp}',false);`);
+const bidDown = await q(`select * from public.vexim_request_ads_change('${qShop}',
+   '{"action":"set_bid","entityType":"keyword","entityKey":"KW-W2","value":"1.90","reason":"SOP-04 b4: hạ bid sau khi giảm hiệu quả"}'::jsonb)`);
+ok(
+  bidDown.status === "approved" && bidDown.requires_approval === false,
+  `0021 ngưỡng: GIẢM bid (2.00 → 1.90) tự duyệt — chỉ tăng mới cần trưởng phòng — ${Q(bidDown)}`,
+);
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role service_role;");
+const throttleClaim = (await db.query(
+  `select * from public.vexim_worker_claim_ads_changes('${qShop}', 10)`)).rows;
+const throttleOne = throttleClaim[0];
+const released = await q(`select * from public.vexim_worker_release_ads_change('${throttleOne.change_id}', 'Amazon báo 429 — thử lại lần chạy sau')`);
+const afterRelease = await q(`select status, attempts, api_response -> 'released' as released
+   from ads.change_requests where id='${throttleOne.change_id}'`);
+ok(
+  released.status === "approved" && Number(released.attempts) === 1
+    && afterRelease.status === "approved" && afterRelease.released === true,
+  `0021 429: yêu cầu được TRẢ LẠI hàng đợi (approved) chứ không thành failed — ${Q(released)}`,
+);
+const reclaim = (await db.query(
+  `select * from public.vexim_worker_claim_ads_changes('${qShop}', 10)`)).rows
+  .find((r) => r.change_id === throttleOne.change_id);
+ok(
+  reclaim !== undefined && Number(reclaim.attempts) === 2,
+  `0021 429: claim lần 2 nhận lại đúng yêu cầu đó, attempts=2 (không mất dấu) — ${Q(reclaim ?? {})}`,
+);
+const rerecord = await q(`select * from public.vexim_worker_record_ads_change('${reclaim.change_id}', true, '{"ok":true}'::jsonb, null)`);
+ok(
+  rerecord.status === "applied",
+  `0021 429: sáng hôm sau Amazon nhận ⇒ applied, không cần người duyệt lại — ${Q(rerecord)}`,
+);
+
 // ---- 6. Negative keyword: duyệt gợi ý A3 → hàng đợi → worker → gương --------
 await ex("reset role;");
 await ex("select set_config('request.jwt.claim.sub','',false);");
@@ -3690,13 +3730,14 @@ const bidReq = await q(`select * from public.vexim_request_ads_change('${qShop}'
 await ex("reset role;");
 await ex("select set_config('request.jwt.claim.sub','',false);");
 await ex("set role service_role;");
+const bidBeforeFail = (await q(`select bid from ads.targets where target_key='KW-W2'`)).bid;
 const bidClaim = await q(`select * from public.vexim_worker_claim_ads_changes('${qShop}', 10)`);
 const bidFail = await q(`select * from public.vexim_worker_record_ads_change('${bidClaim.change_id}', false, '{"code":"INVALID_ARGUMENT"}'::jsonb, 'Bid vượt trần cho phép của Amazon')`);
+const bidAfterFail = (await q(`select bid from ads.targets where target_key='KW-W2'`)).bid;
 ok(
-  bidFail.status === "failed"
-    && (await q(`select bid from ads.targets where target_key='KW-W2'`)).bid == 2
+  bidFail.status === "failed" && Number(bidAfterFail) === Number(bidBeforeFail)
     && (await q(`select count(*)::int n from public.vexim_ads_audit where action='ads.change_failed'`)).n === 1,
-  `0021 thất bại: Amazon từ chối ⇒ status=failed, bid cục bộ GIỮ NGUYÊN 2.00, có audit lỗi — ${Q(bidFail)}`,
+  `0021 thất bại: Amazon từ chối ⇒ status=failed, bid cục bộ GIỮ NGUYÊN ${bidBeforeFail} (KHÔNG ghi giá trị chưa được Amazon nhận), có audit lỗi — ${Q(bidFail)}`,
 );
 ok(
   bidReq.status !== "applied" && (await q(`select error from ads.change_requests where id='${bidClaim.change_id}'`)).error !== null,

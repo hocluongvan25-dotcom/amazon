@@ -217,6 +217,43 @@ export type AdsCreateReportRequest = {
   };
 };
 
+/* ============================================================================
+ * CHIỀU GHI (Module 5 phần 3) — Amazon Ads v3 nhận MẢNG và trả KẾT QUẢ THEO TỪNG
+ * PHẦN TỬ. Đây là điểm dễ hiểu sai nhất:
+ *
+ *   • HTTP 200 KHÔNG có nghĩa là đã ghi xong. Body là một MẢNG:
+ *       [{"code":"SUCCESS","keywordId":"123"},{"code":"INVALID_ARGUMENT","description":"..."}]
+ *     ⇒ phải đọc từng phần tử; một dòng lỗi mà báo "thành công" là ghi sai sự thật.
+ *   • `code` của Amazon là chữ HOA (SUCCESS / NOT_FOUND / INVALID_ARGUMENT…),
+ *     nhưng có bản trả `"SUCCESS"` lẫn `"success"` ⇒ so sánh không phân biệt hoa/thường.
+ *   • Id mới (negative keyword) nằm Ở TỪNG PHẦN TỬ của response, KHÔNG phải header.
+ *
+ * Endpoint v3 đang dùng:
+ *   PUT  /sp/campaigns          — ngân sách (`budget:{budgetType,budget}`) · state
+ *   PUT  /sp/keywords           — bid · state
+ *   POST /sp/negativeKeywords   — tạo negative keyword (trả về keywordId)
+ * ==========================================================================*/
+
+export type AdsWriteItem = {
+  /** vị trí trong mảng gửi lên — để ghép kết quả về đúng đối tượng */
+  index: number;
+  ok: boolean;
+  code: string;
+  description: string;
+  /** id Amazon trả về (keywordId/campaignId…) — rỗng nếu không có */
+  id: string;
+};
+
+export type AdsWriteOutcome = {
+  /** true = MỌI phần tử đều SUCCESS */
+  ok: boolean;
+  items: AdsWriteItem[];
+  /** số phần tử thành công / thất bại (tiện cho log 1 dòng) */
+  succeeded: number;
+  failed: number;
+  raw: unknown;
+};
+
 export type AdsClientOptions = {
   host: string;
   clientId: string;
@@ -298,6 +335,83 @@ export class AdsClient {
       ...keywords.map((raw) => normalizeKeyword(raw as Record<string, unknown>)),
       ...targets.map((raw) => normalizeProductTarget(raw as Record<string, unknown>)),
     ].filter((t) => t.targetKey !== "");
+  }
+
+  // --------------------------------------------------------------------------
+  // 2b. Campaign Management v3 — GHI (ngân sách · bid · state · negative)
+  // --------------------------------------------------------------------------
+  /**
+   * PUT /sp/campaigns — đổi NGÂN SÁCH (và/hoặc state) của campaign.
+   *
+   * Vì sao dùng `budget:{budgetType,budget}` chứ không `dailyBudget`: v3 đã
+   * chuyển sang object budget; `dailyBudget` (v2) vẫn được nhiều shop dùng nên
+   * client gửi dạng object và KHÔNG gửi kèm dailyBudget để tránh 2 nguồn sự thật.
+   */
+  async updateCampaigns(
+    profileId: string,
+    items: { campaignId: string; budget?: number; state?: string }[],
+  ): Promise<AdsWriteOutcome> {
+    const campaigns = items.map((it) => ({
+      campaignId: it.campaignId,
+      ...(it.budget !== undefined
+        ? { budget: { budgetType: "DAILY", budget: round2(it.budget) } }
+        : {}),
+      ...(it.state ? { state: it.state.toUpperCase() } : {}),
+    }));
+    const json = await this.request<unknown>("PUT", "/sp/campaigns", { campaigns }, { profileId });
+    return normalizeWriteResponse(json, items.length, ["campaignId"]);
+  }
+
+  /** PUT /sp/keywords — đổi BID (và/hoặc state) của keyword. */
+  async updateKeywords(
+    profileId: string,
+    items: { keywordId: string; bid?: number; state?: string }[],
+  ): Promise<AdsWriteOutcome> {
+    const keywords = items.map((it) => ({
+      keywordId: it.keywordId,
+      ...(it.bid !== undefined ? { bid: round2(it.bid) } : {}),
+      ...(it.state ? { state: it.state.toUpperCase() } : {}),
+    }));
+    const json = await this.request<unknown>("PUT", "/sp/keywords", { keywords }, { profileId });
+    return normalizeWriteResponse(json, items.length, ["keywordId"]);
+  }
+
+  /**
+   * POST /sp/negativeKeywords — tạo negative keyword (EXACT/Phrase).
+   * Amazon trả `keywordId` cho từng dòng ⇒ job ghi id đó vào gương DB.
+   */
+  async createNegativeKeywords(
+    profileId: string,
+    items: {
+      campaignId: string;
+      adGroupId?: string | null;
+      keywordText: string;
+      matchType: "NEGATIVE_EXACT" | "NEGATIVE_PHRASE";
+    }[],
+  ): Promise<AdsWriteOutcome> {
+    const negativeKeywords = items.map((it) => ({
+      campaignId: it.campaignId,
+      ...(it.adGroupId ? { adGroupId: it.adGroupId } : {}),
+      keywordText: it.keywordText,
+      matchType: it.matchType,
+      state: "ENABLED",
+    }));
+    const json = await this.request<unknown>("POST", "/sp/negativeKeywords", { negativeKeywords }, { profileId });
+    return normalizeWriteResponse(json, items.length, ["keywordId"]);
+  }
+
+  /** POST /sp/negativeKeywords/list — đọc negative ĐANG CÓ trên Amazon (để đối chiếu gương). */
+  async listNegativeKeywords(
+    profileId: string,
+    opts: { maxResults?: number } = {},
+  ): Promise<Record<string, unknown>[]> {
+    const rows = await this.listAll(
+      profileId,
+      "/sp/negativeKeywords/list",
+      { maxResults: clampMaxResults(opts.maxResults), includeExtendedDataFields: true },
+      ["negativeKeywords", "data", "results"],
+    );
+    return rows.map((r) => r as Record<string, unknown>);
   }
 
   // --------------------------------------------------------------------------
@@ -394,7 +508,7 @@ export class AdsClient {
   }
 
   private async request<T>(
-    method: "GET" | "POST",
+    method: "GET" | "POST" | "PUT",
     path: string,
     body?: unknown,
     opts: { profileId?: string; contentType?: string } = {},
@@ -463,6 +577,57 @@ export class AdsClient {
  * Normalize — Amazon đổi tên trường giữa v2/v3 và giữa các list endpoint,
  * nên đọc theo NHIỀU tên có thể (đã liệt kê) thay vì đoán một tên.
  * ==========================================================================*/
+
+/** Làm tròn 2 số lẻ như Amazon yêu cầu (bid/budget gửi 1.234 → 400). */
+function round2(n: number): number {
+  return Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+}
+
+/**
+ * Đọc kết quả ghi của v3: mảng `{code, description, keywordId…}`.
+ * - HTTP 200 nhưng mảng RỖNG ⇒ coi là THẤT BẠI (không có bằng chứng đã ghi).
+ * - Phần tử thiếu `code` ⇒ thất bại (Amazon chưa bao giờ trả success rỗng).
+ */
+export function normalizeWriteResponse(
+  json: unknown,
+  sentCount: number,
+  idFields: string[],
+): AdsWriteOutcome {
+  const list: Record<string, unknown>[] = Array.isArray(json)
+    ? (json as Record<string, unknown>[])
+    : Array.isArray((json as { results?: unknown[] })?.results)
+      ? ((json as { results: Record<string, unknown>[] }).results)
+      : [];
+
+  const items: AdsWriteItem[] = list.map((raw, index) => {
+    const code = String(raw?.code ?? "").trim();
+    let id = "";
+    for (const f of idFields) {
+      const v = String(raw?.[f] ?? "").trim();
+      if (v) {
+        id = v;
+        break;
+      }
+    }
+    return {
+      index,
+      ok: code.toUpperCase() === "SUCCESS",
+      code: code || "NO_CODE",
+      description: String(raw?.description ?? raw?.message ?? "").slice(0, 300),
+      id,
+    };
+  });
+
+  const declaredNoWrite = sentCount > 0 && items.length === 0;
+  const succeeded = items.filter((i) => i.ok).length;
+  return {
+    ok: items.length > 0 && succeeded === items.length && !declaredNoWrite,
+    items,
+    succeeded,
+    failed: items.length - succeeded + (declaredNoWrite ? sentCount : 0),
+    raw: json,
+  };
+}
 
 function normalizeProfile(raw: Record<string, unknown>): AdsProfile {
   const info = (raw?.accountInfo ?? {}) as Record<string, unknown>;

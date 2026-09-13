@@ -71,6 +71,10 @@ import type {
   AdsSearchTermRowInput,
   AdsSuggestionCounts,
   AdsSuggestionRowInput,
+  AdsChangeRow,
+  AdsChangeRecordInput,
+  AdsChangeRecordResult,
+  AdsChangeReleaseResult,
   AdsSpendCounts,
   AdsTargetMetricRowInput,
   AdsTargetRowInput,
@@ -148,6 +152,10 @@ const RPC_PATHS = {
   upsertAdsBudgetEvents: "/rest/v1/rpc/vexim_worker_upsert_ads_budget_events",
   upsertAdsSuggestions: "/rest/v1/rpc/vexim_worker_upsert_ads_suggestions",
   applyAdsSpend: "/rest/v1/rpc/vexim_worker_apply_ads_spend",
+  /* Module 5 phần 3 (0021) — hàng đợi ghi lên Amazon Ads */
+  claimAdsChanges: "/rest/v1/rpc/vexim_worker_claim_ads_changes",
+  recordAdsChange: "/rest/v1/rpc/vexim_worker_record_ads_change",
+  releaseAdsChange: "/rest/v1/rpc/vexim_worker_release_ads_change",
 
   /* ---- Module 0 (0020): token platform + re-authorize ---- */
   setOauthToken: "/rest/v1/rpc/vexim_worker_set_oauth_token",
@@ -1243,6 +1251,61 @@ export class SupabaseDbAdapter implements DbAdapter {
       updated: Number(row?.updated ?? 0),
       skippedNoRow: Number(row?.skipped_no_row ?? 0),
       skippedCurrency: Number(row?.skipped_currency ?? 0),
+    };
+  }
+
+  /* ---- Module 5 phần 3 (0021): hàng đợi ghi lên Amazon Ads ---- */
+
+  async claimAdsChanges(sellerAccountId: string, limit?: number): Promise<AdsChangeRow[]> {
+    const result = await this.request<Record<string, unknown>[]>("POST", RPC_PATHS.claimAdsChanges, {
+      body: { p_seller: sellerAccountId, p_limit: limit ?? 20 },
+    });
+    return (result ?? []).map((r) => ({
+      changeId: String(r.change_id ?? ""),
+      entityType: String(r.entity_type ?? ""),
+      entityKey: String(r.entity_key ?? ""),
+      campaignId: String(r.campaign_id ?? ""),
+      adGroupId: String(r.ad_group_id ?? ""),
+      action: String(r.action ?? "") as AdsChangeRow["action"],
+      payload: (r.payload ?? {}) as Record<string, unknown>,
+      beforeValue: (r.before_value ?? null) as Record<string, unknown> | null,
+      afterValue: (r.after_value ?? null) as Record<string, unknown> | null,
+      adsProfileId: String(r.ads_profile_id ?? ""),
+      currency: r.currency === null || r.currency === undefined ? null : String(r.currency),
+      entityLabel: String(r.entity_label ?? ""),
+      suggestionId: r.suggestion_id === null || r.suggestion_id === undefined ? null : String(r.suggestion_id),
+      attempts: Number(r.attempts ?? 0),
+    }));
+  }
+
+  async recordAdsChange(input: AdsChangeRecordInput): Promise<AdsChangeRecordResult> {
+    const result = await this.request<Record<string, unknown>[]>("POST", RPC_PATHS.recordAdsChange, {
+      body: {
+        p_change_id: input.changeId,
+        p_ok: input.ok === true,
+        p_api: input.api ?? null,
+        p_error: input.error ?? null,
+      },
+    });
+    const row = result?.[0];
+    return {
+      changeId: String(row?.change_id ?? input.changeId),
+      status: String(row?.status ?? (input.ok ? "applied" : "failed")),
+      mirrored: row?.mirrored === true,
+      keywordId: row?.keyword_id === null || row?.keyword_id === undefined ? null : String(row.keyword_id),
+      suggestionApplied: row?.suggestion_applied === true,
+    };
+  }
+
+  async releaseAdsChange(changeId: string, reason: string): Promise<AdsChangeReleaseResult> {
+    const result = await this.request<Record<string, unknown>[]>("POST", RPC_PATHS.releaseAdsChange, {
+      body: { p_change_id: changeId, p_reason: reason },
+    });
+    const row = result?.[0];
+    return {
+      changeId: String(row?.change_id ?? changeId),
+      status: String(row?.status ?? "approved"),
+      attempts: Number(row?.attempts ?? 0),
     };
   }
 

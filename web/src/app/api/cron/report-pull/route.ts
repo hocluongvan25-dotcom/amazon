@@ -4,6 +4,7 @@
  *   /api/cron/report-pull                            → 4 report FBA (0019) + Ads (0020)
  *   /api/cron/report-pull?kinds=storage-fees         → chỉ phí lưu kho (FBA)
  *   /api/cron/report-pull?ads=0                      → bỏ phần Amazon Ads
+ *   /api/cron/report-pull?adsApply=0                  → bỏ phần GHI (duyệt → Amazon)
  *   /api/cron/report-pull?adsKinds=campaigns,targeting → chỉ vài loại report Ads
  *   /api/cron/report-pull?days=7                     → ghi đè khoảng ngày mặc định
  *   /api/cron/report-pull?dryRun=1                   → tải + parse, KHÔNG ghi DB
@@ -31,6 +32,7 @@ import {
   ADS_ALL_KINDS,
   isAdsReportKind,
   isReportKind,
+  runAdsApplyAll,
   runAdsPullAll,
   runAdsSyncAll,
   runReportPullAll,
@@ -119,6 +121,9 @@ export async function GET(req: Request) {
   const days = daysRaw && Number.isFinite(Number(daysRaw)) ? Number(daysRaw) : null;
   const dryRun = url.searchParams.get("dryRun") === "1" || url.searchParams.get("dryRun") === "true";
   const withAds = url.searchParams.get("ads") !== "0";
+  // Phần GHI tách cờ riêng: có shop chỉ muốn kéo số liệu mà chưa muốn cho cron
+  // ghi lên Amazon (ví dụ đang kiểm tra quyền của app Ads).
+  const withAdsApply = url.searchParams.get("adsApply") !== "0";
 
   const buf: string[] = [];
   const out = {
@@ -143,6 +148,7 @@ export async function GET(req: Request) {
     //    Không cấu hình token Ads thì cả hai trả `skipped` kèm hướng dẫn, KHÔNG throw.
     let adsSync: Awaited<ReturnType<typeof runAdsSyncAll>> | null = null;
     let adsPull: Awaited<ReturnType<typeof runAdsPullAll>> | null = null;
+    let adsApply: Awaited<ReturnType<typeof runAdsApplyAll>> | null = null;
     if (withAds) {
       adsSync = await runAdsSyncAll({ stdout: out, dryRun });
       adsPull = await runAdsPullAll({
@@ -153,6 +159,10 @@ export async function GET(req: Request) {
         pollDelayMs: CRON_ADS_POLL_DELAY_MS,
         stdout: out,
       });
+
+      // 3. GHI: chỉ áp dụng yêu cầu ĐÃ ĐƯỢC DUYỆT (ngưỡng >30%/ngày đã qua tay
+      //    trưởng phòng PPC ở UI). Chạy sau sync để có ads_profile_id.
+      if (withAdsApply) adsApply = await runAdsApplyAll({ dryRun, stdout: out });
     }
 
     return NextResponse.json({
@@ -188,6 +198,19 @@ export async function GET(req: Request) {
               needsReauth: adsSync.needsReauth,
               shops: adsSync.shops,
               errors: adsSync.errors,
+            }
+          : null,
+        apply: adsApply
+          ? {
+              db: adsApply.db,
+              apiConfigured: adsApply.apiConfigured,
+              claimed: adsApply.claimed,
+              applied: adsApply.applied,
+              failed: adsApply.failed,
+              released: adsApply.released,
+              needsReauth: adsApply.needsReauth,
+              shops: adsApply.shops,
+              errors: adsApply.errors,
             }
           : null,
         pull: adsPull

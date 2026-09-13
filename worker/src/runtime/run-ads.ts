@@ -12,6 +12,10 @@
  *       Reporting API v3: create → poll → tải GZIP_JSON → parse → RPC.
  *       Sau khi nhập: cảnh báo ACOS/ngân sách + `ads.budget_events` + lấp ads_spend (F4).
  *
+ *   worker:ads-apply [--seller=<uuid>] [--limit=20] [--dry-run]
+ *       Áp dụng các yêu cầu ĐÃ ĐƯỢC DUYỆT lên Amazon Ads (bid · ngân sách ·
+ *       negative) rồi ghi kết quả + audit. Chạy sau ads-sync (cần ads_profile_id).
+ *
  * HAI CHẾ ĐỘ CỦA ads:pull (giống reports:pull của 0019):
  *   (A) API  — không có cờ file: gọi Amazon (cần AMAZON_ADS_CLIENT_ID/SECRET/REFRESH_TOKEN).
  *   (B) FILE — có --<kind>=<đường dẫn>: nạp file JSON đã giải nén, đi ĐÚNG pipeline
@@ -24,7 +28,7 @@
 import { readFileSync } from "node:fs";
 
 import { loadConfig } from "../config.ts";
-import { runAdsPullAll, runAdsSyncAll } from "../run-ads.ts";
+import { runAdsApplyAll, runAdsPullAll, runAdsSyncAll, runOauthReminderAll } from "../run-ads.ts";
 import { ADS_ALL_KINDS, adsSpecOf, isAdsReportKind, type AdsReportKind } from "../ads/registry.ts";
 
 export type AdsSyncCliResult = {
@@ -235,5 +239,118 @@ export async function runAdsPullCli(opts: {
     spendApplied: res.spendApplied,
     needsReauth: res.outcomes.filter((o) => o.needsReauth).map((o) => o.shop),
     errors: res.errors,
+  };
+}
+
+export type AdsApplyCliResult = {
+  mode: string;
+  db: "supabase" | "mock";
+  apiConfigured: boolean;
+  dryRun: boolean;
+  claimed: number;
+  applied: number;
+  failed: number;
+  released: number;
+  needsReauth: string[];
+};
+
+/**
+ * CLI `worker:ads-apply` — chiều GHI. Không có cờ nào để bỏ qua hàng đợi duyệt:
+ * muốn ghi thì phải có yêu cầu `approved` trong DB (do người tạo/duyệt ở web).
+ */
+export async function runAdsApplyCli(opts: {
+  sellerAccountId?: string | null;
+  limit?: number | null;
+  dryRun?: boolean;
+  stdout?: { write: (s: string) => void };
+}): Promise<AdsApplyCliResult> {
+  const log = (s: string) => opts.stdout?.write(s);
+  const cfg = loadConfig();
+
+  if (!cfg.ads) {
+    log(
+      "[ads:apply] ⚠ chưa có credential Amazon Ads ⇒ KHÔNG gửi thay đổi nào lên Amazon.\n" +
+        "    Cần AMAZON_ADS_CLIENT_ID · AMAZON_ADS_CLIENT_SECRET · AMAZON_ADS_REFRESH_TOKEN\n",
+    );
+  }
+  if (opts.dryRun) log("[ads:apply] DRY-RUN — không claim, không gọi Amazon.\n");
+
+  const res = await runAdsApplyAll({
+    sellerAccountId: opts.sellerAccountId ?? null,
+    limit: opts.limit ?? undefined,
+    dryRun: opts.dryRun === true,
+    stdout: opts.stdout,
+  });
+
+  log(
+    `[ads:apply] ${res.claimed} yêu cầu đã nhận · ${res.applied} áp dụng · ` +
+      `${res.failed} thất bại · ${res.released} trả lại hàng đợi` +
+      (res.needsReauth.length > 0 ? ` · CẦN RE-AUTHORIZE: ${res.needsReauth.join(", ")}` : "") +
+      "\n",
+  );
+  return {
+    mode: res.mode,
+    db: res.db,
+    apiConfigured: res.apiConfigured,
+    dryRun: opts.dryRun === true,
+    claimed: res.claimed,
+    applied: res.applied,
+    failed: res.failed,
+    released: res.released,
+    needsReauth: res.needsReauth,
+  };
+}
+
+export type OauthSoonCliResult = {
+  mode: string;
+  db: "supabase" | "mock";
+  dryRun: boolean;
+  /** số shop được kiểm tra (không phải số shop cần nhắc) */
+  count: number;
+  alertsCreated: number;
+  marked: number;
+  needsReauth: string[];
+};
+
+/**
+ * CLI `worker:oauth:soon` — shop sắp/đã hết hạn refresh token (Module 0 · SOP-11).
+ *
+ * MẶC ĐỊNH CHỈ ĐỌC: không tạo cảnh báo, không đánh dấu "đã nhắc" — vì cờ đó chỉ
+ * được cron bật MỘT LẦN cho mỗi shop. Muốn ghi thì phải truyền `--mark` (dùng khi
+ * chạy tay thay cron).
+ */
+export async function runOauthSoonCli(opts: {
+  days?: number | null;
+  mark?: boolean;
+  stdout?: { write: (s: string) => void };
+}): Promise<OauthSoonCliResult> {
+  const mark = opts.mark === true;
+  const res = await runOauthReminderAll({
+    days: opts.days ?? null,
+    dryRun: !mark,
+    stdout: opts.stdout,
+  });
+  const needsReauth = res.shops.filter((s) => s.needsReauth).map((s) => s.shop ?? s.sellerAccountId);
+  opts.stdout?.write(
+    `[oauth:soon] ${res.shops.length} shop cần nhắc${mark ? "" : " (chế độ chỉ đọc — thêm --mark để ghi cảnh báo)"}` +
+      (res.shops.length > 0
+        ? `:\n` +
+          res.shops
+            .map(
+              (s) =>
+                `   ${s.shop ?? s.sellerAccountId} · còn ${s.daysLeft ?? "?"} ngày · ` +
+                `hạn ${s.expiresAt ?? "?"}${s.alreadyNoticed ? " · đã nhắc trước đó" : ""}\n`,
+            )
+            .join("")
+        : " — mọi token đều còn hạn.\n"),
+  );
+  return {
+    mode: res.mode,
+    db: res.db,
+    dryRun: res.dryRun,
+    count: res.checked,
+    alertsCreated: res.alertsCreated,
+    marked: res.marked,
+    needsReauth,
   };
 }

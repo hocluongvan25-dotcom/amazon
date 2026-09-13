@@ -407,7 +407,9 @@ begin
     if not (
          (old.status = 'pending_approval' and new.status in ('approved','rejected','cancelled'))
       or (old.status = 'approved'         and new.status in ('applying','cancelled'))
-      or (old.status = 'applying'         and new.status in ('applied','failed'))
+      -- applying → approved: TRẢ LẠI hàng đợi khi bị 429/5xx (thử lại lần chạy sau,
+      -- không đánh dấu thất bại oan và cũng không tự duyệt lại từ đầu)
+      or (old.status = 'applying'         and new.status in ('applied','failed','approved'))
       or (old.status = 'failed'           and new.status in ('approved','cancelled'))
     ) then
       raise exception '[M5P3] chuyển trạng thái không hợp lệ: % → %', old.status, new.status
@@ -1125,6 +1127,57 @@ comment on function public.vexim_worker_record_ads_change(uuid, boolean, jsonb, 
   '(campaigns.daily_budget, targets.bid/state, negative_keywords) + audit log + đóng gợi ý A3. '
   'Chỉ service_role.';
 
+create or replace function public.vexim_worker_release_ads_change(
+  p_change_id uuid,
+  p_reason    text default null
+)
+returns table (change_id uuid, status text, attempts int)
+language plpgsql
+security definer
+set search_path = ads, iam, public, pg_catalog
+as $$
+declare
+  v_row ads.change_requests%rowtype;
+  v_note text;
+begin
+  if auth.uid() is not null then
+    raise exception '[M5P3] RPC này chỉ dành cho worker (service_role)'
+      using errcode = 'insufficient_privilege';
+  end if;
+
+  select * into v_row from ads.change_requests r where r.id = p_change_id for update;
+  if not found then
+    raise exception '[M5P3] không tìm thấy yêu cầu %', p_change_id using errcode = 'no_data_found';
+  end if;
+  if v_row.status <> 'applying' then
+    raise exception '[M5P3] chỉ trả lại hàng đợi được dòng đang applying (đang: %)', v_row.status
+      using errcode = 'check_violation';
+  end if;
+
+  v_note := coalesce(nullif(btrim(coalesce(p_reason, '')), ''),
+                     'Trả lại hàng đợi để thử lần chạy sau.');
+
+  -- Trả về 'approved' (KHÔNG phải failed): 429/5xx là chuyện tạm thời của Amazon,
+  -- đánh dấu thất bại sẽ bắt người dùng duyệt lại từ đầu một cách vô nghĩa.
+  update ads.change_requests r
+     set status = 'approved',
+         api_response = jsonb_build_object('released', true, 'reason', v_note,
+                                          'attempts', v_row.attempts)
+   where r.id = p_change_id;
+
+  insert into iam.audit_logs (actor_id, seller_account_id, module, action, entity, after_value, result)
+  values (null, v_row.seller_account_id, 'ads', 'ads.change_released',
+          coalesce(nullif(v_row.entity_label,''), v_row.entity_key),
+          v_row.after_value, v_note);
+
+  return query select p_change_id, 'approved'::text, v_row.attempts;
+end;
+$$;
+
+comment on function public.vexim_worker_release_ads_change(uuid, text) is
+  'M5P3: worker TRẢ LẠI hàng đợi (applying → approved) khi Amazon báo 429/5xx — '
+  'lần chạy sau thử tiếp, không bắt người dùng duyệt lại. Chỉ service_role.';
+
 create or replace function public.vexim_worker_upsert_ads_negative_keywords(
   p_seller uuid,
   p_rows   jsonb
@@ -1494,9 +1547,11 @@ grant select on public.vexim_ads_ad_groups, public.vexim_ads_changes,
 revoke all on function public.vexim_worker_claim_ads_changes(uuid, int)          from public, anon, authenticated;
 revoke all on function public.vexim_worker_record_ads_change(uuid, boolean, jsonb, text) from public, anon, authenticated;
 revoke all on function public.vexim_worker_upsert_ads_negative_keywords(uuid, jsonb) from public, anon, authenticated;
+revoke all on function public.vexim_worker_release_ads_change(uuid, text) from public, anon, authenticated;
 grant execute on function public.vexim_worker_claim_ads_changes(uuid, int)        to service_role;
 grant execute on function public.vexim_worker_record_ads_change(uuid, boolean, jsonb, text) to service_role;
 grant execute on function public.vexim_worker_upsert_ads_negative_keywords(uuid, jsonb) to service_role;
+grant execute on function public.vexim_worker_release_ads_change(uuid, text) to service_role;
 
 grant execute on function public.vexim_request_ads_change(uuid, jsonb)       to authenticated, service_role;
 grant execute on function public.vexim_decide_ads_change(uuid, text, text)   to authenticated, service_role;
@@ -1619,9 +1674,9 @@ begin
      and p.proname in ('vexim_request_ads_change','vexim_decide_ads_change','vexim_cancel_ads_change',
                        'vexim_revert_ads_change','vexim_decide_ads_suggestion',
                        'vexim_worker_claim_ads_changes','vexim_worker_record_ads_change',
-                       'vexim_worker_upsert_ads_negative_keywords');
-  if n <> 8 then
-    raise exception '[0021] FAIL: thiếu RPC (%/8)', n;
+                       'vexim_worker_upsert_ads_negative_keywords','vexim_worker_release_ads_change');
+  if n <> 9 then
+    raise exception '[0021] FAIL: thiếu RPC (%/9)', n;
   end if;
 
   -- 10.6 helper duyệt + ngưỡng đọc được

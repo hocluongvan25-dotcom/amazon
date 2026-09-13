@@ -569,6 +569,61 @@ export type AdsSpendCounts = {
   skippedCurrency: number;
 };
 
+/* ---- Module 5 phần 3 (0021): HÀNG ĐỢI GHI lên Amazon Ads ---- */
+
+export type AdsChangeAction =
+  | "set_budget"
+  | "set_bid"
+  | "set_state"
+  | "add_negative_exact"
+  | "add_negative_phrase";
+
+/**
+ * Một yêu cầu ghi đã được DUYỆT, worker vừa nhận (claim) để thực thi.
+ * `beforeValue`/`afterValue` là jsonb `{value: …}` — giữ nguyên dạng của DB để
+ * job không phải đoán kiểu (số cho bid/budget, chuỗi cho state/negative).
+ */
+export type AdsChangeRow = {
+  changeId: string;
+  entityType: string;
+  entityKey: string;
+  campaignId: string;
+  adGroupId: string;
+  action: AdsChangeAction;
+  payload: Record<string, unknown>;
+  beforeValue: Record<string, unknown> | null;
+  afterValue: Record<string, unknown> | null;
+  adsProfileId: string;
+  currency: string | null;
+  entityLabel: string;
+  suggestionId: string | null;
+  attempts: number;
+};
+
+export type AdsChangeRecordInput = {
+  changeId: string;
+  ok: boolean;
+  /** phản hồi Amazon (đã rút gọn) — lưu vào api_response để đối chiếu về sau */
+  api?: Record<string, unknown> | null;
+  error?: string | null;
+};
+
+export type AdsChangeRecordResult = {
+  changeId: string;
+  status: "applied" | "failed" | string;
+  /** true = đã cập nhật bản ghi cục bộ (campaigns/targets/negative_keywords) */
+  mirrored: boolean;
+  keywordId: string | null;
+  /** true = gợi ý A3 gắn với yêu cầu này đã được đóng (applied) */
+  suggestionApplied: boolean;
+};
+
+export type AdsChangeReleaseResult = {
+  changeId: string;
+  status: string;
+  attempts: number;
+};
+
 export type AdsProfileRowInput = {
   adsProfileId: string;
   marketplace: string;
@@ -953,6 +1008,18 @@ export interface DbAdapter {
    */
   applyAdsSpend(sellerAccountId: string, from: string, to: string): Promise<AdsSpendCounts>;
 
+  /* ---- Module 5 phần 3 (0021): chiều GHI lên Amazon Ads ---- */
+  /**
+   * Nhận các yêu cầu ĐÃ DUYỆT của một shop (approved → applying, +1 attempts).
+   * KHÔNG bao giờ trả về dòng `pending_approval`: ngưỡng 30%/ngày phải được
+   * người duyệt TRƯỚC khi có request nào gửi lên Amazon (SOP-05 bước 4).
+   */
+  claimAdsChanges(sellerAccountId: string, limit?: number): Promise<AdsChangeRow[]>;
+  /** Ghi kết quả Amazon trả về (applied/failed) + cập nhật cục bộ + audit. */
+  recordAdsChange(input: AdsChangeRecordInput): Promise<AdsChangeRecordResult>;
+  /** 429/5xx: trả yêu cầu về 'approved' để lần chạy sau thử tiếp. */
+  releaseAdsChange(changeId: string, reason: string): Promise<AdsChangeReleaseResult>;
+
   /* ---- Module 0 (0020): token platform + re-authorize ---- */
   saveOauthToken(sellerAccountId: string, token: OauthTokenInput): Promise<OauthTokenResult>;
   createOauthState(
@@ -1159,6 +1226,25 @@ export class MockDbAdapter implements DbAdapter {
   adsPurchasedProducts: (AdsProductMetricRowInput & { sellerAccountId: string })[] = [];
   adsBudgetEvents: (AdsBudgetEventRowInput & { sellerAccountId: string })[] = [];
   adsSuggestions: (AdsSuggestionRowInput & { sellerAccountId: string; status: string })[] = [];
+  /* Module 5 phần 3 (0021) — hàng đợi ghi + gương negative */
+  adsChanges: (Omit<AdsChangeRow, "changeId"> & {
+    changeId: string;
+    sellerAccountId: string;
+    status: string;
+    apiResponse: Record<string, unknown> | null;
+    error: string | null;
+    appliedAt: string | null;
+  })[] = [];
+  adsNegativeKeywords: {
+    sellerAccountId: string;
+    adsProfileId: string;
+    campaignId: string;
+    adGroupId: string;
+    keywordId: string;
+    keywordText: string;
+    matchType: string;
+    changeRequestId: string;
+  }[] = [];
   oauthTokens: (OauthTokenInput & {
     sellerAccountId: string;
     authorizedAt: string;
@@ -2050,6 +2136,160 @@ export class MockDbAdapter implements DbAdapter {
   }
 
   /* ---- Module 0: token platform + re-authorize ---- */
+
+  /* ==========================================================================
+   * MODULE 5 PHẦN 3 (0021) — HÀNG ĐỢI GHI
+   * Mock giữ đúng luật của DB: chỉ claim dòng 'approved'; ghi kết quả mới đổi
+   * trạng thái + cập nhật bản ghi cục bộ; thất bại thì KHÔNG ghi giá trị chưa
+   * được Amazon nhận (nếu không, test sẽ "xanh" trên một DB đang sai).
+   * ========================================================================*/
+
+  /** Dựng sẵn một yêu cầu cho test/job (thay cho RPC request của web). */
+  seedAdsChange(
+    row: Omit<AdsChangeRow, "changeId"> & {
+      changeId?: string;
+      sellerAccountId: string;
+      status?: string;
+    },
+  ): AdsChangeRow {
+    const changeId = row.changeId ?? `chg-${this.adsChanges.length + 1}`;
+    this.adsChanges.push({
+      ...row,
+      changeId,
+      status: row.status ?? "approved",
+      apiResponse: null,
+      error: null,
+      appliedAt: null,
+    });
+    return { ...row, changeId } as AdsChangeRow;
+  }
+
+  async claimAdsChanges(sellerAccountId: string, limit = 20): Promise<AdsChangeRow[]> {
+    const max = Math.min(Math.max(limit, 1), 200);
+    const out: AdsChangeRow[] = [];
+    for (const c of this.adsChanges) {
+      if (out.length >= max) break;
+      if (c.sellerAccountId !== sellerAccountId) continue;
+      if (c.status !== "approved") continue;
+      c.status = "applying";
+      c.attempts += 1;
+      out.push(this.adsChangeView(c));
+    }
+    return out;
+  }
+
+  async recordAdsChange(input: AdsChangeRecordInput): Promise<AdsChangeRecordResult> {
+    const c = this.adsChanges.find((x) => x.changeId === input.changeId);
+    if (!c) throw new Error(`recordAdsChange: không thấy yêu cầu ${input.changeId}`);
+    if (c.status !== "applying") {
+      throw new Error(`recordAdsChange: yêu cầu đang ở '${c.status}' — chỉ ghi kết quả cho dòng đang applying`);
+    }
+
+    if (!input.ok) {
+      c.status = "failed";
+      c.error = input.error ?? "Amazon từ chối (không có thông báo)";
+      c.apiResponse = input.api ?? null;
+      return { changeId: c.changeId, status: "failed", mirrored: false, keywordId: null, suggestionApplied: false };
+    }
+
+    c.status = "applied";
+    c.appliedAt = new Date().toISOString();
+    c.apiResponse = input.api ?? null;
+    c.error = null;
+
+    const after = String(c.afterValue?.value ?? "");
+    let mirrored = false;
+    let keywordId: string | null = null;
+
+    if (c.action === "set_budget") {
+      const camp = this.adsCampaigns.find(
+        (x) => x.sellerAccountId === c.sellerAccountId && x.campaignId === c.entityKey,
+      );
+      if (camp) {
+        camp.dailyBudget = Number(after);
+        mirrored = true;
+      }
+    } else if (c.action === "set_bid") {
+      const t = this.adsTargets.find(
+        (x) => x.sellerAccountId === c.sellerAccountId && x.targetKind === "keyword" && x.targetKey === c.entityKey,
+      );
+      if (t) {
+        t.bid = Number(after);
+        mirrored = true;
+      }
+    } else if (c.action === "set_state") {
+      if (c.entityType === "campaign") {
+        const camp = this.adsCampaigns.find(
+          (x) => x.sellerAccountId === c.sellerAccountId && x.campaignId === c.entityKey,
+        );
+        if (camp) {
+          camp.state = after;
+          mirrored = true;
+        }
+      } else {
+        const t = this.adsTargets.find(
+          (x) => x.sellerAccountId === c.sellerAccountId && x.targetKind === "keyword" && x.targetKey === c.entityKey,
+        );
+        if (t) {
+          t.state = after;
+          mirrored = true;
+        }
+      }
+    } else {
+      keywordId = String(input.api?.keywordId ?? "") || null;
+      this.adsNegativeKeywords.push({
+        sellerAccountId: c.sellerAccountId,
+        adsProfileId: c.adsProfileId,
+        campaignId: c.campaignId,
+        adGroupId: c.adGroupId,
+        keywordId: keywordId ?? "",
+        keywordText: after,
+        matchType: c.action === "add_negative_phrase" ? "NEGATIVE_PHRASE" : "NEGATIVE_EXACT",
+        changeRequestId: c.changeId,
+      });
+      mirrored = true;
+    }
+
+    // Mock không tự sinh uuid như DB ⇒ tìm gợi ý theo id (nếu có) hoặc theo
+    // (campaign, term) — đúng khoá tự nhiên mà RPC 0020 dùng để gộp dòng.
+    let suggestionApplied = false;
+    if (c.suggestionId) {
+      const sug =
+        this.adsSuggestions.find((x) => (x as { id?: string }).id === c.suggestionId) ??
+        this.adsSuggestions.find(
+          (x) => x.campaignId === c.campaignId && x.term.toLowerCase() === c.entityKey.toLowerCase(),
+        );
+      if (sug) {
+        sug.status = "applied";
+        suggestionApplied = true;
+      }
+    }
+
+    return { changeId: c.changeId, status: "applied", mirrored, keywordId, suggestionApplied };
+  }
+
+  async releaseAdsChange(changeId: string, reason: string): Promise<AdsChangeReleaseResult> {
+    const c = this.adsChanges.find((x) => x.changeId === changeId);
+    if (!c) throw new Error(`releaseAdsChange: không thấy yêu cầu ${changeId}`);
+    if (c.status !== "applying") {
+      throw new Error(`releaseAdsChange: chỉ trả lại hàng đợi được dòng đang applying (đang: ${c.status})`);
+    }
+    c.status = "approved";
+    c.apiResponse = { released: true, reason, attempts: c.attempts };
+    return { changeId: c.changeId, status: "approved", attempts: c.attempts };
+  }
+
+  private adsChangeView(c: MockDbAdapter["adsChanges"][number]): AdsChangeRow {
+    const {
+      changeId, entityType, entityKey, campaignId, adGroupId, action, payload,
+      beforeValue, afterValue, adsProfileId, currency, entityLabel, suggestionId, attempts,
+    } = c;
+    return {
+      changeId, entityType, entityKey, campaignId, adGroupId, action,
+      payload: payload ?? {}, beforeValue, afterValue, adsProfileId,
+      currency: currency ?? null, entityLabel, suggestionId: suggestionId ?? null, attempts,
+    };
+  }
 
   async saveOauthToken(
     sellerAccountId: string,

@@ -11,8 +11,10 @@
  * AN TOÀN DỮ LIỆU (giống run-report-pull.ts): DB thật CHỈ khi mode=production;
  * thiếu credential Ads → job trả `skipped` kèm hướng dẫn, KHÔNG làm đỏ dashboard.
  *
- *   /api/cron/report-pull  →  runAdsSyncAll() + runAdsPullAll() (cùng route, sau
- *                             khi kéo report FBA — Hobby chỉ cho 2 cron/ngày).
+ *   /api/cron/report-pull  →  runAdsSyncAll() + runAdsPullAll() + runAdsApplyAll()
+ *                             (cùng route, sau khi kéo report FBA — Hobby chỉ cho
+ *                             2 cron/ngày). Phần GHI chạy CUỐI cùng vì nó phụ
+ *                             thuộc cấu trúc vừa đồng bộ (ads_profile_id).
  */
 import { loadConfig, type DataMode, type WorkerConfig } from "./config.ts";
 import { AdsClient, AdsLwaTokenManager } from "./amazon/ads.ts";
@@ -20,6 +22,7 @@ import { MockDbAdapter, type ActiveShop, type DbAdapter } from "./db/adapter.ts"
 import { SupabaseDbAdapter } from "./db/supabase.ts";
 import { runAdsEntitySync, type AdsSyncResult, type AdsSyncShop } from "./jobs/ads-sync.job.ts";
 import { runAdsReportPull, type AdsPullResult, type AdsPullShop } from "./jobs/ads-report-pull.job.ts";
+import { runAdsApply, type AdsApplyResult, type AdsApplyShop } from "./jobs/ads-apply.job.ts";
 import { runOauthReminder, type OauthReminderResult } from "./jobs/oauth-reminder.job.ts";
 import { ADS_ALL_KINDS, type AdsReportKind } from "./ads/registry.ts";
 
@@ -431,5 +434,114 @@ export async function runOauthReminderAll(
       adsProfiles: r.adsProfiles,
       tokenActive: r.needsReauth || r.daysLeft !== null,
     })),
+  };
+}
+
+export type AdsApplyRunResult = {
+  mode: DataMode;
+  db: "supabase" | "mock";
+  apiConfigured: boolean;
+  shopsProcessed: number;
+  claimed: number;
+  applied: number;
+  failed: number;
+  released: number;
+  needsReauth: string[];
+  shops: {
+    shop: string;
+    action: string;
+    claimed: number;
+    applied: number;
+    failed: number;
+    released: number;
+    needsReauth: boolean;
+    message: string;
+    changes: AdsApplyResult["results"][number]["changes"];
+    errors: string[];
+  }[];
+  errors: AdsApplyResult["errors"];
+};
+
+/**
+ * ÁP DỤNG các yêu cầu đã duyệt (Module 5 phần 3).
+ *
+ * Chạy SAU ads:sync trong cùng cron vì yêu cầu cần `ads_profile_id` — thiếu
+ * profile thì job từ chối ghi (không đoán marketplace: ghi sai là sai tiền).
+ * Cùng luật an toàn dữ liệu như 2 job kia: DB thật chỉ khi mode=production.
+ */
+export async function runAdsApplyAll(
+  deps: {
+    limit?: number;
+    dryRun?: boolean;
+    stdout?: { write: (s: string) => void };
+    adapter?: DbAdapter;
+    clientFor?: (shop: AdsApplyShop) => AdsClient | null;
+    maxAttempts?: number;
+    sellerAccountId?: string | null;
+    requireSingleShop?: boolean;
+  } = {},
+): Promise<AdsApplyRunResult> {
+  const log = (t: string) => deps.stdout?.write(t);
+  const ctx = await adsRunContext({
+    adapter: deps.adapter,
+    log,
+    sellerAccountId: deps.sellerAccountId,
+    requireSingleShop: deps.requireSingleShop,
+  });
+  const cfg = loadConfig();
+  const clientFor =
+    deps.clientFor ??
+    (cfg.ads && ctx.db === "supabase" ? () => adsClientFromConfig(cfg) : () => null);
+
+  if (ctx.shops.length === 0) {
+    return {
+      mode: ctx.mode,
+      db: ctx.db,
+      apiConfigured: ctx.apiConfigured,
+      shopsProcessed: 0,
+      claimed: 0,
+      applied: 0,
+      failed: 0,
+      released: 0,
+      needsReauth: [],
+      shops: [],
+      errors: [],
+    };
+  }
+
+  log(`[ads-apply] mode=${ctx.mode} host=${cfg.adsHost} · ${ctx.shops.length} shop\n`);
+  const result = await runAdsApply({
+    db: ctx.db_,
+    shops: ctx.shops.map((s) => ({ id: s.id, displayName: s.displayName })),
+    clientFor,
+    limit: deps.limit,
+    dryRun: deps.dryRun === true,
+    maxAttempts: deps.maxAttempts,
+    log,
+  });
+
+  return {
+    mode: ctx.mode,
+    db: ctx.db,
+    apiConfigured: ctx.apiConfigured,
+    shopsProcessed: result.shopsProcessed,
+    claimed: result.claimed,
+    applied: result.applied,
+    failed: result.failed,
+    released: result.released,
+    needsReauth: result.needsReauth,
+    shops: result.results.map((r) => ({
+      shop: r.shopName,
+      action: r.action,
+      claimed: r.claimed,
+      applied: r.applied,
+      failed: r.failed,
+      released: r.released,
+      needsReauth: r.needsReauth,
+      message: r.message,
+      changes: r.changes,
+      errors: r.errors,
+    })),
+    errors: result.errors,
   };
 }
