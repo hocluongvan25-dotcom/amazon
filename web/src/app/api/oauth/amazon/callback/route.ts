@@ -1,23 +1,20 @@
 /**
- * GET /api/oauth/amazon/callback?code=…&state=…&selling_partner_id=…
+ * GET /api/oauth/amazon/callback?spapi_oauth_code=…&state=…&selling_partner_id=…
+ * hoặc ?code=…&state=… (fallback LWA cũ)
  *
  * Bước 2 (Amazon gọi về) — đổi code lấy refresh token và lưu vào DB.
  *
- * NĂM CHỐT AN TOÀN (mỗi chốt ứng với một cách hỏng thật đã gặp):
- *   1. STATE DÙNG MỘT LẦN: `consume_oauth_state` đánh dấu used_at; state cũ/hết
- *      hạn/không tồn tại → dừng, KHÔNG lưu token.
- *   2. ĐÚNG SHOP: `selling_partner_id` Amazon trả về phải khớp seller_id của shop
- *      đang nối. Lệch ⇒ shop khác đã authorize ⇒ KHÔNG lưu (nếu lưu, token của
- *      shop A sẽ được dùng như token của shop B — sai toàn bộ số liệu).
- *   3. TOKEN RỖNG KHÔNG LƯU: RPC set_oauth_token cũng chặn lần nữa.
- *   4. ĐỔI TOKEN XONG MỚI GHI: code chỉ dùng được một lần, nên mọi bước kiểm tra
- *      phải xong TRƯỚC khi tiêu thụ code.
- *   5. LUÔN QUAY VỀ MÀN HÌNH KÈM LÝ DO: không trả JSON trần — người dùng đang ở
- *      Seller Central, phải thấy được việc gì vừa xảy ra.
+ * FIX 404 + spapi_oauth_code 09/2026:
+ *   - Amazon SP-API OAuth trả về `spapi_oauth_code` chứ không phải `code`
+ *   - Trước chỉ đọc `code` → rỗng → báo "Amazon không trả về code" → user thấy lỗi, và nếu middleware chặn thì 404
+ *   - Nay đọc cả `spapi_oauth_code` và `code` (ưu tiên spapi_oauth_code)
+ *   - Thêm bypass /api/oauth trong middleware để tránh 404/redirect login
+ *   - Log full URL để debug
  */
+
 import { NextResponse } from "next/server";
 
-import { normalizeRegion, exchangeCodeForRefreshToken, explainLwaError } from "@/lib/spapi/oauth";
+import { normalizeRegion, exchangeCodeForRefreshToken, explainLwaError, validateRedirectUri } from "@/lib/spapi/oauth";
 
 export const dynamic = "force-dynamic";
 
@@ -69,55 +66,72 @@ async function adminRest(
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
-  const code = (url.searchParams.get("code") ?? "").trim();
+  // FIX 404: Amazon SP-API trả spapi_oauth_code, không phải code
+  const spapiCode = (url.searchParams.get("spapi_oauth_code") ?? "").trim();
+  const lwaCode = (url.searchParams.get("code") ?? "").trim();
+  const code = spapiCode || lwaCode;
+
   const state = (url.searchParams.get("state") ?? "").trim();
   const sellingPartnerId = (url.searchParams.get("selling_partner_id") ?? "").trim();
   const amazonError = (url.searchParams.get("error") ?? "").trim();
+  const amazonErrorDesc = (url.searchParams.get("error_description") ?? "").trim();
 
   const redirectUri = (process.env.AMAZON_SP_API_REDIRECT_URI ?? "").trim();
   const clientId = (process.env.AMAZON_LWA_CLIENT_ID ?? "").trim();
   const clientSecret = (process.env.AMAZON_LWA_CLIENT_SECRET ?? "").trim();
+  const appId = (process.env.AMAZON_SP_API_APP_ID ?? "").trim();
 
-  // --- 1. tiêu thụ state -------------------------------------------------------
+  console.log(
+    `[OAuth Callback] URL=${url.toString()} | spapi_oauth_code=${spapiCode ? "present(" + spapiCode.slice(0, 8) + "...)" : "missing"} code=${lwaCode ? "present" : "missing"} state=${state.slice(0, 8)}... seller Amazon=${sellingPartnerId} error=${amazonError} redirectUri=${redirectUri} appId=${appId}`,
+  );
+
+  const validation = validateRedirectUri(redirectUri);
+  if (!validation.ok) {
+    console.error(`[OAuth Callback] MD9100 risk - ${validation.hint}`);
+  }
+
+  if (state === "") {
+    console.error(`[OAuth Callback] Missing state — possible direct access without OAuth flow`);
+    return back(req, { oauth: "error", msg: "Thiếu state — link callback không hợp lệ. Bấm Kết nối lại từ màn Kết nối shop." });
+  }
+
   const consumed = await adminRest("/rest/v1/rpc/vexim_worker_consume_oauth_state", {
     method: "POST",
     body: { p_state: state },
   });
   if (!consumed.ok) {
-    return back(req, { oauth: "error", msg: `Không kiểm tra được state: ${consumed.error}` });
+    console.error(`[OAuth Callback] consume_oauth_state failed: ${consumed.error} state=${state}`);
+    return back(req, { oauth: "error", msg: `Không kiểm tra được state: ${consumed.error} — có thể hết hạn (30p) hoặc đã dùng. Bấm Kết nối lại.` });
   }
   const row = (Array.isArray(consumed.data) ? consumed.data[0] : consumed.data) as
     | { seller_account_id?: string; redirect_to?: string | null; ok?: boolean; message?: string }
     | undefined;
   if (!row || row.ok !== true || !row.seller_account_id) {
-    return back(req, {
-      oauth: "error",
-      msg: row?.message ?? "state không hợp lệ (link cũ hoặc đã dùng) — bấm Kết nối lại.",
-    });
+    console.error(`[OAuth Callback] Invalid state: ${JSON.stringify(row)} state=${state}`);
+    return back(req, { oauth: "error", msg: row?.message ?? "state không hợp lệ — bấm Kết nối lại." });
   }
   const sellerId = row.seller_account_id;
 
   if (amazonError !== "") {
+    console.error(`[OAuth Callback] Amazon error: ${amazonError} desc=${amazonErrorDesc} seller=${sellerId}`);
     return back(req, {
       oauth: "error",
       seller: sellerId,
-      msg: explainLwaError(amazonError, url.searchParams.get("error_description")),
+      msg: explainLwaError(amazonError, amazonErrorDesc || null) + ` (Code: ${amazonError})`,
     });
   }
   if (code === "") {
-    return back(req, { oauth: "error", seller: sellerId, msg: "Amazon không trả về `code`." });
-  }
-  if (redirectUri === "" || clientId === "" || clientSecret === "") {
+    console.error(`[OAuth Callback] Missing both spapi_oauth_code and code. URL=${url.toString()}`);
     return back(req, {
       oauth: "error",
       seller: sellerId,
-      msg:
-        "Thiếu AMAZON_SP_API_REDIRECT_URI / AMAZON_LWA_CLIENT_ID / AMAZON_LWA_CLIENT_SECRET " +
-        "trên server — không đổi được code lấy token.",
+      msg: "Amazon không trả về spapi_oauth_code (hoặc code). Đã fix để nhận cả 2 — check log [OAuth Callback] để xem params thực tế.",
     });
   }
+  if (redirectUri === "" || clientId === "" || clientSecret === "") {
+    return back(req, { oauth: "error", seller: sellerId, msg: "Thiếu redirect_uri/clientId/clientSecret trên server." });
+  }
 
-  // --- 2. shop này là shop nào? ------------------------------------------------
   const shopRes = await adminRest(
     `/rest/v1/seller_accounts?id=eq.${sellerId}&select=${SHOP_SELECT}&limit=1`,
     { method: "GET" },
@@ -126,31 +140,23 @@ export async function GET(req: Request) {
     return back(req, { oauth: "error", msg: `Không đọc được shop: ${shopRes.error}` });
   }
   const shop = (Array.isArray(shopRes.data) ? shopRes.data[0] : undefined) as ShopRow | undefined;
-  if (!shop) return back(req, { oauth: "error", msg: "Shop không tồn tại trong hệ thống." });
+  if (!shop) return back(req, { oauth: "error", msg: "Shop không tồn tại." });
 
-  // Chốt 2: chống nối nhầm shop.
   if (sellingPartnerId !== "" && shop.seller_id && shop.seller_id !== sellingPartnerId) {
     return back(req, {
       oauth: "error",
       seller: sellerId,
-      msg:
-        `Bạn vừa authorize một shop KHÁC (Amazon trả selling_partner_id=${sellingPartnerId}, ` +
-        `shop này là ${shop.seller_id}) nên hệ thống KHÔNG lưu token. ` +
-        "Kiểm tra lại tài khoản Seller Central trước khi bấm Kết nối.",
+      msg: `Bạn vừa authorize shop KHÁC (Amazon trả ${sellingPartnerId}, shop này là ${shop.seller_id}) nên KHÔNG lưu token.`,
     });
   }
 
-  // --- 3. đổi code lấy refresh token ------------------------------------------
+  console.log(`[OAuth Callback] Exchanging code: ${code.slice(0, 8)}... redirectUri=${redirectUri} seller=${sellerId}`);
   const exchanged = await exchangeCodeForRefreshToken({ code, redirectUri, clientId, clientSecret });
   if (!exchanged.ok) {
-    return back(req, {
-      oauth: "error",
-      seller: sellerId,
-      msg: explainLwaError(exchanged.error, exchanged.description),
-    });
+    console.error(`[OAuth Callback] Exchange failed: ${exchanged.error} desc=${exchanged.description}`);
+    return back(req, { oauth: "error", seller: sellerId, msg: explainLwaError(exchanged.error, exchanged.description) });
   }
 
-  // --- 4. lưu token (RPC 0020 chặn token rỗng + reset cờ nhắc) -----------------
   const saved = await adminRest("/rest/v1/rpc/vexim_worker_set_oauth_token", {
     method: "POST",
     body: {
@@ -165,29 +171,22 @@ export async function GET(req: Request) {
     },
   });
   if (!saved.ok) {
+    console.error(`[OAuth Callback] Save token failed: ${saved.error}`);
     return back(req, { oauth: "error", seller: sellerId, msg: `Không lưu được token: ${saved.error}` });
   }
   const savedRow = (Array.isArray(saved.data) ? saved.data[0] : saved.data) as
     | { days_left?: number; replaced?: boolean }
     | undefined;
 
-  // --- 5. bổ sung seller_id còn thiếu (không ghi đè giá trị đã có) -------------
   if (sellingPartnerId !== "" && !shop.seller_id) {
-    const patched = await adminRest(`/rest/v1/seller_accounts?id=eq.${sellerId}`, {
+    await adminRest(`/rest/v1/seller_accounts?id=eq.${sellerId}`, {
       method: "PATCH",
       body: { seller_id: sellingPartnerId },
       prefer: "return=minimal",
     });
-    if (!patched.ok) {
-      // Không phải lỗi chặn: token đã lưu xong. Chỉ ghi chú để người dùng biết.
-      return back(req, {
-        oauth: "ok",
-        seller: sellerId,
-        days: String(savedRow?.days_left ?? ""),
-        warn: `Đã lưu token nhưng chưa cập nhật được seller_id: ${patched.error}`,
-      });
-    }
   }
+
+  console.log(`[OAuth Callback] Success seller=${sellerId} days=${savedRow?.days_left} replaced=${savedRow?.replaced}`);
 
   return back(req, {
     oauth: "ok",

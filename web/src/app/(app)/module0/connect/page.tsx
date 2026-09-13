@@ -1,20 +1,27 @@
 /**
- * Module 0 → Kết nối shop (SOP-11).
+ * Module 0 → Kết nối shop (SOP-11) — FIX UX 09/2026 + MD1000/MD9100.
  *
- * Trang này có HAI chế độ, và chúng KHÁC NHAU về bản chất:
- *   • SUPABASE MODE — công cụ thật: danh sách shop + tình trạng token (còn mấy
- *     ngày, có cần authorize lại không) + nút Kết nối chạy luồng OAuth thật.
- *   • DEMO MODE — chỉ là bản mô tả trình tự kết nối (không có gì để bấm).
+ * VẤN ĐỀ CŨ:
+ *   - Seed cố định 8 dòng (A1·US, C2·US, P1·US...) → người vận hành dễ bấm nhầm [Kết nối] ghi đè Refresh Token
+ *   - Mã A1/B1/P1 mang tính kỹ thuật, khách không nhận biết gian hàng nào
+ *   - Nhiều dòng "Chưa kết nối" gây rối mắt
+ *   - MD1000: thiếu version=beta, redirect_uri không khớp
+ *   - MD9100: This app can't connect right now — redirect_uri lệch 100% hoặc App Draft thiếu Test Accounts
  *
- * Vì sao phải hiện hạn token ngay ở đây: LWA refresh token sống 365 ngày và
- * Amazon KHÔNG báo khi nó hết hạn. Nhìn thấy "còn 12 ngày" trước khi mọi thứ
- * ngừng đồng bộ là khác biệt giữa "chủ động authorize lại" và "sáng ra thấy
- * dashboard trống".
+ * PHƯƠNG ÁN MỚI:
+ *   1. Nhóm theo seller_id: P1·US + P2·CA cùng seller AQMVYI4HJTI4C → 1 card
+ *   2. Tách production vs mock: production chính, mock ẩn collapsible
+ *   3. Tên thân thiện + cờ marketplace
+ *   4. Modal xác nhận chống ghi đè + ?confirm=1
+ *   5. version=beta trong authorize URL (fix MD1000)
+ *   6. validateRedirectUri 100% match + diag endpoint /api/oauth/amazon/diag (fix MD9100)
  */
-import { Chip, NoAccess, PageHeader, Panel, tableCls } from "@/components/ui";
+import { Chip, NoAccess, PageHeader, Panel } from "@/components/ui";
 import { requireSession } from "@/lib/auth/session";
-import { connectStatusOf, readConnectShops, type ConnectShopRow } from "@/lib/data/oauth";
+import { readConnectShops, type ConnectShopRow } from "@/lib/data/oauth";
 import type { PersonaKey } from "@/lib/roles";
+import { ShopConnectTable } from "./ShopConnectTable";
+import { validateRedirectUri } from "@/lib/spapi/oauth";
 
 const ALLOWED: PersonaKey[] = ["ceo"];
 
@@ -22,19 +29,19 @@ const STEPS = [
   {
     n: 1,
     title: "Bấm Kết nối shop",
-    detail: "Hệ thống sinh link authorize (OAuth LWA) theo app SP-API của VEXIM.",
+    detail: "Hệ thống sinh link authorize (OAuth LWA) với version=beta + modal xác nhận chống bấm nhầm.",
     live: (s: ConnectShopRow) => s.hasToken,
   },
   {
     n: 2,
     title: "Authorize trên Seller Central",
-    detail: "Seller đăng nhập Amazon → bấm Authorize → Amazon trả refresh token (lưu vào DB, không nằm trong env).",
+    detail: "Seller đăng nhập Amazon → bấm Authorize → Amazon trả refresh token (lưu DB). Nếu MD9100, check redirect_uri 100% và Test Accounts.",
     live: (s: ConnectShopRow) => s.hasToken,
   },
   {
     n: 3,
     title: "Backfill 30 ngày dữ liệu",
-    detail: "Orders, FBA Inventory, Listings, Pricing, Settlement qua Reports API — chạy bằng Vercel Cron/worker.",
+    detail: "Orders, FBA Inventory, Listings, Pricing, Settlement qua Reports API — Vercel Cron/worker.",
     live: () => false,
   },
   {
@@ -52,115 +59,99 @@ const STEPS = [
 ];
 
 function EnvPanel() {
-  // Chỉ hiện CÓ/KHÔNG — không bao giờ in giá trị biến môi trường ra HTML.
-  const rows: { label: string; ok: boolean; hint: string }[] = [
+  const redirectUri = (process.env.AMAZON_SP_API_REDIRECT_URI ?? "").trim();
+  const allowedEnv = (process.env.AMAZON_LWA_ALLOWED_RETURN_URLS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  const validation = validateRedirectUri(redirectUri, allowedEnv.length > 0 ? allowedEnv : undefined);
+
+  const rows: { label: string; ok: boolean; hint: string; value?: string }[] = [
     {
-      label: "AMAZON_SP_API_APP_ID (amzn1.sp.solution…)",
+      label: "AMAZON_SP_API_APP_ID",
       ok: !!process.env.AMAZON_SP_API_APP_ID,
-      hint: "Application ID của app SP-API — dùng để dựng link authorize.",
+      hint: `App ID: ${(process.env.AMAZON_SP_API_APP_ID ?? "").slice(0, 30)}... — phải là amzn1.sp.solution.ee3dce31...`,
+      value: process.env.AMAZON_SP_API_APP_ID,
     },
     {
       label: "AMAZON_LWA_CLIENT_ID / SECRET",
       ok: !!process.env.AMAZON_LWA_CLIENT_ID && !!process.env.AMAZON_LWA_CLIENT_SECRET,
-      hint: "Login with Amazon credentials của app SP-API.",
+      hint: "Login with Amazon credentials",
     },
     {
       label: "AMAZON_SP_API_REDIRECT_URI",
-      ok: !!process.env.AMAZON_SP_API_REDIRECT_URI,
-      hint: "Phải trùng ĐÚNG từng ký tự với redirect URI đã đăng ký ở Amazon, nếu không Amazon trả invalid_grant.",
+      ok: !!redirectUri && validation.ok,
+      hint: validation.hint,
+      value: redirectUri,
+    },
+    {
+      label: "AMAZON_LWA_ALLOWED_RETURN_URLS (optional)",
+      ok: allowedEnv.length === 0 || validation.ok,
+      hint:
+        allowedEnv.length > 0
+          ? `Env đối soát: ${allowedEnv.join(" | ")} — phải khớp 100% với Console`
+          : "Chưa set — cần vào Console LWA Credentials → Allowed Return URLs để đối soát thủ công",
+      value: allowedEnv.join(", "),
     },
     {
       label: "SUPABASE_SERVICE_ROLE_KEY",
       ok: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
-      hint: "Server dùng để sinh state + lưu token (RPC chỉ cho service_role).",
+      hint: "Server dùng để sinh state + lưu token",
+    },
+    {
+      label: "AMAZON_SP_API_REGION",
+      ok: true,
+      hint: `Region hiện tại: ${process.env.AMAZON_SP_API_REGION || "NA (default)"} — phải NA cho US/CA`,
+      value: process.env.AMAZON_SP_API_REGION || "NA",
     },
   ];
   const ready = rows.every((r) => r.ok);
 
   return (
     <Panel
-      title="Điều kiện chạy được thật"
-      hint={ready ? "đủ biến môi trường" : "còn thiếu — nút Kết nối sẽ báo lỗi rõ ràng"}
+      title="Điều kiện chạy được thật + Chẩn đoán MD1000/MD9100"
+      hint={ready ? "đủ biến môi trường + redirect_uri khớp" : "còn thiếu hoặc lệch — sẽ MD1000/MD9100"}
     >
       <div className="flex flex-col gap-2 text-[13px]">
         {rows.map((r) => (
           <div
             key={r.label}
-            className="flex items-center gap-2.5 rounded-[10px] border border-line px-3 py-2.5"
+            className={`flex flex-col gap-1 rounded-[10px] border px-3 py-2.5 ${r.ok ? "border-line" : "border-amber-soft bg-amber-soft/20"}`}
           >
-            <Chip tone={r.ok ? "green" : "amber"}>{r.ok ? "Sẵn" : "Thiếu"}</Chip>
-            <span className="font-mono text-[12px]">{r.label}</span>
-            <span className="text-soft">{r.hint}</span>
+            <div className="flex items-center gap-2.5">
+              <Chip tone={r.ok ? "green" : "amber"}>{r.ok ? "Sẵn" : "Lệch/Thiếu"}</Chip>
+              <span className="font-mono text-[12px]">{r.label}</span>
+              <span className="text-soft">{r.hint}</span>
+            </div>
+            {r.value ? (
+              <div className="ml-14 font-mono text-[11px] text-soft break-all">
+                Giá trị: {r.value.slice(0, 120)}
+                {r.value.length > 120 ? "..." : ""} {r.value.endsWith("/") ? " (CÓ / cuối)" : " (KHÔNG có / cuối)"}
+              </div>
+            ) : null}
           </div>
         ))}
       </div>
-    </Panel>
-  );
-}
 
-function ShopTable({ shops }: { shops: ConnectShopRow[] }) {
-  if (shops.length === 0) {
-    return (
-      <div className="rounded-[10px] border border-dashed border-line px-3 py-6 text-center text-[13px] text-soft">
-        Bạn chưa được gán shop nào. Nhờ quản trị viên gán shop ở màn Người dùng &amp; phân quyền.
+      <div className="mt-3 rounded-[10px] border border-line bg-[#f8f9fb] p-3 text-[12px]">
+        <div className="font-bold">Checklist MD1000/MD9100:</div>
+        <ol className="mt-1 list-decimal pl-4 text-soft">
+          <li>
+            Vào <b>Amazon Developer Console → Apps & Services → App ee3dce31... → LWA Credentials → Allowed Return URLs</b>
+          </li>
+          <li>
+            So sánh với env <code>AMAZON_SP_API_REDIRECT_URI</code> trên Vercel: <code className="font-mono">{redirectUri || "(thiếu)"}</code> — phải khớp <b>100% từng chữ cái</b>, bao gồm https và dấu / cuối
+          </li>
+          <li>
+            Nếu App ở <b>Draft</b>, Seller email phải trong <b>Test Accounts</b> (Roles → Test Accounts), và Region phải <b>NA</b> cho US/CA
+          </li>
+          <li>
+            Mở <a href="/api/oauth/amazon/diag" className="text-accent underline" target="_blank">/api/oauth/amazon/diag</a> (chỉ CEO) để xem validation chi tiết + close matches
+          </li>
+          <li>Check Vercel Logs tìm <code>[OAuth Start]</code> để xem URI thực tế gửi sang Amazon</li>
+        </ol>
       </div>
-    );
-  }
-  return (
-    <table className={tableCls.table}>
-      <thead>
-        <tr>
-          <th className={tableCls.th}>Shop</th>
-          <th className={tableCls.th}>Marketplace</th>
-          <th className={tableCls.th}>Trạng thái token</th>
-          <th className={`${tableCls.th} text-right`}>Còn lại</th>
-          <th className={tableCls.th}>Authorize lần cuối</th>
-          <th className={tableCls.th}>Profile Ads</th>
-          <th className={tableCls.th} />
-        </tr>
-      </thead>
-      <tbody>
-        {shops.map((s) => {
-          const st = connectStatusOf(s);
-          const label = s.hasToken ? "Kết nối lại" : "Kết nối";
-          return (
-            <tr key={s.sellerAccountId}>
-              <td className={`${tableCls.td} font-bold`}>{s.shop}</td>
-              <td className={tableCls.td}>{s.marketplace}</td>
-              <td className={tableCls.td}>
-                <Chip tone={st.tone}>{st.label}</Chip>
-                <div className="mt-1 text-[11.5px] text-soft">{st.hint}</div>
-                {s.rotateReminderSent && s.needsReauth ? (
-                  <div className="mt-0.5 text-[11.5px] text-soft">
-                    đã nhắc lúc {s.noticeSentAt ? s.noticeSentAt.slice(0, 10) : "—"}
-                  </div>
-                ) : null}
-              </td>
-              <td className={`${tableCls.td} text-right tabular-nums`}>
-                {s.daysLeft === null ? "—" : `${s.daysLeft} ngày`}
-              </td>
-              <td className={tableCls.td}>
-                {s.authorizedAt ? s.authorizedAt.slice(0, 10) : "chưa từng"}
-                {s.refreshCount && s.refreshCount > 1 ? (
-                  <span className="text-soft"> · lần {s.refreshCount}</span>
-                ) : null}
-              </td>
-              <td className={`${tableCls.td} text-right tabular-nums`}>
-                {s.adsProfiles > 0 ? s.adsProfiles : "—"}
-              </td>
-              <td className={`${tableCls.td} text-right`}>
-                <a
-                  href={`/api/oauth/amazon/start?seller=${encodeURIComponent(s.sellerAccountId)}`}
-                  className="inline-flex items-center rounded-[8px] bg-accent px-3 py-1.5 text-[12.5px] font-extrabold text-white hover:opacity-90"
-                >
-                  {label}
-                </a>
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+    </Panel>
   );
 }
 
@@ -194,7 +185,6 @@ export default async function ConnectPage({
         : null;
 
   if (session.mode !== "supabase") {
-    // DEMO MODE — chưa có Supabase thì chưa lưu được token ở đâu cả.
     return (
       <>
         <div className="mb-3 text-sm font-bold text-amber">DEMO · Chưa cấu hình Supabase</div>
@@ -233,13 +223,14 @@ export default async function ConnectPage({
 
   const needing = shops.filter((s) => s.hasToken && (s.needsReauth || s.isExpired)).length;
   const notConnected = shops.filter((s) => !s.hasToken).length;
+  const prodCount = shops.filter((s) => (s.dataSource ?? "mock") !== "mock").length;
 
   return (
     <>
       <PageHeader
         title="Kết nối shop Amazon"
-        sub={`Trình kết nối · SOP-11 · ${shops.length} shop`}
-        desc="Refresh token lưu trong DB (không nằm trong biến môi trường). Amazon không báo khi token hết hạn — trang này nhắc trước."
+        sub={`SOP-11 · ${prodCount} gian hàng chính · ${shops.length} tổng (có ${shops.filter((s) => (s.dataSource ?? "mock") === "mock").length} demo)`}
+        desc="Refresh token lưu trong DB. Đã nhóm theo Seller ID + thêm version=beta (fix MD1000) + validate redirect_uri 100% (fix MD9100). Tên kỹ thuật A1/B1/P1 nên đổi thành tên thân thiện."
       />
 
       {banner ? (
@@ -267,19 +258,19 @@ export default async function ConnectPage({
       ) : null}
 
       <Panel
-        title="Shop đã cấp quyền cho VEXIM"
+        title="Gian hàng Amazon — đã nhóm theo Seller để chống ghi đè + fix MD1000/MD9100"
         hint={
           needing > 0
             ? `${needing} shop cần authorize lại`
             : notConnected > 0
-              ? `${notConnected} shop chưa kết nối`
+              ? `${notConnected} shop chưa kết nối · ${prodCount} production`
               : "tất cả token còn hiệu lực"
         }
       >
-        <ShopTable shops={shops} />
+        <ShopConnectTable shops={shops} />
       </Panel>
 
-      <Panel title="Trình tự kết nối" hint="đúng luồng OAuth 2.0 / Login with Amazon">
+      <Panel title="Trình tự kết nối" hint="đúng luồng OAuth 2.0 / Login with Amazon + version=beta">
         <ol className="flex flex-col">
           {STEPS.map((s) => {
             const done = shops.length > 0 && shops.every((shop) => s.live(shop));
@@ -308,6 +299,48 @@ export default async function ConnectPage({
       </Panel>
 
       <EnvPanel />
+
+      <Panel title="Đề xuất đổi tên thân thiện (thay A1/B1/P1)" hint="chạy 1 lần trong Supabase SQL">
+        <div className="text-[12.5px] leading-relaxed">
+          <div className="mb-2 text-soft">
+            Mã kỹ thuật A1/B1/P1 không giúp người vận hành nhận biết gian hàng. Đề xuất đổi{" "}
+            <code>display_name</code> thành tên thân thiện trong DB:
+          </div>
+          <pre className="overflow-x-auto rounded-[8px] bg-[#f6f7f9] p-3 text-[11.5px]">
+{`-- Đổi tên P1·US / P2·CA thành tên dễ hiểu
+update connections.seller_accounts
+set display_name = case
+  when marketplace = 'ATVPDKIKX0DER' then 'VEXIM US - Chính'
+  when marketplace = 'A2EUQ1WTGCTBG2' then 'VEXIM CA - Canada'
+  else display_name
+end
+where seller_id = 'AQMVYI4HJTI4C';
+
+-- Ẩn shop mock khỏi production view (hoặc xóa)
+update connections.seller_accounts set status='revoked' where data_source='mock';`}
+          </pre>
+          <div className="mt-2 text-[11.5px] text-soft">
+            Sau khi đổi, UI sẽ hiện &quot;VEXIM US - Chính 🇺🇸 US&quot; thay vì &quot;P1 · US&quot;, giảm nhầm lẫn.
+          </div>
+        </div>
+      </Panel>
+
+      <Panel title="Fix MD9100 - This app can't connect right now" hint="checklist chi tiết">
+        <div className="text-[12.5px] leading-relaxed">
+          <div className="font-bold">MD9100 thường do 2 nguyên nhân:</div>
+          <ol className="mt-2 list-decimal pl-5">
+            <li className="mb-2">
+              <b>Redirect URI lệch 100% (khả năng cao nhất):</b> Vào <code>Amazon Developer Console → Apps & Services → LWA Credentials → Allowed Return URLs</code> so sánh với env <code>AMAZON_SP_API_REDIRECT_URI</code> trên Vercel. Phải khớp từng chữ cái, bao gồm https và dấu / cuối. Mở <a href="/api/oauth/amazon/diag" className="text-accent underline" target="_blank">/api/oauth/amazon/diag</a> để xem validation + close matches (gần giống nhưng lệch /).
+            </li>
+            <li className="mb-2">
+              <b>App Status & Regions:</b> App ID <code>amzn1.sp.solution.ee3dce31...</code> đang Draft hay Published? Nếu Draft/Private, Seller email đăng nhập phải trong <code>Roles → Test Accounts</code>. Region phải <b>NA</b> cho US/CA (check env <code>AMAZON_SP_API_REGION=NA</code> và Console chọn North America).
+            </li>
+          </ol>
+          <div className="mt-2 text-soft">
+            Log <code>[OAuth Start]</code> trong Vercel Logs sẽ hiện URI thực tế gửi sang Amazon để đối soát. Nếu đã sửa Console, đợi vài phút để Amazon cache refresh.
+          </div>
+        </div>
+      </Panel>
     </>
   );
 }

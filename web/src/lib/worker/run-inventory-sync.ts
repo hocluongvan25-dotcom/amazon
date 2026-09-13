@@ -212,6 +212,19 @@ export async function runInventorySyncAll(
         now,
       });
 
+      // Module 0 — ghi mức dùng SP-API cho màn /module0/api-usage
+      try {
+        const day = now.toISOString().slice(0, 10);
+        await db.recordApiUsage({
+          sellerAccountId: shop.id,
+          day,
+          apiGroup: "fba_inventory",
+          calls: Math.max(1, Math.ceil(report.skusProcessed / 50)),
+        });
+      } catch {
+        // không chặn luồng chính nếu ghi api_usage fail
+      }
+
       for (const a of report.alerts) {
         await db.upsertAlert({
           sellerAccountId: shop.id,

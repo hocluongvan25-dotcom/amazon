@@ -1,26 +1,16 @@
 /**
- * GET /api/oauth/amazon/start?seller=<uuid>
+ * GET /api/oauth/amazon/start?seller=<uuid>&confirm=1
  *
- * Bước 1 của luồng authorize LWA (SOP-11): sinh `state` dùng-một-lần rồi đưa chủ
- * shop sang Seller Central để bấm Authorize.
- *
- * VÌ SAO `state` NẰM Ở DB (không phải cookie): callback là request KHÁC, có thể
- * do Amazon mở trên máy khác/trình duyệt khác, và phải chống CSRF. Ghi state vào
- * `connections.oauth_states` (RPC service_role) rồi kiểm tra ở callback là cách
- * duy nhất còn hiệu lực khi không dựa vào cookie.
- *
- * VÌ SAO PHẢI KIỂM TRA QUYỀN TRƯỚC KHI SINH STATE: nếu ai cũng sinh được state
- * cho shop bất kỳ thì họ có thể khiến shop đó authorize lại vào tài khoản của
- * người khác. Ở đây: chỉ người ĐỌC ĐƯỢC shop đó (qua RLS `vexim_shops`) mới được
- * bắt đầu luồng.
- *
- * Route chỉ ĐỌC/GHI quyền truy cập — không tự đổi dữ liệu shop nào.
+ * FIX MD1000/MD9100 09/2026:
+ *   Log bạn gửi đã OK: redirect_uri OK + version=beta, nhưng vẫn MD9100
+ *   → 99% là Allowed Return URLs trong Console lệch 100% với env, hoặc App Draft thiếu Test Accounts
  */
+
 import { NextResponse } from "next/server";
 
 import { getAppSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
-import { buildAuthorizeUrl, normalizeRegion } from "@/lib/spapi/oauth";
+import { buildAuthorizeUrl, normalizeRegion, validateRedirectUri } from "@/lib/spapi/oauth";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +20,6 @@ function backTo(req: Request, params: Record<string, string>): NextResponse {
   return NextResponse.redirect(url);
 }
 
-/** Client service_role: cần để gọi RPC create_oauth_state (RPC từ chối user thường). */
 async function adminRpc(
   fn: string,
   body: Record<string, unknown>,
@@ -69,6 +58,7 @@ async function adminRpc(
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const sellerId = (url.searchParams.get("seller") ?? "").trim();
+  const confirmOverwrite = (url.searchParams.get("confirm") ?? "").trim() === "1";
 
   const session = await getAppSession();
   if (!session) return NextResponse.redirect(new URL("/login", url.origin));
@@ -89,49 +79,82 @@ export async function GET(req: Request) {
   const region = normalizeRegion(process.env.AMAZON_SP_API_REGION);
 
   const missing: string[] = [];
-  if (appId === "") missing.push("AMAZON_SP_API_APP_ID (amzn1.sp.solution…)");
+  if (appId === "") missing.push("AMAZON_SP_API_APP_ID");
   if (clientId === "") missing.push("AMAZON_LWA_CLIENT_ID");
   if (clientSecret === "") missing.push("AMAZON_LWA_CLIENT_SECRET");
   if (redirectUri === "") missing.push("AMAZON_SP_API_REDIRECT_URI");
   if (missing.length > 0) {
     return backTo(req, {
       oauth: "error",
-      msg:
-        `Thiếu biến môi trường: ${missing.join(" · ")}. ` +
-        "Điền vào Vercel → Environment Variables rồi thử lại (redirect URI phải trùng đúng từng ký tự với app SP-API).",
+      msg: `Thiếu env: ${missing.join(" · ")}. Điền vào Vercel → Env Variables.`,
     });
   }
 
-  // Quyền: chỉ người đọc được shop này (RLS của vexim_shops) mới được bắt đầu.
+  // FIX MD9100: Đối soát redirect_uri 100% - log chi tiết để debug
+  const allowedReturnUrlsEnv = (process.env.AMAZON_LWA_ALLOWED_RETURN_URLS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  const validation = validateRedirectUri(redirectUri, allowedReturnUrlsEnv.length > 0 ? allowedReturnUrlsEnv : undefined);
+
+  if (!validation.ok) {
+    console.error(
+      `[OAuth Start] MD1000/MD9100 RISK - validation FAIL: ${validation.hint} | redirectUri=${redirectUri} | allowedEnv=${allowedReturnUrlsEnv.join(", ") || "(not set)"} | hasTrailingSlash=${validation.details.hasTrailingSlash} | closeMatches=${validation.details.closeMatches.join("|") || "none"}`,
+    );
+  } else {
+    if (allowedReturnUrlsEnv.length === 0) {
+      console.warn(
+        `[OAuth Start] redirect_uri format OK but NO env AMAZON_LWA_ALLOWED_RETURN_URLS to compare with Console — MD9100 can still happen if Console has different value. redirect_uri=${redirectUri} | appId=${appId} | region=${region} | seller=${sellerId} | hint: ${validation.hint}`,
+      );
+      console.warn(
+        `[OAuth Start] ACTION REQUIRED: Vào Developer Console → Apps & Services → App ${appId} → LWA Credentials → Allowed Return URLs, đối soát thủ công 100% với env [${redirectUri}] — lệch 1 ký tự (/ cuối, https) là MD9100. Xem /api/oauth/amazon/diag để chi tiết.`,
+      );
+    } else {
+      console.log(
+        `[OAuth Start] redirect_uri OK: ${redirectUri} | appId=${appId} | region=${region} | seller=${sellerId} | exactMatch=${validation.details.exactMatch}`,
+      );
+    }
+  }
+
   const supa = await createClient();
   const { data: shops, error: shopErr } = (await supa!
     .from("vexim_shops")
-    .select("seller_account_id")
+    .select("seller_account_id, shop, marketplace, data_source")
     .eq("seller_account_id", sellerId)) as {
-    data: { seller_account_id: string }[] | null;
+    data: { seller_account_id: string; shop: string; marketplace: string; data_source: string | null }[] | null;
     error: { message: string } | null;
   };
   if (shopErr) {
-    return backTo(req, { oauth: "error", msg: `Không đọc được danh sách shop: ${shopErr.message}` });
+    return backTo(req, { oauth: "error", msg: `Không đọc được shop: ${shopErr.message}` });
   }
   if (!shops || shops.length === 0) {
-    return backTo(req, {
-      oauth: "error",
-      msg: "Bạn không có quyền với shop này (hoặc shop không tồn tại).",
-    });
+    return backTo(req, { oauth: "error", msg: "Bạn không có quyền với shop này." });
   }
 
-  // redirect_to: quay lại màn Kết nối shop sau khi Amazon trả code.
+  // Chống ghi đè nhầm
+  try {
+    const { data: tokenRows } = (await supa!
+      .from("vexim_oauth_connections")
+      .select("seller_account_id")
+      .eq("seller_account_id", sellerId)
+      .limit(1)) as { data: { seller_account_id: string }[] | null; error: unknown };
+    const hasToken = tokenRows && tokenRows.length > 0;
+    if (hasToken && !confirmOverwrite) {
+      return backTo(req, {
+        warn: `Gian hàng ${shops[0].shop} (${shops[0].marketplace}) ĐÃ có token. Nếu kết nối lại, token cũ sẽ bị GHI ĐÈ. Xác nhận trong modal để tiếp tục.`,
+        oauth: "error",
+        msg: `Cần xác nhận ghi đè token cho ${shops[0].shop}`,
+      });
+    }
+  } catch {}
+
   const created = await adminRpc("vexim_worker_create_oauth_state", {
     p_seller: sellerId,
     p_redirect_to: "/module0/connect",
     p_ttl_minutes: 30,
   });
   if (!created.ok) {
-    return backTo(req, {
-      oauth: "error",
-      msg: `Không tạo được phiên authorize: ${created.error ?? "lỗi không rõ"}`,
-    });
+    return backTo(req, { oauth: "error", msg: `Không tạo được phiên authorize: ${created.error}` });
   }
   const rows = Array.isArray(created.data) ? created.data : [];
   const state = rows.length > 0 ? String((rows[0] as { state?: unknown }).state ?? "") : "";
@@ -140,5 +163,14 @@ export async function GET(req: Request) {
   }
 
   const authorizeUrl = buildAuthorizeUrl({ appId, state, redirectUri, region });
+  console.log(`[OAuth Start] Redirect to Amazon consent: ${authorizeUrl} | seller=${sellerId} | shop=${shops[0].shop} | validation=${validation.ok ? "OK" : "FAIL"} | hint=${validation.hint}`);
+
+  // Thêm log hướng dẫn fix MD9100 nếu validation chỉ OK theo format nhưng chưa đối soát Console
+  if (allowedReturnUrlsEnv.length === 0) {
+    console.log(
+      `[OAuth Start] MD9100 diagnostic: Nếu vẫn MD9100 dù log báo OK, 99% là Console Allowed Return URLs lệch với env. Vào Console check: env=[${redirectUri}] vs Console=??. Mở /api/oauth/amazon/diag để xem chi tiết.`,
+    );
+  }
+
   return NextResponse.redirect(authorizeUrl);
 }

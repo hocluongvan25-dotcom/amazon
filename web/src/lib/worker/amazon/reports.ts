@@ -3,12 +3,16 @@
  *
  * VÌ SAO CẦN (Module 3 nâng cao, đợt 2):
  *   Bốn report nuôi các màn I2/I4 và phí theo FC đều KHÔNG có API realtime:
- *     • GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA      → phân bổ tồn theo FC
- *     • GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA     → lịch sử nhận hàng
+ *     • GET_LEDGER_SUMMARY_VIEW_DATA (thay cho DEPRECATED GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA) → phân bổ tồn theo FC
+ *     • GET_LEDGER_DETAIL_VIEW_DATA (thay cho DEPRECATED GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA) → lịch sử nhận hàng
  *     • GET_FBA_STORAGE_FEE_CHARGES_DATA                → phí lưu kho theo FC
  *     • GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA  → phí inbound sai quy cách
  *   Trước đây phải vào Seller Central tải file TSV rồi nạp tay. Client này để
  *   Vercel Cron tự kéo mỗi ngày (route /api/cron/report-pull).
+ *
+ * FIX 400 09/2026:
+ *   2 report FBA cũ bị Amazon deprecated từ 31/01/2023 → 400 InvalidInput "Report type is deprecated"
+ *   → Migrate sang ledger reports với reportOptions, và cải thiện log details để Worker console thấy lý do.
  *
  * BA ĐẶC THÙ PHẢI XỬ LÝ (nếu không cron sẽ "xanh giả"):
  *   1. BẤT ĐỒNG BỘ: createReport chỉ trả reportId. Report chạy IN_QUEUE →
@@ -64,8 +68,8 @@ export type ReportDocumentInfo = {
   length?: number | null;
 };
 
-/** Lỗi SP-API có cấu trúc — giữ code để tầng trên phân biệt trần tốc độ. */
-export type SpApiError = { code: string; message: string; status: number };
+/** Lỗi SP-API có cấu trúc — giữ code + details để tầng trên phân biệt trần tốc độ và log rõ 400. */
+export type SpApiError = { code: string; message: string; status: number; details?: string };
 
 export class SpApiRequestError extends Error {
   readonly status: number;
@@ -73,16 +77,21 @@ export class SpApiRequestError extends Error {
   readonly details?: string;
 
   constructor(err: SpApiError) {
-    super(`SP-API ${err.status} ${err.code}: ${err.message}`);
+    // FIX 3: log chi tiết Worker console — Amazon trả errors[0].details với lý do 400 InvalidInput
+    // Ví dụ: "Report type GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA is deprecated, please use GET_LEDGER_SUMMARY_VIEW_DATA"
+    // hoặc "Missing required reportOptions: aggregateByLocation, aggregatedByTimePeriod"
+    // hoặc "Invalid reportOptions: aggregatedByTimePeriod must be DAILY for FC"
+    const detailSuffix = err.details ? ` | details: ${err.details}` : "";
+    super(`SP-API ${err.status} ${err.code}: ${err.message}${detailSuffix}`);
     this.name = "SpApiRequestError";
     this.status = err.status;
     this.code = err.code;
-    this.details = err.message;
+    this.details = err.details ?? err.message;
   }
 
   /** Trần tốc độ / hạn mức report — KHÔNG phải lỗi cấu hình, lần chạy sau thử lại. */
   get isThrottled(): boolean {
-    return this.status === 429 || /quota|throttl|rate.?limit/i.test(this.code + this.details);
+    return this.status === 429 || /quota|throttl|rate.?limit/i.test(this.code + (this.details ?? ""));
   }
 }
 
@@ -117,7 +126,7 @@ export class ReportsClient {
   async createReport(params: {
     reportType: string;
     marketplaceIds: string[];
-    /** ISO 8601; report dạng snapshot (current inventory) thì bỏ qua */
+    /** ISO 8601 UTC chuẩn — ví dụ 2023-01-15T00:00:00.000Z */
     dataStartTime?: string | null;
     dataEndTime?: string | null;
     reportOptions?: Record<string, string>;
@@ -127,8 +136,10 @@ export class ReportsClient {
       marketplaceIds: params.marketplaceIds,
     };
     // Chỉ gửi khi có giá trị: gửi rỗng khiến Amazon trả 400 InvalidInput.
+    // FIX 2: dataStartTime/dataEndTime phải là ISO 8601 UTC chuẩn — dùng toISOString() (có ms)
     if (params.dataStartTime) body.dataStartTime = params.dataStartTime;
     if (params.dataEndTime) body.dataEndTime = params.dataEndTime;
+    // FIX 1: reportOptions bắt buộc cho ledger reports — thiếu sẽ 400 "Missing reportOptions"
     if (params.reportOptions && Object.keys(params.reportOptions).length > 0) {
       body.reportOptions = params.reportOptions;
     }
@@ -137,7 +148,7 @@ export class ReportsClient {
     if (!reportId) {
       throw new Error(
         `createReport(${params.reportType}): Amazon không trả reportId — phản hồi: ` +
-          `${JSON.stringify(json).slice(0, 200)}`,
+          `${JSON.stringify(json).slice(0, 500)}`,
       );
     }
     return { reportId };
@@ -238,7 +249,7 @@ export class ReportsClient {
   }
 
   // --------------------------------------------------------------------------
-  // HTTP lõi: token LWA + retry 429/5xx + lỗi có cấu trúc
+  // HTTP lõi: token LWA + retry 429/5xx + lỗi có cấu trúc + log chi tiết 400
   // --------------------------------------------------------------------------
   private async request<T>(
     method: "GET" | "POST",
@@ -276,9 +287,11 @@ export class ReportsClient {
         const retryAfter = Number(res.headers.get("retry-after") ?? 0);
         const waitMs = retryAfter > 0 ? retryAfter * 1000 : lastWait;
         const text = await safeText(res);
+        const parsed = parseSpApiErrorJson(text);
         lastError = new SpApiRequestError({
-          code: extractErrorCode(text) ?? (res.status === 429 ? "QuotaExceeded" : "ServiceUnavailable"),
-          message: text.slice(0, 300),
+          code: parsed.code ?? extractErrorCode(text) ?? (res.status === 429 ? "QuotaExceeded" : "ServiceUnavailable"),
+          message: parsed.message ?? text.slice(0, 500),
+          details: parsed.details,
           status: res.status,
         });
         // Hết lượt retry → ném để job ghi 'failed' kèm lỗi thật (không im lặng).
@@ -290,9 +303,21 @@ export class ReportsClient {
 
       if (!res.ok) {
         const text = await safeText(res);
+        const parsed = parseSpApiErrorJson(text);
+        // FIX 3: đọc log Worker console chi tiết 400 — parse errors[0].details từ Amazon
+        // Ví dụ: {"errors":[{"code":"InvalidInput","message":"Invalid Input","details":"Report type ... deprecated"}]}
+        // Trước chỉ slice 500 ký tự, mất details → Worker console không biết lý do
+        // Giờ giữ full details để log ra console CloudWatch/Vercel
+        const fullBodyForLog = text.length > 2000 ? text.slice(0, 2000) + "…(truncated)" : text;
+        // Nếu là 400, log thêm body gốc để debug reportType typo vs enum
+        if (res.status === 400) {
+          const reqBodyLog = body !== undefined ? JSON.stringify(body).slice(0, 1000) : "(no body - GET)";
+          console.error(`[ReportsClient] 400 InvalidInput body=${fullBodyForLog} requestBody=${reqBodyLog}`);
+        }
         throw new SpApiRequestError({
-          code: extractErrorCode(text) ?? `HTTP_${res.status}`,
-          message: text.slice(0, 500) || res.statusText,
+          code: parsed.code ?? extractErrorCode(text) ?? `HTTP_${res.status}`,
+          message: parsed.message ?? (text.slice(0, 500) || res.statusText),
+          details: parsed.details ?? text.slice(0, 1000),
           status: res.status,
         });
       }
@@ -353,6 +378,32 @@ async function safeText(res: Response): Promise<string> {
 function extractErrorCode(text: string): string | null {
   const m = text.match(/"code"\s*:\s*"([^"]+)"/);
   return m ? m[1] : null;
+}
+
+/**
+ * FIX 3: Parse lỗi SP-API chuẩn — Amazon trả dạng:
+ * {
+ *   "errors": [
+ *     {"code":"InvalidInput","message":"Invalid Input","details":"Report type ... is deprecated, please use ..."}
+ *   ]
+ * }
+ * Cần lấy cả details để biết lý do 400: typo reportType vs enum, thiếu reportOptions, sai date format...
+ */
+function parseSpApiErrorJson(text: string): { code?: string; message?: string; details?: string } {
+  try {
+    const json = JSON.parse(text) as { errors?: Array<{ code?: string; message?: string; details?: string }> };
+    const first = json?.errors?.[0];
+    if (first) {
+      return {
+        code: first.code,
+        message: first.message,
+        details: first.details,
+      };
+    }
+  } catch {
+    // không phải JSON → fallback regex
+  }
+  return {};
 }
 
 /**

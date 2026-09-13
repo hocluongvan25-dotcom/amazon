@@ -1031,6 +1031,9 @@ export interface DbAdapter {
   markOauthNotice(sellerAccountId: string): Promise<{ rotateReminderSent: boolean }>;
   /** Shop sắp/đã hết hạn token — cron nhắc re-auth dùng hàm này (service_role). */
   listOauthSoon(days?: number | null): Promise<OauthSoonRow[]>;
+
+  /** Module 0 — ghi mức dùng API (SP-API, Ads) theo ngày/shop/nhóm */
+  recordApiUsage(input: { sellerAccountId: string; day: string; apiGroup: string; calls?: number }): Promise<void>;
 }
 
 /* ---- helper cho luật nhập report PHÍ (0019) trong MockDbAdapter ---- */
@@ -1261,6 +1264,7 @@ export class MockDbAdapter implements DbAdapter {
     expiresAt: string;
     usedAt: string | null;
   }[] = [];
+  apiUsage: { sellerAccountId: string; day: string; apiGroup: string; calls: number }[] = [];
   private oauthStateSeq = 0;
   private sellingDays: Record<string, number[]> = {};
 
@@ -2391,5 +2395,16 @@ export class MockDbAdapter implements DbAdapter {
         };
       })
       .sort((a, b) => String(a.expiresAt).localeCompare(String(b.expiresAt)));
+  }
+
+  async recordApiUsage(input: { sellerAccountId: string; day: string; apiGroup: string; calls?: number }): Promise<void> {
+    const calls = Math.max(1, Math.round(input.calls ?? 1));
+    const key = `${input.sellerAccountId}|${input.day}|${input.apiGroup}`;
+    const idx = this.apiUsage.findIndex((u) => `${u.sellerAccountId}|${u.day}|${u.apiGroup}` === key);
+    if (idx >= 0) {
+      this.apiUsage[idx].calls += calls;
+    } else {
+      this.apiUsage.push({ sellerAccountId: input.sellerAccountId, day: input.day, apiGroup: input.apiGroup, calls });
+    }
   }
 }

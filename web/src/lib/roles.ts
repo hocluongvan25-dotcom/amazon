@@ -148,7 +148,7 @@ export const NAV: { group: string; items: NavItem[] }[] = [
     group: "Hạ tầng vận hành",
     items: [
       { href: "/module0/connect", label: "Kết nối shop", icon: "🔌", personas: ["ceo"] },
-      { href: "/module0/sync-health", label: "Sức khỏe đồng bộ", icon: "❤️‍🩹", personas: ["ceo"] },
+      { href: "/module0/sync-health", label: "Sức khỏe đồng bộ", icon: "🩺", personas: ["ceo"] },
       { href: "/module0/api-usage", label: "Mức dùng API", icon: "🧮", personas: ["ceo"] },
       { href: "/module0/audit-log", label: "Nhật ký thao tác", icon: "🧾", personas: ["ceo"] },
       { href: "/module0/users", label: "Người dùng & quyền", icon: "👥", personas: ["ceo"] },

@@ -250,33 +250,51 @@ export function UsersBoard({ demo, users, me, departments, shops, audit }: Props
 
       <Panel
         title="Nhật ký thao tác quản trị"
-        hint={demo ? "trống ở chế độ demo" : "iam.audit_logs · module iam (append-only)"}
+        hint={demo ? "trống ở chế độ demo" : "iam.audit_logs · module iam (append-only) — đã chuyển sang trang riêng để khỏi dài"}
       >
         {audit.length === 0 ? (
           <p className="text-[12.5px] text-soft">
             {demo
-              ? "Chế độ demo không có nhật ký thật. Khi chạy Supabase, mọi thao tác mời/sửa/khóa/cấp quyền được ghi tại đây."
+              ? "Chế độ demo không có nhật ký thật. Khi chạy Supabase, mọi thao tác mời/sửa/khóa/cấp quyền được ghi tại trang Nhật ký."
               : "Chưa có thao tác quản trị nào được ghi."}
           </p>
         ) : (
-          <ul className="divide-y divide-[#f0f2f6]">
-            {audit.map((a) => (
-              <li key={a.id} className="py-2 text-[12.5px]">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Chip tone={a.result === "ok" ? "green" : "red"}>
-                    {auditActionLabel(a.action)}
-                  </Chip>
-                  <b>{a.entity ?? "—"}</b>
-                  <span className="text-soft">
-                    bởi {a.actorName ?? a.actorEmail ?? "không rõ"} · {relativeTime(a.createdAt)}
-                  </span>
-                </div>
-                <div className="mt-1 text-[12px] text-muted">
-                  {auditDiff(a.beforeValue, a.afterValue)}
-                </div>
-              </li>
-            ))}
-          </ul>
+          <>
+            <div className="flex flex-wrap items-center gap-3 text-[12.5px]">
+              <span className="font-semibold text-muted">
+                {audit.length} thao tác gần nhất đã ghi (hiển thị 3 mẫu):
+              </span>
+              <a
+                href="/module0/audit-log"
+                className="inline-flex h-7 items-center rounded-full bg-ink px-3 text-[11.5px] font-bold text-white hover:bg-[#232f3e]"
+              >
+                Xem toàn bộ nhật ký → /module0/audit-log
+              </a>
+            </div>
+            <ul className="mt-3 divide-y divide-[#f0f2f6]">
+              {audit.slice(0, 3).map((a) => (
+                <li key={a.id} className="py-2 text-[12.5px]">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Chip tone={a.result === "ok" ? "green" : "red"}>
+                      {auditActionLabel(a.action)}
+                    </Chip>
+                    <b>{a.entity ?? "—"}</b>
+                    <span className="text-soft">
+                      bởi {a.actorName ?? a.actorEmail ?? "không rõ"} · {relativeTime(a.createdAt)}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-[12px] text-muted">
+                    {auditDiff(a.beforeValue, a.afterValue)}
+                  </div>
+                </li>
+              ))}
+            </ul>
+            {audit.length > 3 ? (
+              <p className="mt-2 text-[11.5px] text-soft">
+                …và {audit.length - 3} thao tác khác. Mở trang Nhật ký để lọc, phân trang và xem chi tiết đầy đủ (tránh để trang Người dùng dài hàng trăm dòng).
+              </p>
+            ) : null}
+          </>
         )}
       </Panel>
 

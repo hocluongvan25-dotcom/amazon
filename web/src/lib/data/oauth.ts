@@ -11,31 +11,22 @@
  * Shop CHƯA từng authorize sẽ không có dòng trong view token ⇒ phải LEFT JOIN
  * bằng tay: nếu chỉ đọc view token thì shop mới hoàn toàn biến mất khỏi màn
  * hình, đúng lúc cần "Kết nối" nhất.
+ *
+ * FIX UX SOP-11 (09/2026): tách pure helpers sang oauth-shared.ts để client component không kéo next/headers
  */
 
 import { createClient } from "@/lib/supabase/server";
 import { readAll } from "./inventory-model";
+import type { ConnectShopRow } from "./oauth-shared";
+import { MARKETPLACE_META, marketplaceLabel, connectStatusOf, groupBySeller } from "./oauth-shared";
 
-export type ConnectShopRow = {
-  sellerAccountId: string;
-  shop: string;
-  marketplace: string;
-  status: string | null;
-  hasToken: boolean;
-  isActive: boolean;
-  isExpired: boolean;
-  needsReauth: boolean;
-  daysLeft: number | null;
-  expiresAt: string | null;
-  authorizedAt: string | null;
-  noticeDays: number | null;
-  refreshCount: number | null;
-  rotateReminderSent: boolean;
-  noticeSentAt: string | null;
-  adsProfiles: number;
-};
+// Re-export để các file cũ vẫn import từ oauth.ts được
+export type { ConnectShopRow } from "./oauth-shared";
+export { MARKETPLACE_META, marketplaceLabel, connectStatusOf, groupBySeller };
 
+// Cố gắng lấy seller_id và display_name nếu view đã được migrate (0024), fallback về view cũ
 const SHOP_SELECT = "seller_account_id,shop,marketplace,status,data_source";
+const SHOP_SELECT_V2 = "seller_account_id,shop,marketplace,status,data_source,seller_id,display_name";
 const TOKEN_SELECT =
   "seller_account_id,shop,is_active,is_expired,needs_reauth,days_left,expires_at," +
   "authorized_at,notice_days,refresh_count,rotate_reminder_sent,notice_sent_at,ads_profiles";
@@ -44,12 +35,17 @@ export async function readConnectShops(): Promise<ConnectShopRow[]> {
   const client = await createClient();
   if (!client) throw new Error("Supabase unavailable");
 
-  const shops = await readAll<Record<string, unknown>>((from, to) =>
-    client.from("vexim_shops").select(SHOP_SELECT).order("shop").range(from, to),
-  );
+  let shops: Record<string, unknown>[] = [];
+  try {
+    shops = await readAll<Record<string, unknown>>((from, to) =>
+      client.from("vexim_shops").select(SHOP_SELECT_V2).order("shop").range(from, to),
+    );
+  } catch {
+    shops = await readAll<Record<string, unknown>>((from, to) =>
+      client.from("vexim_shops").select(SHOP_SELECT).order("shop").range(from, to),
+    );
+  }
 
-  // View token có thể chưa tồn tại (chưa chạy 0020) — khi đó màn hình vẫn phải
-  // hiện danh sách shop kèm trạng thái "chưa kết nối", KHÔNG sập cả trang.
   let tokens: Record<string, unknown>[] = [];
   try {
     tokens = await readAll<Record<string, unknown>>((from, to) =>
@@ -65,10 +61,17 @@ export async function readConnectShops(): Promise<ConnectShopRow[]> {
     .map((s) => {
       const id = String(s.seller_account_id);
       const t = byId.get(id);
+      const marketplaceId = String(s.marketplace ?? "");
+      const displayName = String((s as any).display_name ?? s.shop ?? id);
+      const sellerId = (s as any).seller_id ? String((s as any).seller_id) : null;
       return {
         sellerAccountId: id,
         shop: String(s.shop ?? id),
-        marketplace: String(s.marketplace ?? ""),
+        marketplace: marketplaceId,
+        marketplaceId,
+        sellerId,
+        displayName,
+        dataSource: s.data_source ? String(s.data_source) : null,
         status: s.status ? String(s.status) : null,
         hasToken: t !== undefined,
         isActive: t?.is_active === true,
@@ -88,35 +91,4 @@ export async function readConnectShops(): Promise<ConnectShopRow[]> {
         adsProfiles: t?.ads_profiles === undefined ? 0 : Number(t.ads_profiles ?? 0),
       };
     });
-}
-
-/** Trạng thái hiển thị — gom luật vào một chỗ để UI không tự đoán. */
-export function connectStatusOf(row: ConnectShopRow):
-  | { label: string; tone: "green" | "amber" | "red" | "gray"; hint: string } {
-  if (!row.hasToken) {
-    return {
-      label: "Chưa kết nối",
-      tone: "gray",
-      hint: "Shop chưa từng authorize app — bấm Kết nối để lấy refresh token.",
-    };
-  }
-  if (row.isExpired || !row.isActive) {
-    return {
-      label: "Token hết hạn",
-      tone: "red",
-      hint: "Refresh token đã hết hạn/thu hồi: mọi module đang ngừng đồng bộ. Phải authorize lại.",
-    };
-  }
-  if (row.needsReauth) {
-    return {
-      label: `Sắp hết hạn (${row.daysLeft ?? "?"} ngày)`,
-      tone: "amber",
-      hint: `Còn ${row.daysLeft ?? "?"} ngày (nhắc trước ${row.noticeDays ?? 30} ngày) — nên kết nối lại trước khi hết.`,
-    };
-  }
-  return {
-    label: "Đang hoạt động",
-    tone: "green",
-    hint: "Token còn hiệu lực, đồng bộ chạy bình thường.",
-  };
 }

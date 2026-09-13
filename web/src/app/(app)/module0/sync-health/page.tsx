@@ -1,6 +1,6 @@
-import { Chip, MockDataNotice, NoAccess, PageHeader, Panel, tableCls } from "@/components/ui";
+import { Chip, NoAccess, PageHeader, Panel, tableCls } from "@/components/ui";
 import { requireSession } from "@/lib/auth/session";
-import { syncJobs } from "@/lib/data/mock";
+import { createClient } from "@/lib/supabase/server";
 import { readReportRequests } from "@/lib/data/fees";
 import { mapReportRequestRow, type ReportRequestUiRow } from "@/lib/data/fees-model";
 import type { PersonaKey } from "@/lib/roles";
@@ -21,21 +21,81 @@ const toneChip: Record<string, "green" | "amber" | "gray" | "red"> = {
   down: "red",
 };
 
+type SyncJobRow = {
+  id: string;
+  shop: string;
+  seller_account_id: string;
+  job_type: string;
+  status: string;
+  attempts: number | null;
+  last_error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string | null;
+  age_minutes: number | null;
+};
+
+async function readSyncJobs(): Promise<
+  | { ok: true; jobs: SyncJobRow[] }
+  | { ok: false; message: string }
+> {
+  const client = await createClient();
+  if (!client) return { ok: false, message: "Supabase unavailable" };
+  const { data, error } = await client
+    .from("vexim_sync_jobs")
+    .select("id,seller_account_id,shop,job_type,status,attempts,last_error,started_at,finished_at,created_at,age_minutes")
+    .order("started_at", { ascending: false })
+    .limit(100);
+  if (error) return { ok: false, message: error.message };
+  return { ok: true, jobs: (data ?? []) as SyncJobRow[] };
+}
+
+function fmtAge(min: number | null): string {
+  if (min === null || min === undefined) return "—";
+  const m = Math.round(min);
+  if (m < 60) return `${m} phút trước`;
+  if (m < 1440) return `${Math.floor(m / 60)} giờ ${m % 60} phút`;
+  return `${Math.floor(m / 1440)} ngày`;
+}
+
+function fmtTime(iso: string | null): string {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString("vi-VN", { hour12: false });
+  } catch {
+    return iso.slice(0, 19);
+  }
+}
+
 export default async function SyncHealthPage() {
   const session = await requireSession();
   if (!ALLOWED.includes(session.persona)) return <NoAccess />;
 
-  // 0019: cron Reports API ghi trạng thái mỗi lần yêu cầu report vào
-  // connections.report_requests. Đọc TÁCH BIỆT để trang này không sập khi DB
-  // chưa chạy 0019 (các panel sync_jobs vẫn là dữ liệu demo như trước).
+  // Sync jobs thật từ connections.sync_jobs (qua view vexim_sync_jobs)
+  let syncRows: SyncJobRow[] = [];
+  let syncFailed = false;
+  let syncNoSupabase = false;
+  let syncMessage = "";
+  if (session.mode === "supabase") {
+    const res = await readSyncJobs();
+    if (res.ok) syncRows = res.jobs;
+    else {
+      if (res.message === "Supabase unavailable") syncNoSupabase = true;
+      else {
+        syncFailed = true;
+        syncMessage = res.message;
+      }
+    }
+  }
+
+  // Report requests (đã thật từ trước)
   let reportRows: ReportRequestUiRow[] = [];
   let reportFailed = false;
   let reportNoSupabase = false;
   try {
     reportRows = (await readReportRequests()).map(mapReportRequestRow);
   } catch (err) {
-    // "Supabase unavailable" = app chưa cấu hình Supabase (chế độ demo).
-    // Lỗi khác = đã nối DB nhưng thiếu view/quyền (chưa chạy 0019).
     if (err instanceof Error && err.message === "Supabase unavailable") reportNoSupabase = true;
     else reportFailed = true;
   }
@@ -44,46 +104,80 @@ export default async function SyncHealthPage() {
 
   return (
     <>
-      {session.mode === "supabase" ? (
-        <MockDataNotice what={<>Riêng bảng **Job đồng bộ gần nhất** vẫn là dữ liệu minh hoạ (chưa có bảng `sync_jobs`
-        thật); panel "Yêu cầu report (Reports API)" bên dưới thì đọc THẬT từ
-        `connections.report_requests`.</>} />
-      ) : null}
       <PageHeader
         title="Sức khỏe đồng bộ"
-        sub="sync_jobs · notifications_log · cập nhật realtime"
+        sub="sync_jobs · report_requests · cập nhật realtime"
         desc="Trường hợp dữ liệu không mới phải thấy ngay tại đây: từng job, độ trễ, số lần retry, lỗi gần nhất."
       />
-      <Panel title="Job đồng bộ gần nhất" hint="mọi trang dashboard đọc dữ liệu sau khi job này xong">
-        <table className={tableCls.table}>
-          <thead>
-            <tr>
-              <th className={tableCls.th}>Job</th>
-              <th className={tableCls.th}>Shop</th>
-              <th className={tableCls.th}>Trạng thái</th>
-              <th className={`${tableCls.th} text-right`}>Chạy lúc</th>
-              <th className={tableCls.th}>Độ trễ</th>
-              <th className={`${tableCls.th} text-right`}>Retry</th>
-            </tr>
-          </thead>
-          <tbody>
-            {syncJobs.map((j) => (
-              <tr key={j.jobType + j.shop}>
-                <td className={`${tableCls.td} font-bold`}>{j.jobType}</td>
-                <td className={tableCls.td}>{j.shop}</td>
-                <td className={tableCls.td}>
-                  <Chip tone={statusChip[j.status]}>{j.statusLabel}</Chip>
-                </td>
-                <td className={tableCls.tdNum}>{j.lastRun}</td>
-                <td className={tableCls.td}>{j.latency}</td>
-                <td className={`${tableCls.tdNum} ${j.retries > 0 ? "font-bold text-amber" : ""}`}>
-                  {j.retries}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+
+      <Panel
+        title="Job đồng bộ gần nhất"
+        hint={
+          session.mode !== "supabase"
+            ? "chế độ demo — không có job thật"
+            : syncNoSupabase
+              ? "chưa nối Supabase"
+              : syncFailed
+                ? `không đọc được vexim_sync_jobs: ${syncMessage.slice(0, 120)}`
+                : `${syncRows.length} job gần nhất · connections.sync_jobs · worker ghi thật`
+        }
+      >
+        {session.mode !== "supabase" ? (
+          <p className="text-[13px] text-muted">
+            Chế độ demo không có job thật. Khi chạy production, worker ghi mỗi lần bắt đầu/kết thúc vào <code>connections.sync_jobs</code> và bảng này hiện ở đây.
+          </p>
+        ) : syncNoSupabase ? (
+          <p className="text-[13px] text-muted">
+            <b className="text-amber">Chưa nối Supabase</b> — không đọc được job thật.
+          </p>
+        ) : syncFailed ? (
+          <p className="text-[13px] text-muted">
+            <b className="text-amber">Không đọc được vexim_sync_jobs</b> — kiểm tra migration 0023 và RLS <code>rls_read_sync_jobs</code>. Worker vẫn ghi bằng service_role, nhưng view cần quyền <code>can_read_seller_account</code>.
+          </p>
+        ) : syncRows.length === 0 ? (
+          <p className="text-[13px] text-muted">
+            Chưa có job nào được ghi. Worker ghi <code>sync_jobs</code> mỗi khi chạy <code>inventory.pull</code>, <code>report.pull</code>, <code>ads.sync</code>… Kiểm tra cron và <code>seller_accounts data_source=production</code>.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className={tableCls.table}>
+              <thead>
+                <tr>
+                  <th className={tableCls.th}>Job</th>
+                  <th className={tableCls.th}>Shop</th>
+                  <th className={tableCls.th}>Trạng thái</th>
+                  <th className={`${tableCls.th} text-right`}>Bắt đầu</th>
+                  <th className={`${tableCls.th} text-right`}>Kết thúc</th>
+                  <th className={tableCls.th}>Độ trễ</th>
+                  <th className={`${tableCls.th} text-right`}>Retry</th>
+                  <th className={tableCls.th}>Lỗi</th>
+                </tr>
+              </thead>
+              <tbody>
+                {syncRows.map((j) => (
+                  <tr key={j.id}>
+                    <td className={`${tableCls.td} font-bold`}>{j.job_type}</td>
+                    <td className={tableCls.td}>{j.shop}</td>
+                    <td className={tableCls.td}>
+                      <Chip tone={statusChip[j.status] ?? "gray"}>{j.status}</Chip>
+                    </td>
+                    <td className={tableCls.tdNum}>{fmtTime(j.started_at ?? j.created_at)}</td>
+                    <td className={tableCls.tdNum}>{fmtTime(j.finished_at)}</td>
+                    <td className={tableCls.td}>{fmtAge(j.age_minutes)}</td>
+                    <td className={`${tableCls.tdNum} ${Number(j.attempts ?? 0) > 0 ? "font-bold text-amber" : ""}`}>
+                      {j.attempts ?? 0}
+                    </td>
+                    <td className={`${tableCls.td} max-w-[260px] truncate text-[11.5px] ${j.last_error ? "text-red" : "text-soft"}`} title={j.last_error ?? undefined}>
+                      {j.last_error ? j.last_error.slice(0, 120) : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Panel>
+
       <Panel
         title="Report đã kéo qua Reports API"
         hint={
@@ -163,6 +257,7 @@ export default async function SyncHealthPage() {
           </>
         )}
       </Panel>
+
       <Panel title="Nguyên tắc đồng bộ 3 tầng (đã chốt trong kiến trúc)">
         <ul className="list-disc space-y-1.5 pl-5 text-[13px] text-muted">
           <li>

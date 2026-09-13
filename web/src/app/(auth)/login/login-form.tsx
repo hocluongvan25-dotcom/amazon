@@ -11,6 +11,7 @@ export default function LoginForm({ supabaseMode }: { supabaseMode: boolean }) {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -46,7 +47,7 @@ export default function LoginForm({ supabaseMode }: { supabaseMode: boolean }) {
     return (
       <div className="mt-5">
         <div className="mb-3 text-[11.5px] font-extrabold uppercase tracking-widest text-soft">
-          Chọn vai trò demo (kiểm chứng phân quyền theo phòng)
+          Chọn vai trò demo
         </div>
         <div className="flex flex-col gap-2">
           {(Object.keys(PERSONAS) as PersonaKey[]).map((k) => {
@@ -62,9 +63,7 @@ export default function LoginForm({ supabaseMode }: { supabaseMode: boolean }) {
                 </span>
                 <span className="min-w-0">
                   <span className="block text-[13.5px] font-bold">{p.label}</span>
-                  <span className="block truncate text-[12px] text-soft">
-                    {p.scope}
-                  </span>
+                  <span className="block truncate text-[12px] text-soft">{p.scope}</span>
                 </span>
               </button>
             );
@@ -74,42 +73,122 @@ export default function LoginForm({ supabaseMode }: { supabaseMode: boolean }) {
     );
   }
 
+  const [resetMode, setResetMode] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
+
+  async function handleResetPassword(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setError("Vui lòng nhập email hợp lệ.");
+      return;
+    }
+    setResetLoading(true);
+    try {
+      const { createClient } = await import("@/lib/supabase/client");
+      const supabase = createClient();
+      if (!supabase) throw new Error("Supabase chưa cấu hình");
+      const origin = typeof window !== "undefined" ? window.location.origin : "";
+      const redirectTo = origin ? `${origin}/auth/confirm?next=/dashboard` : undefined;
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo,
+      });
+      if (error) throw error;
+      setResetSent(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Không gửi được email.");
+    } finally {
+      setResetLoading(false);
+    }
+  }
+
   return (
-    <form onSubmit={loginSupabase} className="mt-5 flex flex-col gap-3">
-      <label className="text-[12.5px] font-bold text-muted">
-        Email
-        <input
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-          className="mt-1 w-full rounded-[9px] border border-line px-3 py-2.5 text-[13.5px] outline-none focus:border-accent"
-          placeholder="ten@vexim.vn"
-        />
-      </label>
-      <label className="text-[12.5px] font-bold text-muted">
-        Mật khẩu
-        <input
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-          className="mt-1 w-full rounded-[9px] border border-line px-3 py-2.5 text-[13.5px] outline-none focus:border-accent"
-          placeholder="••••••••"
-        />
-      </label>
-      {error ? (
-        <div className="rounded-lg bg-red-soft px-3 py-2 text-[12.5px] font-semibold text-[#a01717]">
-          {error}
+    <>
+      <form onSubmit={resetMode ? handleResetPassword : loginSupabase} className="mt-5 flex flex-col gap-3">
+        <label className="text-[12.5px] font-bold text-muted">
+          Email
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            className="mt-1 w-full rounded-[10px] border border-line px-3 py-2.5 text-[13.5px] outline-none focus:border-accent"
+            placeholder="ten@vexim.vn"
+          />
+        </label>
+
+        {!resetMode ? (
+          <label className="text-[12.5px] font-bold text-muted">
+            Mật khẩu
+            <div className="relative mt-1">
+              <input
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                className="w-full rounded-[10px] border border-line px-3 py-2.5 pr-10 text-[13.5px] outline-none focus:border-accent"
+                placeholder="••••••••"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-soft transition hover:bg-bg hover:text-ink"
+                aria-label={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
+                tabIndex={-1}
+              >
+                {showPassword ? (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
+                    <path d="M10.73 5.08A10.94 10.94 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+                    <path d="M6.38 6.38A13.16 13.16 0 0 0 2 12s3 7 10 7a10.94 10.94 0 0 0 5.39-1.39" />
+                    <line x1="2" y1="2" x2="22" y2="22" />
+                  </svg>
+                ) : (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                )}
+              </button>
+            </div>
+          </label>
+        ) : null}
+
+        {error ? (
+          <div className="rounded-lg bg-red-soft px-3 py-2 text-[12.5px] font-semibold text-[#a01717]">
+            {error}
+          </div>
+        ) : null}
+
+        {resetMode && resetSent ? (
+          <div className="rounded-lg bg-green-soft px-3 py-2 text-[12.5px] font-semibold text-[#0b7a55]">
+            Đã gửi email đặt lại mật khẩu đến <b>{email}</b>. Vui lòng kiểm tra hộp thư.
+          </div>
+        ) : null}
+
+        <button
+          type="submit"
+          disabled={resetMode ? resetLoading : loading}
+          className="mt-1 rounded-full bg-ink px-5 py-2.5 text-[14px] font-semibold text-white transition hover:bg-black disabled:opacity-60"
+        >
+          {resetMode ? (resetLoading ? "Đang gửi…" : "Gửi link đặt lại mật khẩu") : loading ? "Đang đăng nhập…" : "Đăng nhập"}
+        </button>
+
+        <div className="mt-1 flex items-center justify-between text-[12px]">
+          <button
+            type="button"
+            onClick={() => {
+              setResetMode(!resetMode);
+              setError(null);
+              setResetSent(false);
+            }}
+            className="font-semibold text-soft underline hover:text-ink"
+          >
+            {resetMode ? "← Quay lại đăng nhập" : "Quên mật khẩu?"}
+          </button>
         </div>
-      ) : null}
-      <button
-        type="submit"
-        disabled={loading}
-        className="mt-1 rounded-full bg-ink px-5 py-2.5 text-[14px] font-semibold text-white disabled:opacity-60"
-      >
-        {loading ? "Đang đăng nhập…" : "Đăng nhập"}
-      </button>
-    </form>
+      </form>
+    </>
   );
 }

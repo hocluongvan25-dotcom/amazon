@@ -1,9 +1,11 @@
 /**
  * Job nhập 2 report FBA inventory — Module 3 nâng cao (migration 0018).
  *
- *   • GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA → inventory.fc_allocation
+ *   • MỚI (FIX 400 09/2026): GET_LEDGER_SUMMARY_VIEW_DATA (FC/DAILY) → inventory.fc_allocation
+ *     Thay cho DEPRECATED GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA (trả 400 InvalidInput)
  *     (I2: "hàng của SKU này đang nằm ở FC nào, mỗi FC bao nhiêu %")
- *   • GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA → inventory.receipts
+ *   • MỚI: GET_LEDGER_DETAIL_VIEW_DATA (Receipts) → inventory.receipts
+ *     Thay cho DEPRECATED GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA
  *     (I2/I4: "Amazon thực nhận bao nhiêu, ngày nào, lô nào")
  *
  * VÌ SAO KHÔNG DÙNG API:
@@ -35,6 +37,8 @@ import type {
 } from "../db/adapter.ts";
 import {
   parseFcAllocationReport,
+  parseLedgerDetailAsReceipts,
+  parseLedgerSummaryAsFc,
   parseReceiptsReport,
   type FcAllocationRow,
   type ReceiptRow,
@@ -95,9 +99,9 @@ export type InventoryFcSyncReport = {
 
 export type InventoryFcSyncOptions = {
   sellerAccountId: string;
-  /** Nội dung report GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA (TSV) */
+  /** Nội dung report GET_LEDGER_SUMMARY_VIEW_DATA FC/DAILY (hoặc cũ GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA) (TSV) */
   fcReportText?: string;
-  /** Nội dung report GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA (TSV) */
+  /** Nội dung report GET_LEDGER_DETAIL_VIEW_DATA (hoặc cũ GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA) (TSV) */
   receiptsReportText?: string;
   adapter: DbAdapter;
   now?: Date;
@@ -217,8 +221,9 @@ export async function runInventoryFcSync(
     payload: {
       source: "report",
       reports: {
-        fc: opts.fcReportText ? "GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA" : null,
-        receipts: opts.receiptsReportText ? "GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA" : null,
+        // FIX 400: dùng reportType mới, giữ backward compat cho log cũ
+        fc: opts.fcReportText ? "GET_LEDGER_SUMMARY_VIEW_DATA" : null,
+        receipts: opts.receiptsReportText ? "GET_LEDGER_DETAIL_VIEW_DATA" : null,
       },
     },
   };
@@ -233,8 +238,13 @@ export async function runInventoryFcSync(
     }
 
     // ---- (1) Phân bổ tồn theo FC -------------------------------------------
+    // FIX 400: auto-detect ledger format (EndingWarehouseBalance) vs cũ (snapshot-date)
+    const detectLedgerSummary = (text: string) => {
+      const lower = text.toLowerCase();
+      return lower.includes("endingwarehousebalance") || lower.includes("startingwarehousebalance");
+    };
     const fcParsed = opts.fcReportText
-      ? parseFcAllocationReport(opts.fcReportText)
+      ? (detectLedgerSummary(opts.fcReportText) ? parseLedgerSummaryAsFc(opts.fcReportText) : parseFcAllocationReport(opts.fcReportText))
       : { rows: [] as FcAllocationRow[], warnings: [] as string[], skipped: 0, fcTotals: {}, snapshotDates: [] };
     warnings.push(...fcParsed.warnings);
 
@@ -261,8 +271,12 @@ export async function runInventoryFcSync(
     }
 
     // ---- (2) Lịch sử nhận hàng ----------------------------------------------
+    const detectLedgerDetail = (text: string) => {
+      const lower = text.toLowerCase();
+      return lower.includes("eventtype") && lower.includes("referenceid");
+    };
     const rxParsed = opts.receiptsReportText
-      ? parseReceiptsReport(opts.receiptsReportText)
+      ? (detectLedgerDetail(opts.receiptsReportText) ? parseLedgerDetailAsReceipts(opts.receiptsReportText) : parseReceiptsReport(opts.receiptsReportText))
       : {
           rows: [] as ReceiptRow[],
           warnings: [] as string[],

@@ -3,10 +3,21 @@
  *
  *   kind           reportType                                          nuôi màn
  *   ─────────────  ──────────────────────────────────────────────────  ────────
- *   fc             GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA           I2 · I3
- *   receipts       GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA          I2 · I4
+ *   fc             GET_LEDGER_SUMMARY_VIEW_DATA (thay cho DEPRECATED
+ *                  GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA)           I2 · I3
+ *   receipts       GET_LEDGER_DETAIL_VIEW_DATA (thay cho DEPRECATED
+ *                  GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA)          I2 · I4
  *   storage-fees   GET_FBA_STORAGE_FEE_CHARGES_DATA                     I2 · phí FC
  *   noncompliance  GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA       I4
+ *
+ * LÝ DO ĐỔI (SP-API 400 InvalidInput 09/2026):
+ *   Amazon đã DEPRECATED 2 report FBA cũ từ 31/01/2023:
+ *     GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA
+ *     GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA
+ *   và trả 400 InvalidInput với details "Report type is deprecated".
+ *   Thay thế chuẩn theo Amazon docs:
+ *     fc       → GET_LEDGER_SUMMARY_VIEW_DATA + aggregateByLocation=FC + aggregatedByTimePeriod=DAILY
+ *     receipts → GET_LEDGER_DETAIL_VIEW_DATA (filter EventType=Receipts ở parser)
  *
  * Vì sao gộp một chỗ: CLI (`worker reports:pull`), Vercel Cron
  * (`/api/cron/report-pull`) và test đều cần CÙNG một định nghĩa — loại report,
@@ -29,6 +40,8 @@ import type {
 } from "../db/adapter.ts";
 import {
   parseFcAllocationReport,
+  parseLedgerDetailAsReceipts,
+  parseLedgerSummaryAsFc,
   parseReceiptsReport,
 } from "./fba-inventory.parser.ts";
 import {
@@ -56,28 +69,46 @@ export type ReportSpec = {
   lookbackDays: number;
   /** trần yêu cầu lại của Amazon (giờ) — dưới mức này thì poll report cũ */
   cooldownHours: number;
+  /** reportOptions bắt buộc cho Ledger reports */
+  reportOptions?: Record<string, string>;
+  /** ghi chú deprecated để log rõ khi Amazon trả 400 */
+  deprecatedNote?: string;
 };
 
 export const REPORT_SPECS: Record<ReportKind, ReportSpec> = {
   fc: {
     kind: "fc",
-    reportType: "GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA",
-    label: "Phân bổ tồn theo FC (FBA Daily Inventory History)",
+    // FIX 1: reportType cũ GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA đã bị Amazon deprecated từ 31/01/2023
+    // → 400 InvalidInput "Report type is deprecated" cho cả P1-US và P2-CA
+    // Thay bằng GET_LEDGER_SUMMARY_VIEW_DATA + aggregateByLocation=FC + DAILY (chuẩn mới)
+    reportType: "GET_LEDGER_SUMMARY_VIEW_DATA",
+    label: "Phân bổ tồn theo FC (Ledger Summary FC/DAILY)",
     screen: "I2 · I3",
     needsDateRange: true,
-    // Mỗi ngày một snapshot; kéo 2 ngày để chắc chắn có ngày gần nhất
-    // (Amazon có thể chưa sinh snapshot hôm nay lúc cron chạy 03:00).
-    lookbackDays: 2,
+    // FIX 2: DAILY ledger yêu cầu start và end CÙNG NGÀY, end = 23:59:59Z
+    // lookback 1 ngày = snapshot mới nhất, tránh Amazon trả rỗng nếu range quá rộng
+    lookbackDays: 1,
     cooldownHours: 4,
+    reportOptions: {
+      aggregateByLocation: "FC",
+      aggregatedByTimePeriod: "DAILY",
+    },
+    deprecatedNote: "Cũ: GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA đã deprecated 31/01/2023 → 400 InvalidInput",
   },
   receipts: {
     kind: "receipts",
-    reportType: "GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA",
-    label: "Lịch sử nhận hàng (FBA Received Inventory)",
+    // FIX 1: GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA cũng deprecated → 400
+    // Thay bằng GET_LEDGER_DETAIL_VIEW_DATA, filter EventType=Receipts ở parser
+    reportType: "GET_LEDGER_DETAIL_VIEW_DATA",
+    label: "Lịch sử nhận hàng (Ledger Detail Receipts)",
     screen: "I2 · I4",
     needsDateRange: true,
     lookbackDays: 30,
     cooldownHours: 4,
+    // Detail view không cần reportOptions bắt buộc, nhưng có thể filter
+    // Để rỗng = lấy tất cả event, parser sẽ lọc Receipts
+    reportOptions: {},
+    deprecatedNote: "Cũ: GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA deprecated 31/01/2023 → 400",
   },
   "storage-fees": {
     kind: "storage-fees",
@@ -122,7 +153,7 @@ export function kindOfReportType(reportType: string): ReportKind | null {
 }
 
 // ============================================================================
-// Parse: một hàm cho cả 4 loại
+// Parse: một hàm cho cả 4 loại (hỗ trợ cả format cũ và mới Ledger)
 // ============================================================================
 
 export type AnyReportRow =
@@ -165,6 +196,21 @@ function formatMoney(byCurrency: Record<string, number>): string {
 export function parseReportText(kind: ReportKind, text: string): ParsedReport {
   switch (kind) {
     case "fc": {
+      // Thử parse format Ledger Summary FC trước (mới), fallback format cũ
+      const isLedger = text.toLowerCase().includes("endingwarehousebalance") || text.toLowerCase().includes("startingwarehousebalance");
+      if (isLedger) {
+        const p = parseLedgerSummaryAsFc(text);
+        const units = p.rows.reduce((s, r) => s + r.quantity, 0);
+        return {
+          kind,
+          rows: p.rows as AnyReportRow[],
+          warnings: p.warnings,
+          skipped: p.skipped,
+          summary:
+            `${p.rows.length} dòng Ledger Summary FC · ${p.snapshotDates.length} ngày snapshot` +
+            ` (mới nhất ${p.snapshotDates.at(-1) ?? "—"}) · ${units} đơn vị (EndingWarehouseBalance)`,
+        };
+      }
       const p = parseFcAllocationReport(text);
       const units = p.rows.reduce((s, r) => s + r.quantity, 0);
       return {
@@ -178,6 +224,22 @@ export function parseReportText(kind: ReportKind, text: string): ParsedReport {
       };
     }
     case "receipts": {
+      // Thử parse Ledger Detail Receipts trước (mới), fallback cũ
+      const isLedgerDetail = text.toLowerCase().includes("eventtype") && text.toLowerCase().includes("referenceid");
+      if (isLedgerDetail) {
+        const p = parseLedgerDetailAsReceipts(text);
+        const units = p.rows.reduce((s, r) => s + r.quantity, 0);
+        const shipments = new Set(p.rows.map((r) => r.fbaShipmentId).filter((v) => v !== "")).size;
+        return {
+          kind,
+          rows: p.rows as AnyReportRow[],
+          warnings: p.warnings,
+          skipped: p.skipped,
+          summary:
+            `${p.rows.length} dòng Ledger Detail Receipts · ${shipments} lô · ${units} đơn vị` +
+            ` · từ ${p.receivedFrom ?? "—"} đến ${p.receivedTo ?? "—"}`,
+        };
+      }
       const p = parseReceiptsReport(text);
       const units = p.rows.reduce((s, r) => s + r.quantity, 0);
       const shipments = new Set(p.rows.map((r) => r.fbaShipmentId).filter((v) => v !== "")).size;

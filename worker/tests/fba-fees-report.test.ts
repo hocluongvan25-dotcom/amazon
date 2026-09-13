@@ -370,12 +370,15 @@ test("phí inbound: không có SKU vẫn giữ dòng (vấn đề cấp carton) 
 // 4. Registry — một định nghĩa cho CLI, cron và test
 // ============================================================================
 
-test("registry: 4 loại report đúng reportType của Amazon + trần 4 giờ", () => {
+test("registry: 4 loại report đúng reportType của Amazon + trần 4 giờ (FIX 400 deprecated)", () => {
   assert.deepEqual([...ALL_REPORT_KINDS], ["fc", "receipts", "storage-fees", "noncompliance"]);
   assert.equal(specOf("storage-fees").reportType, "GET_FBA_STORAGE_FEE_CHARGES_DATA");
   assert.equal(specOf("noncompliance").reportType, "GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA");
-  assert.equal(specOf("fc").reportType, "GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA");
-  assert.equal(specOf("receipts").reportType, "GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA");
+  // FIX 400 09/2026: 2 report cũ deprecated 31/01/2023 → 400 InvalidInput, migrate sang ledger
+  assert.equal(specOf("fc").reportType, "GET_LEDGER_SUMMARY_VIEW_DATA");
+  assert.equal(specOf("receipts").reportType, "GET_LEDGER_DETAIL_VIEW_DATA");
+  // reportOptions bắt buộc cho ledger
+  assert.deepEqual(specOf("fc").reportOptions, { aggregateByLocation: "FC", aggregatedByTimePeriod: "DAILY" });
   for (const k of ALL_REPORT_KINDS) {
     assert.equal(REPORT_SPECS[k].cooldownHours, 4, `${k}: report FBA daily trần 1 lần/4 giờ`);
     assert.ok(REPORT_SPECS[k].label.length > 5, `${k}: phải có nhãn tiếng Việt cho log`);
@@ -558,17 +561,29 @@ test("mock trạng thái report: thiếu reportType → ném lỗi (không ghi d
 // 6. computePeriod
 // ============================================================================
 
-test("computePeriod: khoảng ngày theo lookback của từng loại report (UTC)", () => {
+test("computePeriod: khoảng ngày theo lookback của từng loại report (UTC) + FIX ledger DAILY", () => {
   const now = new Date("2026-09-12T03:00:00Z");
-  assert.deepEqual(computePeriod("fc", { now }), {
-    start: "2026-09-10", end: "2026-09-12",
-    startIso: "2026-09-10T00:00:00Z", endIso: "2026-09-12T23:59:59Z",
-  });
-  assert.equal(computePeriod("receipts", { now }).start, "2026-08-13");
+  // FIX 2: ISO 8601 UTC chuẩn với ms: toISOString() 00:00:00.000Z → 23:59:59.999Z
+  // FIX DAILY: fc = ledger SUMMARY DAILY → start và end CÙNG NGÀY (Amazon yêu cầu), lookback 1 ngày = today
+  const fcPeriod = computePeriod("fc", { now });
+  assert.equal(fcPeriod.start, "2026-09-12");
+  assert.equal(fcPeriod.end, "2026-09-12");
+  assert.equal(fcPeriod.startIso, "2026-09-12T00:00:00.000Z");
+  assert.equal(fcPeriod.endIso, "2026-09-12T23:59:59.999Z");
+
+  // receipts = ledger DETAIL → range 30 ngày, vẫn dùng ms
+  const receiptsPeriod = computePeriod("receipts", { now });
+  assert.equal(receiptsPeriod.start, "2026-08-13");
+  assert.equal(receiptsPeriod.end, "2026-09-12");
+  assert.equal(receiptsPeriod.startIso, "2026-08-13T00:00:00.000Z");
+  assert.equal(receiptsPeriod.endIso, "2026-09-12T23:59:59.999Z");
+
   assert.equal(computePeriod("storage-fees", { now }).start, "2026-06-09");
   assert.equal(computePeriod("noncompliance", { now }).start, "2026-07-14");
   assert.equal(computePeriod("storage-fees", { days: 7, now }).start, "2026-09-05");
-  assert.equal(computePeriod("fc", { days: 0, now }).start, "2026-09-11", "days=0 → tối thiểu 1 ngày");
+  // days=0 → tối thiểu 1 ngày, nhưng với fc DAILY vẫn cùng ngày
+  assert.equal(computePeriod("fc", { days: 0, now }).start, "2026-09-12", "days=0 → DAILY vẫn cùng ngày today");
+  assert.equal(computePeriod("fc", { days: 0, now }).end, "2026-09-12");
 });
 
 // ============================================================================
