@@ -66,9 +66,10 @@ export function UsersBoard({ demo, users, me, departments, shops, audit }: Props
     <>
       {demo ? (
         <div className="mb-4 rounded-[13px] border-2 border-dashed border-amber/60 bg-amber-soft px-4 py-3 text-[12.5px] text-[#8a5602]">
-          <b>CHẾ ĐỘ DEMO</b> — bảng dưới là dữ liệu GIẢ LẬP để xem giao diện (email đuôi{" "}
-          <code>@vexim.example</code>). Chưa cấu hình Supabase nên không đọc được{" "}
-          <code>iam.user_profiles</code>; nút Sửa/Quyền/Khóa chỉ mô phỏng, không ghi vào DB.
+          <b>CHẾ ĐỘ DEMO — bảng để TRẮNG theo chủ đích.</b> Chưa cấu hình Supabase nên không đọc
+          được <code>iam.user_profiles</code>, và hệ thống KHÔNG bày sẵn danh sách người dùng giả
+          để “cho có”: một dòng giả trong màn phân quyền là một lời hứa sai. Đăng nhập bằng tài
+          khoản thật để thấy hồ sơ + 3 nút Sửa · Quyền · Khóa hoạt động.
         </div>
       ) : null}
 
@@ -189,7 +190,17 @@ export function UsersBoard({ demo, users, me, departments, shops, audit }: Props
               {users.length === 0 ? (
                 <tr>
                   <td className={`${tableCls.td} text-soft`} colSpan={8}>
-                    Chưa có hồ sơ người dùng nào trong <code>iam.user_profiles</code>.
+                    {demo ? (
+                      <>
+                        Chế độ demo: không hiển thị dữ liệu người dùng (kể cả dữ liệu mẫu) — cần
+                        đăng nhập bằng tài khoản thật để đọc <code>iam.user_profiles</code>.
+                      </>
+                    ) : (
+                      <>
+                        Chưa có hồ sơ người dùng nào trong <code>iam.user_profiles</code>. Bấm{" "}
+                        <b>＋ Thêm người dùng</b> để mời người đầu tiên.
+                      </>
+                    )}
                   </td>
                 </tr>
               ) : null}

@@ -163,17 +163,47 @@ test("'đăng nhập cuối': chưa đăng nhập / vừa xong / theo giờ", ()
   assert.equal(relativeTime("không-phải-ngày", now), "—");
 });
 
-test("dữ liệu demo không bao giờ dùng email thật của VEXIM", async () => {
-  const { DEMO_USERS, DEMO_SHOPS, DEMO_DEPARTMENTS } = await import(
-    "../src/app/(app)/module0/users/demo-users.ts"
+test("màn Người dùng KHÔNG còn dữ liệu người dùng giả (đã xoá hẳn, không chỉ ẩn)", async () => {
+  const { readFileSync, existsSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const { dirname, join } = await import("node:path");
+  const web = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+  // 1) file fixture giả lập của màn Người dùng phải KHÔNG còn tồn tại
+  assert.equal(
+    existsSync(join(web, "src/app/(app)/module0/users/demo-users.ts")),
+    false,
+    "demo-users.ts phải bị xoá — bảng người dùng để trắng thay vì bày dữ liệu giả",
   );
-  assert.ok(DEMO_USERS.length >= 3);
-  for (const u of DEMO_USERS) {
-    assert.match(u.email, /@vexim\.example$/, `email demo phải là @vexim.example: ${u.email}`);
-    assert.ok(!u.email.endsWith("@vexim.vn"), "không được dùng email thật trong demo");
+
+  // 2) mock.ts không còn mảng `users` và 6 email giả cũ
+  const mock = readFileSync(join(web, "src/lib/data/mock.ts"), "utf8");
+  assert.equal(/export const users\s*:/.test(mock), false, "mock.ts không được export mảng users");
+  for (const email of [
+    "haianh@vexim.vn",
+    "mylinh@vexim.vn",
+    "tuan@vexim.vn",
+    "ha@vexim.vn",
+    "lan@vexim.vn",
+    "contact@khacha-a.vn",
+  ]) {
+    assert.equal(mock.includes(email), false, `email giả cũ vẫn còn trong mock.ts: ${email}`);
   }
-  assert.ok(DEMO_USERS.some((u) => u.status === "suspended"), "có mẫu tài khoản đã khóa để xem giao diện");
-  assert.ok(DEMO_USERS.some((u) => u.status === "invited"), "có mẫu tài khoản đã mời");
-  assert.ok(DEMO_USERS.some((u) => u.isSelf), "phải có người đang đăng nhập để bật/tắt nút");
-  assert.ok(DEMO_SHOPS.length >= 1 && DEMO_DEPARTMENTS.length >= 1);
+
+  // 3) trang Người dùng phải truyền bảng RỖNG ở chế độ demo (không có nhánh dữ liệu mẫu)
+  const page = readFileSync(join(web, "src/app/(app)/module0/users/page.tsx"), "utf8");
+  assert.match(page, /users=\{\[\]\}/, "nhánh demo phải truyền users={[]}");
+  assert.equal(/DEMO_USERS|demo-users/.test(page), false, "trang không được tham chiếu fixture giả");
+});
+
+test("mock.ts không còn số liệu khách hàng viết cứng cho /client", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const { dirname, join } = await import("node:path");
+  const web = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const mock = readFileSync(join(web, "src/lib/data/mock.ts"), "utf8");
+  assert.equal(/export const clientKpis\s*:/.test(mock), false, "clientKpis phải bị xoá");
+  assert.equal(/export const clientReports\s*:/.test(mock), false, "clientReports phải bị xoá");
+  assert.equal(mock.includes("$186,400"), false, "số doanh thu bịa còn sót trong mock.ts");
+  assert.equal(mock.includes("$23,900"), false, "số settlement bịa còn sót trong mock.ts");
 });

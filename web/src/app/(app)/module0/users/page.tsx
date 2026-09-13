@@ -2,7 +2,6 @@ import { NoAccess, PageHeader, Panel } from "@/components/ui";
 import { requireSession } from "@/lib/auth/session";
 import { readUsersSnapshot } from "@/lib/data/users-admin";
 import type { PersonaKey } from "@/lib/roles";
-import { DEMO_DEPARTMENTS, DEMO_SHOPS, DEMO_USERS } from "./demo-users";
 import { UsersBoard } from "./UsersBoard";
 
 /**
@@ -14,9 +13,10 @@ import { UsersBoard } from "./UsersBoard";
  *     quyết định ở DB, không ở `persona` của web (persona trong supabase mode
  *     hiện luôn là "ceo" — xem TODO Tier 1 ở `lib/auth/session.ts`, nên KHÔNG được
  *     dùng nó để chặn trang này).
- *   • DEMO MODE (chưa cấu hình Supabase): 5 dòng GIẢ LẬP (`@vexim.example`) để xem
- *     giao diện; ghi chú demo hiện rõ trên đầu bảng. Danh sách nhân viên giả cũ
- *     trong `mock.ts` đã bị xoá (13/09/2026) vì làm người dùng thật hiểu sai.
+ *   • DEMO MODE (chưa cấu hình Supabase): KHÔNG hiển thị dòng người dùng nào.
+ *     Danh sách nhân viên giả trong `mock.ts` đã bị xoá 13/09/2026, và bản "5 dòng
+ *     giả lập @vexim.example" cũng đã bị xoá theo yêu cầu — bảng để trắng kèm lời
+ *     giải thích, vì một dòng giả trong màn PHÂN QUYỀN vẫn là lời hứa sai.
  */
 const DEMO_ALLOWED: PersonaKey[] = ["ceo"];
 
@@ -70,15 +70,15 @@ export default async function UsersPage() {
     <>
       <PageHeader
         title="Người dùng & phân quyền"
-        sub={`${DEMO_USERS.length} dòng giả lập (chế độ demo) · production đọc iam.user_profiles`}
-        desc="Bản xem trước giao diện: Sửa · Quyền · Khóa. Khi cấu hình Supabase, bảng đọc dữ liệu THẬT và 3 nút gọi RPC có kiểm quyền + ghi audit."
+        sub="chế độ demo — không hiển thị dữ liệu người dùng giả"
+        desc="Bảng người dùng đọc thẳng iam.user_profiles (RLS + iam.is_user_admin()). Chế độ demo không có kết nối Supabase nên bảng để trắng; Sửa · Quyền · Khóa sẽ hoạt động khi đăng nhập bằng tài khoản thật."
       />
       <UsersBoard
         demo
-        users={DEMO_USERS}
-        me={DEMO_USERS.find((u) => u.isSelf) ?? null}
-        departments={DEMO_DEPARTMENTS}
-        shops={DEMO_SHOPS}
+        users={[]}
+        me={null}
+        departments={[]}
+        shops={[]}
         audit={[]}
       />
     </>

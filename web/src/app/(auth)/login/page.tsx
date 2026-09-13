@@ -29,8 +29,18 @@ export default function LoginPage() {
           </Suspense>
         </div>
         <p className="mt-4 text-center text-[11.5px] text-soft">
-          DEMO MODE: dữ liệu giả (MockProvider) — khi kết nối Supabase + SP-API
-          sẽ chuyển nguồn dữ liệu thật, không đổi giao diện.
+          {supabaseMode ? (
+            <>
+              Hệ thống đã nối Supabase — mọi số liệu đọc từ cơ sở dữ liệu thật
+              (RLS theo quyền của bạn). Đăng nhập để tiếp tục.
+            </>
+          ) : (
+            <>
+              DEMO MODE: chưa cấu hình Supabase nên giao diện chạy bằng dữ liệu
+              giả lập (MockProvider) — nối Supabase là chuyển nguồn thật, không
+              đổi giao diện.
+            </>
+          )}
         </p>
       </div>
     </div>

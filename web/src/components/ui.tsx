@@ -215,6 +215,22 @@ export function Grid2({ children }: { children: ReactNode }) {
   return <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">{children}</div>;
 }
 
+/* ---------- Cảnh báo "màn này chưa nối dữ liệu thật" ----------
+ * VÌ SAO CẦN: vài màn còn render số viết cứng trong `lib/data/mock.ts` (chưa có
+ * nguồn thật tương ứng). Trong chế độ demo thì bình thường, nhưng khi hệ thống ĐÃ
+ * nối Supabase mà vẫn hiện số minh hoạ thì người xem tưởng đó là dữ liệu vận hành
+ * của mình. Component này nói thẳng điều đó — thà xấu mà thật.
+ */
+export function MockDataNotice({ what }: { what: ReactNode }) {
+  return (
+    <div className="mb-4 rounded-[13px] border-2 border-dashed border-amber/60 bg-amber-soft px-4 py-3 text-[12.5px] text-[#8a5602]">
+      <b>⚠️ DỮ LIỆU MINH HOẠ — chưa nối nguồn thật.</b> {what} Số liệu trên màn này
+      KHÔNG phải dữ liệu vận hành của bạn; đừng dùng để ra quyết định. Xem mục tiến độ
+      trong <code>docs/tien-do-trien-khai.md</code>.
+    </div>
+  );
+}
+
 /* ---------- Không có quyền ---------- */
 export function NoAccess() {
   return (
