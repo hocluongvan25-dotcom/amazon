@@ -19,6 +19,7 @@ import { runFinanceClaimsCli } from "./runtime/run-finance-claims.ts";
 import { runListingsSyncCli } from "./runtime/run-listings-sync.ts";
 import { runInventoryFcSyncCli } from "./runtime/run-inventory-fc-sync.ts";
 import { runReportPullCli } from "./runtime/run-report-pull.ts";
+import { runAdsApplyCli, runAdsPullCli, runAdsSyncCli, runOauthSoonCli } from "./runtime/run-ads.ts";
 
 /** Đọc tham số dạng --key=value / --flag (không có giá trị) */
 function parseArgs(argv: string[]): { flags: Set<string>; values: Record<string, string> } {
@@ -257,6 +258,73 @@ async function main() {
       });
       break;
     }
+    case "ads:sync": {
+      // Module 5 phần 1: đồng bộ CẤU TRÚC quảng cáo (profile → campaign →
+      // ad group → keyword/target). Chạy trước ads:pull để có ads_profile_id.
+      if (loaded) process.stderr.write(`[worker] loaded env from ${loaded}\n`);
+      const { values, flags } = parseArgs(process.argv.slice(3));
+      const result = await runAdsSyncCli({
+        sellerAccountId: values.seller ?? null,
+        dryRun: flags.has("dry-run"),
+        stdout: process.stdout,
+      });
+      if (result.needsReauth.length > 0 || result.failed > 0) process.exitCode = 1;
+      break;
+    }
+    case "ads:pull": {
+      // Module 5 phần 1: TỰ KÉO 5 report Amazon Ads (Reporting API v3) hoặc nạp
+      // file JSON đã giải nén. Sau khi nhập: cảnh báo acos_over_target /
+      // budget_exhausted + budget_events + lấp ads_spend cho F4 (TACOS thật).
+      if (loaded) process.stderr.write(`[worker] loaded env from ${loaded}\n`);
+      const { values, flags } = parseArgs(process.argv.slice(3));
+      const result = await runAdsPullCli({
+        kind: values.kind ?? null,
+        days: values.days ? Number(values.days) : null,
+        sellerAccountId: values.seller ?? null,
+        files: {
+          campaigns: values.campaigns ?? null,
+          targeting: values.targeting ?? null,
+          "search-terms": values["search-terms"] ?? null,
+          "advertised-products": values["advertised-products"] ?? null,
+          "purchased-products": values["purchased-products"] ?? null,
+        },
+        dryRun: flags.has("dry-run"),
+        pollAttempts: values.poll ? Number(values.poll) : undefined,
+        fireAlerts: !flags.has("no-alerts"),
+        applySpend: !flags.has("no-spend"),
+        stdout: process.stdout,
+      });
+      if (result.counts.failed > 0 || result.needsReauth.length > 0) process.exitCode = 1;
+      break;
+    }
+    case "ads:apply": {
+      // Module 5 P3: áp dụng yêu cầu ĐÃ DUYỆT lên Amazon Ads (bid/ngân sách/negative).
+      // Không có cờ "ép ghi": muốn ghi thì yêu cầu phải có trong hàng đợi đã duyệt.
+      if (loaded) process.stderr.write(`[worker] loaded env from ${loaded}\n`);
+      const { values, flags } = parseArgs(process.argv.slice(3));
+      const result = await runAdsApplyCli({
+        sellerAccountId: values.seller ?? null,
+        limit: values.limit ? Number(values.limit) : null,
+        dryRun: flags.has("dry-run"),
+        stdout: process.stdout,
+      });
+      if (result.failed > 0 || result.needsReauth.length > 0) process.exitCode = 1;
+      break;
+    }
+    case "oauth:soon": {
+      // Module 0: shop sắp/đã hết hạn refresh token (365 ngày) — cron nhắc
+      // re-authorize trước khi Ads/SP-API ngừng chạy (SOP-11).
+      if (loaded) process.stderr.write(`[worker] loaded env from ${loaded}\n`);
+      const { values, flags } = parseArgs(process.argv.slice(3));
+      const result = await runOauthSoonCli({
+        days: values.days ? Number(values.days) : null,
+        // Mặc định chỉ ĐỌC. Cron mới là nơi tạo cảnh báo + đánh dấu đã nhắc.
+        mark: flags.has("mark"),
+        stdout: process.stdout,
+      });
+      if (result.count > 0) process.exitCode = 1;
+      break;
+    }
     case "finance:claims": {
       // Module 6 Đợt 2: F3 bồi hoàn FBA (SOP-09) + F4 lợi nhuận SKU
       const { values, flags } = parseArgs(process.argv.slice(3));
@@ -290,15 +358,21 @@ async function main() {
           "  listing:schema       L3: tải JSON Schema product type cho form động (--product-type=LUGGAGE)",
           "  finance:claims       F3+F4: claim bồi hoàn FBA + lợi nhuận SKU (--ledger=<file> --reimbursements=<file>)",
           "  inventory:fc         M3 nâng cao: phân bổ tồn theo FC + lịch sử nhận hàng (--fc=<file> [--receipts=<file>])",
+          "  ads:sync             M5 P1: đồng bộ cấu trúc Amazon Ads (profile → campaign → ad group → target)",
+          "  ads:pull             M5 P1: TỰ KÉO 5 report Amazon Ads (--kind=all|campaigns|targeting|search-terms|advertised-products|purchased-products",
+          "                       [--days=30] [--poll=3]) + cảnh báo ACOS/ngân sách + lấp ads_spend (F4/TACOS)",
+          "  ads:apply            M5 P3: ghi các yêu cầu ĐÃ DUYỆT lên Amazon (bid · ngân sách · negative) [--limit=20]",
+          "  oauth:soon           M0: shop sắp hết hạn token (--days=30 [--mark]) — --mark mới tạo cảnh báo",
           "  reports:pull         M3 nâng cao: TỰ KÉO 4 report FBA qua Reports API (--type=all|fc|receipts|storage-fees|noncompliance",
           "                       [--days=7] [--poll=3]) hoặc nạp file: --storage-fees=<tsv> --noncompliance=<tsv>",
           "",
           "Cờ dùng chung: --seller=<uuid> (bắt buộc khi >1 shop) · --dry-run (chỉ chạy trong bộ nhớ)",
           "",
           "Env đọc từ web/.env.local (hoặc biến môi trường hệ thống):",
-          "  AMAZON_LWA_CLIENT_ID / SECRET / REFRESH_TOKEN",
+          "  AMAZON_LWA_CLIENT_ID / SECRET / REFRESH_TOKEN  (SP-API)",
+          "  AMAZON_ADS_CLIENT_ID / SECRET / REFRESH_TOKEN  (Amazon Ads — đăng ký RIÊNG)",
           "  SUPABASE_SERVICE_ROLE_KEY + NEXT_PUBLIC_SUPABASE_URL",
-          "  AMAZON_SP_API_REGION=NA (mặc định)",
+          "  AMAZON_SP_API_REGION=NA (mặc định) · AMAZON_ADS_REGION=NA (mặc định cho Ads)",
           "",
           "Không có credentials → tự động DEMO MODE với dữ liệu giả.",
           "",

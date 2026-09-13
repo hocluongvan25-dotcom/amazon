@@ -184,9 +184,18 @@ export default function NewUserForm() {
         <section className="mt-4 rounded-[13px] border border-line bg-card px-[18px] py-4">
           <h3 className="mb-3 text-[14.5px] font-bold">3. Phạm vi shop được gán</h3>
           <div className="mb-2 flex flex-wrap gap-2">
-            {(shops.length ? shops : Array.from({ length: 6 }, (_, i) => ({
-              id: `demo-${i}`, display_name: ["A1 · US", "A2 · MX", "B1 · DE", "C2 · US", "D1 · US", "E3 · CA"][i], seller_id: `SH${i}`, marketplace: "US", status: "active",
-            }))).map((s) => {
+            {(shops.length
+              ? shops
+              : isDemo
+                ? Array.from({ length: 6 }, (_, i) => ({
+                    id: `demo-${i}`,
+                    display_name: ["A1 · US", "A2 · MX", "B1 · DE", "C2 · US", "D1 · US", "E3 · CA"][i],
+                    seller_id: `SH${i}`,
+                    marketplace: "US",
+                    status: "active",
+                  }))
+                : []
+            ).map((s) => {
               const active = selectedShops.includes(s.id);
               return (
                 <button type="button" key={s.id} onClick={() => toggleShop(s.id)}
@@ -197,6 +206,13 @@ export default function NewUserForm() {
               );
             })}
           </div>
+          {!isDemo && shops.length === 0 ? (
+            <p className="mt-1 rounded-md border border-amber/50 bg-amber-soft px-2.5 py-1.5 text-[11.5px] font-semibold text-[#8a5602]">
+              Chưa đọc được shop nào từ <code>connections.seller_accounts</code> — không hiện
+              danh sách shop mẫu (danh sách mẫu chỉ có ở chế độ demo). Kiểm tra kết nối shop
+              trước khi mời người dùng.
+            </p>
+          ) : null}
           <p className="text-[11.5px] text-soft">
             Super Admin tự động có mọi shop. Client Viewer phải gán đúng shop của khách.
           </p>

@@ -13,7 +13,11 @@
     "worker:finance-claims": "node --experimental-strip-types src/cli.ts finance:claims",
     "worker:listings-sync": "node --experimental-strip-types src/cli.ts listings:sync",
     "worker:inventory-fc": "node --experimental-strip-types src/cli.ts inventory:fc",
-    "worker:reports-pull": "node --experimental-strip-types src/cli.ts reports:pull"
+    "worker:reports-pull": "node --experimental-strip-types src/cli.ts reports:pull",
+    "worker:ads-sync": "node --experimental-strip-types src/cli.ts ads:sync",
+    "worker:ads-pull": "node --experimental-strip-types src/cli.ts ads:pull",
+    "worker:ads-apply": "node --experimental-strip-types src/cli.ts ads:apply",
+    "worker:oauth-soon": "node --experimental-strip-types src/cli.ts oauth:soon"
   },
   "engines": {
     "node": ">=22"

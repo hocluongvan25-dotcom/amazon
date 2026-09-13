@@ -1,4 +1,4 @@
-import { Bars, Chip, NoAccess, PageHeader, Panel, tableCls } from "@/components/ui";
+import { Bars, Chip, MockDataNotice, NoAccess, PageHeader, Panel, tableCls } from "@/components/ui";
 import { requireSession } from "@/lib/auth/session";
 import { apiUsage } from "@/lib/data/mock";
 import type { PersonaKey } from "@/lib/roles";
@@ -13,6 +13,10 @@ export default async function ApiUsagePage() {
 
   return (
     <>
+      {session.mode === "supabase" ? (
+        <MockDataNotice what={<>Màn này chưa nối nguồn thật. Bảng `connections.api_usage_daily` (Usage API) chưa được
+        ghi và chưa có view để đọc — số "calls hôm nay" bên dưới là ví dụ.</>} />
+      ) : null}
       <PageHeader
         title="Mức dùng API & chi phí"
         sub={`Hôm nay · ${total} calls · theo dõi để kiểm soát chi phí SP-API 2026`}

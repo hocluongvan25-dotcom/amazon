@@ -201,9 +201,9 @@ Nguồn log tin nhắn (email shared mailbox? nhập tay?) — **cần VEXIM ch�
 
 | # | Màn hình | Nội dung chính | Cấp |
 |---|---|---|---|
-| A1 | **Campaigns** | Bảng: loại (SP/SB/SD), trạng thái, ngân sách/ngày, spend hôm qua + 7 ngày, ACOS 7/14 ngày, đơn từ ads, **đã cạn budget lúc mấy giờ hôm qua**. Hành động: bật/tắt, đổi budget/bid (ghi audit, duyệt theo ngưỡng) | 🟡 |
-| A2 | **Chi tiết campaign** | Ad groups, keywords/targets (match type, bid, impressions, CTR, CPC, ACOS từng từ), placements | 🟡 |
-| A3 | **Search terms** | Thuật ngữ người dùng gõ: clicks, spend, sales, đơn — **gợi ý negative keyword** (mức tin cậy kèm theo, người duyệt) | 🟡 |
+| A1 | **Campaigns** | Bảng: loại (SP/SB/SD), trạng thái, ngân sách/ngày, spend hôm qua + 7 ngày, ACOS 7/14 ngày, đơn từ ads, **đã cạn budget lúc mấy giờ hôm qua**. Hành động: bật/tắt, đổi budget/bid (ghi audit, duyệt theo ngưỡng) | 🟡 ✅ *P1 13/09 (0020)* |
+| A2 | **Chi tiết campaign** | Ad groups, keywords/targets (match type, bid, impressions, CTR, CPC, ACOS từng từ), placements | 🟡 ✅ *P2 13/09 (0021 · `/ppc/campaigns/[id]` — đổi bid · tạm dừng · nới ngân sách)* |
+| A3 | **Search terms** | Thuật ngữ người dùng gõ: clicks, spend, sales, đơn — **gợi ý negative keyword** (mức tin cậy kèm theo, người duyệt) | 🟡 ✅ *P2/P3 13/09 (0021 · `/ppc/search-terms` — bộ lọc SOP-04, duyệt là chặn)* |
 | A4 | **Bảng quyết định tuần** | Tổng hợp đề xuất tuần: tăng/giảm budget, giảm bid, negative — duyệt hàng loạt 1 click | 🔵 |
 
 ### Ánh xạ API (Amazon Ads API — đăng ký riêng, không thuộc SP-API)
@@ -212,11 +212,16 @@ Nguồn log tin nhắn (email shared mailbox? nhập tay?) — **cần VEXIM ch�
 |---|---|---|---|
 | Profiles của seller | Profiles API | Đọc | khi kết nối |
 | Danh sách campaigns/keywords/budget | Sponsored Products/SB/SD **Campaigns v3** (`listCampaigns`, `updateCampaigns`…) | Đọc/**Ghi** | mỗi giờ / thao tác tức thời |
+| Ghi ngân sách/bid/negative | `PUT /sp/campaigns` · `PUT /sp/keywords` · `POST /sp/negativeKeywords` (v3) | **Ghi** | ✅ *P3 13/09 (0021 · worker `ads:apply`, chỉ ghi yêu cầu ĐÃ duyệt)* |
 | Metrics theo ngày (impressions, clicks, cost, sales7d/14d/30d, ACOS, ROAS, CTR, CPC…) | **Reporting API v3** — async: tạo report (`campaigns`, `targeting`, `searchTerms`, `advertisedProduct`, `purchasedProduct`) → nhận xong → tải về | Đọc | metrics hằng ngày; intraday theo giờ cho nhóm trọng yếu |
 | Ngân sách cạn sớm | Ads notifications / budget usage | Đọc | trong ngày |
 
 ### Đầu ra cho dashboard
 KPI: spend, ACOS, TACOS, đơn từ ads. Alert: `acos_over_target`, `budget_exhausted` → SOP-04, SOP-05.
+
+**Trạng thái 13/09:** A1 ✅ (P1 · 0020) · A2 + A3 ✅ (P2 · 0021) · **phần 3 — ghi ngược lên Amazon + hàng đợi duyệt
+> 30%/ngày + audit + REVERT 1 chạm ✅** (P3 · 0021, worker `worker:ads-apply`, cron `/api/cron/report-pull` bước 3).
+Còn lại: A4 (bảng quyết định tuần — duyệt hàng loạt) và giờ cạn ngân sách (cần Amazon Marketing Stream).
 
 **Effort:** A1–A3: 4 người-tuần (🟡) · A4: 1.5 người-tuần (🔵)
 

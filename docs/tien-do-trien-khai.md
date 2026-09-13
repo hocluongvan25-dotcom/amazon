@@ -1,6 +1,330 @@
 # TIẾN ĐỘ TRIỂN KHAI — VEXIM OPS
 
-> Cập nhật: 12/09/2026 · Thứ tự build đã chốt: **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** (21 màn Đợt 1)
+> Cập nhật: 13/09/2026 · Thứ tự build đã chốt: **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** (21 màn Đợt 1)
+
+## Cập nhật 13/09 — MODULE 0: NGƯỜI DÙNG & PHÂN QUYỀN LÀM THẬT (migration 0022)
+
+Anh Hồ Lương Văn mở `/module0/users` và thấy 6 tài khoản (`haianh@vexim.vn`, `mylinh@…`,
+`tuan@…`, `ha@…`, `lan@…`, `contact@khacha-a.vn`) cùng 3 nút **Sửa · Quyền · Khóa** bấm
+không được. Kiểm tra ra **2 sự thật khác nhau** — cả hai đều phải sửa:
+
+1. **6 tài khoản đó là DỮ LIỆU GIẢ** — chỉ tồn tại trong mảng viết cứng
+   `web/src/lib/data/mock.ts`, chưa từng được `insert` vào DB ⇒ **không có mật khẩu, không
+   đăng nhập được, không phải nhân viên**. Đã **xoá hẳn** khỏi `mock.ts` (kèm type
+   `UserRow`). Chế độ demo (chưa cấu hình Supabase) dùng danh sách giả lập mới
+   `(app)/module0/users/demo-users.ts` với email `@vexim.example` và một dải cảnh báo
+   "CHẾ ĐỘ DEMO" ngay trên bảng — không thể lẫn với người thật.
+2. **3 nút bị `disabled` vì là màn demo**, không phải lỗi phân quyền. Nay chúng gọi RPC
+   thật, và **luật quyền nằm ở DB**, không ở giao diện.
+
+### Migration 0022 làm gì
+
+| Phần | Nội dung |
+|---|---|
+| `iam.user_profiles.status` | `active` · `invited` · `suspended` (+ backfill người chưa từng đăng nhập & chưa có vai trò ⇒ `invited`) |
+| `iam.role_level()` · `iam.user_level()` · `iam.is_user_admin()` | cấp bậc vai trò + ai được quản trị người dùng (super_admin/org_admin; trưởng phòng chỉ trong phòng mình) |
+| **Khóa = mất quyền THẬT** | vá 4 hàm lõi `iam.has_role` · `iam.current_org_id` · `iam.can_read_seller_account` · `iam.can_write_seller_account`: tài khoản `suspended` ⇒ luôn `false`. Nhờ vậy **mọi** bảng/view/RPC đều chặn, không cần sửa từng policy — và chặn **ngay**, không đợi JWT hết hạn |
+| 6 RPC cho web | `vexim_admin_users` (danh sách thật, trả cả `shop_ids`) · `vexim_admin_update_user` (sửa hồ sơ + khóa/mở) · `vexim_admin_set_user_access` (vai trò + phòng + shop) · `vexim_admin_audit` (nhật ký) · `vexim_admin_grant_invited_user` (ghi hồ sơ cho tài khoản vừa mời) · `vexim_touch_login` (điểm danh `invited` → `active`) |
+
+**Luật chống leo thang (đều kiểm bằng SỐ, không so chuỗi):** không ai tự đổi vai trò / tự
+khóa mình · không đụng người có cấp cao hơn · chỉ gán được vai trò **thấp hơn** mình (khớp
+ma trận `canAssign` sẵn có) · org_admin không đụng super_admin · vai trò vận hành phải thuộc
+một phòng ban · tài khoản đang khóa thì không cấp lại quyền (phải mở khóa trước) · tài khoản
+đang khóa thì mời lại **không tự hồi sinh**.
+
+### Hai lỗi âm thầm phát hiện thêm khi làm (đã sửa trong cùng đợt)
+
+* **`/api/admin/invite-user` chết trong production.** Route cũ tự kiểm vai trò rồi
+  `insert` thẳng vào `iam.user_profiles` / `role_assignments` / `assignments` bằng phiên của
+  người dùng — nhưng role `authenticated` **chưa từng được GRANT insert/update** trên các
+  bảng đó (0001 chỉ grant `select`) ⇒ mời người dùng sẽ báo `permission denied`. Nay route
+  chỉ còn gọi GoTrue (cần `service_role`) rồi để DB ghi qua RPC; luật quyền có **một nguồn
+  sự thật**.
+* **Policy `rls_upd_user_profiles_self` (0004) là policy chết**: user tự sửa hồ sơ mình
+  nhưng thiếu grant cột ⇒ "Thông tin cá nhân" ở chế độ Supabase cũng `permission denied`.
+  0022 cấp `UPDATE (display_name, phone, avatar_url, mfa_enabled)` — đúng 4 cột, không cấp
+  cả bảng.
+
+Thêm một điểm phải nhớ khi đọc code: trong SUPABASE MODE, `session.persona` **luôn là
+`ceo`** (TODO Tier 1 ở `lib/auth/session.ts`) ⇒ **không được** dùng persona để chặn trang
+này. Trang gọi RPC và để DB từ chối; người không phải admin thấy màn "Không có quyền" kèm
+lý do từ database.
+
+### Kiểm chứng
+
+* `supabase` harness: **592 PASS / 0 FAIL** (BƯỚC 23 mới — 24 phép thử cho 0022, gồm cả
+  phép thử **tài khoản bị khóa mất quyền đọc/ghi ở tầng RLS**, leo thang, tự khóa mình,
+  mời lại người đang khóa, điểm danh đăng nhập, quyền của trưởng phòng).
+* `web`: **184 test** (+10 test `users-admin`: thứ bậc vai trò · luật ẩn/hiện 3 nút ·
+  trạng thái · nhãn audit · dữ liệu demo không dùng email thật) · `tsc` sạch · `next build`
+  qua · chạy thật ở chế độ demo: `/module0/users` hiện bảng giả lập có dải cảnh báo, đúng
+  **3 nút bị tắt kèm lý do** (tự đổi quyền mình · tự khóa mình · tài khoản đang khóa), 0
+  email thật còn sót.
+
+### Việc VEXIM cần làm
+
+* ☐ Chạy **`0022_user_admin.sql`** sau 0021 (không phụ thuộc dữ liệu cũ, có DO-block tự soát).
+* ☐ Mở `/module0/users` bằng `hocluongvan88@gmail.com` → sẽ thấy **1 dòng thật** (chính anh)
+  thay vì 6 tài khoản giả; từ đó "Thêm người dùng" tạo người thật và 3 nút hoạt động.
+
+## Cập nhật 13/09 — VÁ UI MENU TRÁI trước khi bàn giao Ops (active 2 dòng · số mock)
+
+Hai lỗi Ops báo khi nhận Module 5:
+
+1. **Hai mục menu cùng sáng cam.** Ở `/ppc/search-terms` thì cả *Quảng cáo (PPC)* lẫn
+   *Search term & chặn (A3)* đều được tô nền — vì logic cũ
+   `pathname === href || pathname.startsWith(href + "/")` coi mục CHA là khớp khi đang ở
+   mục CON. Sửa bằng cách **chọn href khớp dài nhất** (`activeHrefFor` trong `lib/roles.ts`,
+   thuần nên test được): mục con thắng mục cha, trang con không có trong menu
+   (`/ppc/campaigns/C-1`) vẫn sáng mục cha gần nhất, và khớp theo **biên đoạn** nên `/ppcx`
+   KHÔNG bị tính là `/ppc`. Đã kiểm cho **toàn bộ menu** (mọi href của cả 4 vai trò) chứ
+   không chỉ vá mỗi `/ppc`.
+2. **Số đỏ cạnh menu là số mock cứng** (5 · 7 · 12 · 3…) nằm trong `roles.ts`. Một con số
+   đỏ là *lời hứa* "có 12 việc đang chờ" — bấm vào không thấy thì mất niềm tin cả dashboard.
+   Đã **gỡ hẳn trường `count`** khỏi `NavItem` và thay bằng `readNavBadges()`
+   (`lib/data/nav-badges.ts`): đếm thật bằng `select("*", { count: "exact", head: true })`
+   (Postgres đếm, KHÔNG kéo dòng nào về) trên view có RLS, mỗi badge một dòng trong
+   `NAV_BADGE_SPECS`. Hiện nối 2 badge đã có định nghĩa rõ "cần người xử lý":
+   `/ppc` = yêu cầu **chờ trưởng phòng duyệt** (`vexim_ads_changes.status='pending_approval'`),
+   `/ppc/search-terms` = gợi ý negative **đang chờ duyệt** (`vexim_ads_negative_suggestions.status='pending'`).
+   Các mục còn lại **không hiện gì** cho tới khi có query thật (thà trống còn hơn số sai);
+   query lỗi ⇒ badge biến mất, không làm sập layout.
+
+**Kiểm chứng:** `web` **174 test** (+5 test menu: chỉ 1 mục sáng · toàn bộ menu · 4 vai trò ·
+biên đoạn · không còn số mock) · `tsc` sạch · `next build` qua · chạy thật: 8 đường dẫn
+(`/ppc`, `/ppc/search-terms`, `/ppc/approvals`, `/ppc/campaigns/C-DEMO-01`, `/finance/claims`,
+`/listing/editor`, `/module0/users/new`, `/dashboard`) đều đúng **1 mục sáng** và **0 badge**
+ở chế độ demo.
+
+## Cập nhật 13/09 — MODULE 5 PHẦN 2 & 3 (A2 · A3 · GHI NGƯỢC LÊN AMAZON: hàng đợi duyệt > 30%/ngày · audit · REVERT 1 chạm) — migration 0021
+
+Phần 2 (đọc sâu) và phần 3 (ghi thật) của Module 5 đã xong trong cùng một đợt, vì
+**A3 không có nghĩa nếu bấm "chặn" mà không có đường ghi**. Một đường ghi duy nhất:
+
+```
+web (RPC 0021)  →  ads.change_requests (hàng đợi + máy trạng thái)
+                →  worker:ads-apply / cron 03:00  →  Amazon Ads API v3 (PUT/POST)
+                →  ghi kết quả + iam.audit_logs  →  gương DB (campaign/target/negative)
+```
+
+### Luật duyệt nằm ở DB, không ở màn hình (SOP-05 bước 4)
+
+- `ads.approval_reason(action, before, after, entity)`: `pct = round((after−before)*100/before, 1)`,
+  **> 30 ⇒ "Tăng X%/ngày > 30% (SOP-05 bước 4) ⇒ cần trưởng phòng PPC duyệt."**
+- Trigger `ads.change_request_guard` **tính LẠI `requires_approval` khi INSERT** ⇒ client gửi
+  `requiresApproval: false` cũng vô ích (đã có test đúng ca này).
+- Không đọc được giá trị cũ (before NULL/≤ 0) ⇒ **đòi duyệt** (không đoán).
+- Tăng bid > 30% cũng cần duyệt (tiền chảy như nhau); **GIẢM** giá ⇒ tự duyệt.
+- `PAUSED → ENABLED` (bật lại) ⇒ cần duyệt; `ENABLED → PAUSED` (chặn chi tiêu) ⇒ tự chạy.
+- **Negative keyword KHÔNG cần ngưỡng** (là hành động giảm chi tiêu) nhưng vẫn đi cùng đường ghi
+  và vẫn có audit.
+- Người yêu cầu CHÍNH LÀ trưởng phòng PPC ⇒ tự duyệt, `decided_by` vẫn ghi rõ (audit đọc được).
+- Người duyệt: `iam.is_ads_approver()` = `super_admin`/`org_admin` **hoặc `dept_lead` phòng PPC**
+  (trưởng phòng Listing không duyệt được thay đổi quảng cáo — có test chặn).
+
+### Máy trạng thái + chống mất dấu khi Amazon throttle
+
+`pending_approval → approved|rejected|cancelled` · `approved → applying|cancelled` ·
+`applying → applied|failed|approved (trả lại hàng đợi khi 429/5xx)` · `failed → approved|cancelled`.
+Dòng `applied` **không sửa được nội dung** (bằng chứng audit, trigger chặn UPDATE).
+`attempts` tăng mỗi lần claim; RPC `vexim_worker_release_ads_change` đưa dòng `applying` về
+`approved` **giữ nguyên số lần thử** ⇒ sáng hôm sau worker gửi tiếp, **không bắt trưởng phòng duyệt lại**.
+
+### Ghi lên Amazon — Ads API v3 (4 lời gọi)
+
+| Việc | API | Ghi chú |
+|---|---|---|
+| Ngân sách ngày | `PUT /sp/campaigns` | `{campaignId, budget:{budgetType:"DAILY", budget:round2(v)}}` |
+| Bid từ khoá | `PUT /sp/keywords` | bid làm tròn 2 chữ số; state `ENABLED`/`PAUSED` |
+| Thêm negative | `POST /sp/negativeKeywords` | `NEGATIVE_EXACT`/`NEGATIVE_PHRASE`, `state: ENABLED` |
+| Đọc negative | `GET /sp/negativeKeywords` | đồng bộ về gương `ads.negative_keywords` |
+
+**HTTP 200 KHÔNG phải thành công.** Ads v3 trả 200 kèm `[{code:"INVALID_ARGUMENT"}]`; nặng hơn,
+có lần trả 200 + `[]` (không phần tử nào). `normalizeWriteResponse` xử lý cả hai:
+`ok = sentCount > 0 && items.length > 0 && failed === 0`. Thất bại ⇒ **KHÔNG ghi giá trị cục bộ**
+(không để DB khoe số mà Amazon chưa hề nhận) + ghi `error` để người vận hành đọc.
+
+### An toàn dữ liệu của worker (đúng như 2 job Ads trước)
+
+- Chỉ ghi DB thật khi `mode === "production"`; thiếu credential Ads ⇒ `skipped` kèm hướng dẫn,
+  **không bắn yêu cầu nào lên Amazon**.
+- Thiếu `ads_profile_id` ⇒ dừng yêu cầu đó (không đoán profile — ghi sai shop là tiêu tiền sai shop).
+- 401/403 ⇒ **trả lại hàng đợi** (không tính là thất bại, không bắt duyệt lại) + `needsReauth` để
+  Module 0 nhắc kết nối lại.
+- 429/5xx ⇒ trả lại hàng đợi, tối đa `maxAttempts = 5` rồi mới `failed`.
+
+### Màn hình
+
+- **A2 `/ppc/campaigns/[campaignId]`** — ad group → từ khoá/nhóm sản phẩm: đổi bid, tạm dừng/bật lại
+  từ khoá, nới ngân sách campaign, danh sách negative đã chặn. Bấm campaign ở A1 là sang A2.
+- **A3 `/ppc/search-terms`** — bảng search term với **bộ lọc mặc định = luật SOP-04** (≥ 5 click ·
+  chi ≥ 10 · 0 đơn trong 7 ngày), gợi ý Exact/Phrase kèm **bằng chứng + lý do + độ tin cậy**;
+  duyệt/từ chối từng gợi ý; dòng **đã chặn thì không hiện nút** (chống tạo yêu cầu trùng).
+- **P3 `/ppc/approvals`** — 3 nhóm: *chờ trưởng phòng duyệt* (chưa gửi gì lên Amazon) · *đã duyệt
+  chờ worker gửi* · *đã xong*; nút Duyệt/Từ chối/Huỷ + **REVERT 1 chạm** cho Ops; kèm nhật ký
+  `iam.audit_logs` đọc từ `vexim_ads_audit`.
+- Web **không** dùng service_role, **không** ghi thẳng bảng: mọi nút đi qua 5 RPC `vexim_*` của 0021
+  (RLS + `iam.can_write_seller_account` quyết định quyền). Hai hàm hỏi quyền
+  (`vexim_can_ads_approve`, `vexim_can_write_ads`) chỉ để **ẩn/hiện nút cho đúng** — không phải phân quyền.
+
+### REVERT 1 chạm (Ops)
+
+Revert **không sửa dòng cũ**: nó tạo một yêu cầu MỚI đi ngược lại (`payload.revertOf = id gốc`), dòng gốc
+được đánh dấu `reverted_by` và **mất nút Revert** (chống đảo hai lần). Đảo một lần giảm giá ⇒ tự duyệt;
+đảo một lần tăng ngân sách ⇒ vẫn phải qua trưởng phòng. Negative keyword **không revert qua API**
+(Amazon không có endpoint xoá theo cách này) — DB từ chối và nói rõ phải xoá trên console rồi sync lại.
+
+### Vá lỗi RLS tự tham chiếu (phát hiện khi đọc tên người duyệt)
+
+Khi làm hàng đợi duyệt thì thấy **không đọc được tên người yêu cầu/người duyệt**: policy đọc của
+`iam.user_profiles` / `iam.role_assignments` / `iam.assignments` (và 3 policy của `ops.*`) **truy vấn
+vòng tròn chính bảng bị RLS bảo vệ** ⇒ Postgres báo `infinite recursion detected in policy for relation`
+và **mọi câu SELECT trên các bảng đó đều lỗi** cho user thật (không phải lỗi quyền — là lỗi hạ tầng).
+0021 §0 vá bằng 2 hàm `SECURITY DEFINER` (`iam.has_role(text[])`, `iam.current_org_id()`) rồi tạo lại
+11 policy với **đúng ngữ nghĩa cũ**; harness có test cho cả hai chiều (đọc được hồ sơ của mình +
+không thấy hồ sơ người khác, hết đệ quy ⇒ đọc được `ops.alert_rules`).
+
+### Kiểm chứng đợt này
+
+```bash
+cd supabase && npm test    # BƯỚC 22 của 0021: 551 kiểm tra — TẤT CẢ PASS (gồm 429→release→thử lại, revert, RLS, tự soát)
+cd worker   && npm test    # 443 test (39 test mới cho chiều GHI: payload v3 · 200-vẫn-là-lỗi · claim chỉ dòng đã duyệt · release khi throttle)
+cd web      && npm test    # 169 test (8 test mới: bộ lọc SOP-04 · nhãn trạng thái · % hiển thị · hợp đồng cột)
+cd web      && npx tsc --noEmit && npx next build   # sạch
+```
+
+### CÒN LẠI của Module 5
+
+1. Chạy `0021` trên Supabase rồi `npm run worker:ads-sync` → `ads:pull` → **`ads:apply`** (lần đầu nên
+   `--dry-run` để xem worker sẽ gửi gì).
+2. Gợi ý negative do job tổng hợp sinh trong `ads.negative_suggestions` (0020) — phần A3 chỉ **duyệt**;
+   muốn tinh chỉnh ngưỡng gợi ý thì sửa rule `ads.negative_suggestions` của 0020.
+3. Amazon Marketing Stream (giờ cạn ngân sách) vẫn là hạng mục chưa làm — Reporting v3 không có hourly.
+
+## Cập nhật 13/09 — MODULE 5 PHẦN 1 (AMAZON ADS: campaign số thật + cảnh báo ACOS/ngân sách + ads_spend → F4/TACOS) + MODULE 0: KẾT NỐI SHOP THẬT (migration 0020)
+
+Module 5 chia 3 phần như cách đã làm với Module 3. **Phần 1 (đợt này) = đọc + A1 chạy số thật**:
+cấu trúc campaign/ad group/từ khoá + 5 report metrics theo ngày + cảnh báo tự nổ + tiền quảng cáo
+chảy vào F4 để có TACOS thật. Phần 2 (A2 chi tiết campaign · A3 search term & gợi ý negative) và
+phần 3 (ghi ngược lên Amazon: đổi ngân sách/bid, thêm negative — cần ngưỡng duyệt + audit log) làm sau.
+
+### Vì sao Ads phải làm KHÁC SP-API (ba sự thật chi phối toàn bộ thiết kế)
+
+1. **Ads là đăng ký riêng** — LWA client/secret/refresh token riêng, KHÔNG dùng chung app SP-API.
+   Vì vậy `config.ts` đọc `AMAZON_ADS_*` (có fallback `ADS_LWA_*`), và `AMAZON_ADS_REGION` quyết định
+   host: `advertising-api.amazon.com` (NA) / `-eu` / `-fe`. Thiếu credential ⇒ job trả `skipped` kèm
+   hướng dẫn, KHÔNG throw (một biến môi trường thiếu không được làm đỏ dashboard).
+2. **Reporting v3 CHỈ có `DAILY` và `SUMMARY`** — không có `HOURLY`. Nên `budget_exhausted` biết *ngày*
+   cạn ngân sách nhưng **không biết giờ**: `ads.budget_events.hour_source='unavailable'`,
+   `exhausted_hour=NULL`, và giao diện nói thẳng "chưa biết giờ" thay vì bịa. Muốn có giờ phải dùng
+   Amazon Marketing Stream (chưa làm).
+3. **v3 không trả ACOS/ROAS/CPC/CTR** — đây là *số suy ra*. Hệ thống KHÔNG lưu chúng vào bảng
+   (lưu là chúng lệch ngay sau lần nhập lại) mà tính trong view từ `cost ÷ sales`.
+   Ngoài ra API chỉ giữ dữ liệu ~60 ngày ⇒ `lookbackDays` mặc định 30.
+
+### Migration `0020_ads_ppc.sql` (~3.200 dòng, idempotent + DO-block tự soát 21 mục)
+
+- **7 bảng mới + 1 bảng trạng thái**: `ads.profiles` · `ads.campaigns` (mở rộng) · **`ads.ad_groups`** ·
+  **`ads.targets`** (keyword + product target chung một bảng) · **`ads.campaign_metrics_daily`** ·
+  **`ads.target_metrics_daily`** · **`ads.search_terms`** (theo campaign × ad group × từ khoá) ·
+  **`ads.advertised_product_metrics_daily`** · **`ads.purchased_product_metrics_daily`** ·
+  **`ads.budget_events`** · **`ads.negative_suggestions`** + **`connections.oauth_states`** (state OAuth
+  dùng một lần).
+- **Cửa sổ quy đổi lưu riêng**: `sales_7d/14d/30d`, `purchases_7d/14d/30d`, `units_sold_clicks_*`
+  (≡`units_7d`) — **tuyệt đối không cộng chéo các cửa sổ** (cộng là ra "doanh thu ảo" gấp 3).
+- **16 RPC `vexim_worker_*` service_role**: upsert profile/campaign/ad group/target/metrics theo campaign/
+  metrics theo target/search term/sản phẩm được quảng cáo/sản phẩm đã mua/campaign gợi ý negative/sự kiện
+  ngân sách, **`apply_ads_spend`** (lấp `finance.sku_profit_daily.ads_spend`), và 5 RPC Module 0
+  (`set_oauth_token`, `create_oauth_state`, `consume_oauth_state`, `mark_oauth_notice`, `oauth_soon`).
+  Mọi RPC trả bộ đếm `inserted/updated/skipped/merged` (+`days`,`currencies`) — nhập lại cùng dữ liệu là
+  `updated`, **không phình bảng**.
+- **10 view**: `vexim_ads_profiles` · **`vexim_ads_campaigns`** (A1: spend hôm qua/7/14/30 ngày, ACOS
+  7/14/30 + ROAS 7 suy ra, `budget_state` capped/ok/no_data/unknown, số ngày cạn 30 ngày) ·
+  `vexim_ads_targets` (A2) · `vexim_ads_search_terms` (A3 + gợi ý negative đang chờ) ·
+  `vexim_ads_negative_suggestions` · `vexim_ads_budget_events` (`hour_known`) · `vexim_ads_sku_spend`
+  (`sku_source`) · `vexim_ads_account_daily` · `vexim_ads_kpi` (TACOS) · `vexim_oauth_connections`.
+  9 view `security_invoker` (RLS bảng gốc vẫn áp); riêng view token KHÔNG invoker vì
+  `connections.oauth_tokens` không có policy cho client — nó tự lọc bằng
+  `iam.can_read_seller_account()` và **không phơi cột token**.
+- **3 rule cảnh báo**: `acos_over_target` (ACOS 7 ngày > 25%) · `budget_exhausted` (dùng ≥ 95% ngân sách
+  ngày) · `oauth_reauth_due` (token còn ≤ 30 ngày). Lưu ý `iam.module_code` **không có `ppc`** ⇒ rule
+  quảng cáo nằm ở module `'ads'`, rule token nằm ở `'account_health'`.
+
+### Engine worker (web/src/lib/worker — Vercel Cron chạy trong `web/`)
+
+- **`amazon/ads.ts`** — `AdsClient` (LWA riêng, cache access token, retry ≤30s khi 429/5xx) với
+  `/v2/profiles` và Campaign Management v3 `list` (campaign · ad group · keyword + target, đi hết phân
+  trang `nextToken`), Reporting v3 `createReport`/`getReport`/`downloadReport` (tự giải nén GZIP_JSON).
+  `AdsApiRequestError.isThrottled` (429 — thử lại sau) tách hẳn khỏi `isAuthError` (401/403 — **phải
+  re-authorize ở Module 0**); lẫn hai cái này là hỏng cả SOP-11.
+- **`ads/registry.ts`** — 5 report (`spCampaigns` · `spTargeting` · `spSearchTerm` · `spAdvertisedProduct` ·
+  `spPurchasedProduct`) khai một chỗ: `reportTypeId`, `groupBy`, cột (chỉ cột v3 thật có), `lookbackDays`
+  30, `cooldownHours` 4; parser đọc được **mảng JSON · JSON-lines · object bọc mảng**, dòng thiếu khoá bị
+  **bỏ + đếm**, không tự tính ACOS.
+- **`jobs/ads-sync.job.ts`** — profile → campaign → ad group → target. Ghi **hết** profile token nhìn
+  thấy (shop US+CA có 2 profile), ưu tiên profile khớp marketplace.
+- **`jobs/ads-report-pull.job.ts`** — clone đúng luật 0019: `cooldownHours` + **poll-không-tạo-mới** qua
+  `connections.report_requests` + report rỗng ⇒ `no_data` (không phải lỗi) + `--dry-run` không ghi gì.
+  Khác 0019 ở **bước nghiệp vụ sau khi nhập**: tự tạo cảnh báo `acos_over_target` /
+  `budget_exhausted` (**tiêu đề cố định** để dedupe 24h không sinh cảnh báo mới mỗi ngày; có ngưỡng tối
+  thiểu click/chi để không nhiễu vì campaign nhỏ), ghi `ads.budget_events` (`capped`,
+  `hour_source='unavailable'`), và **`apply_ads_spend`** cho report `spAdvertisedProduct` (chỉ UPDATE dòng
+  F4 đã có — không tạo dòng lợi nhuận mới, không trộn tiền tệ; SKU thiếu dòng F4 thì **cảnh báo rõ** để
+  người vận hành chạy F4 cho ngày đó trước).
+- **`run-ads.ts`** (runner dùng chung) + CLI: `npm run worker:ads-sync` · `npm run worker:ads-pull`
+  (`--kind=…` `--days=30` `--poll=3` `--dry-run`; nạp file tay bằng `--campaigns=<file.json>` …) ·
+  `npm run worker:oauth-soon` (`--mark` mới tạo cảnh báo).
+- **Cron** `/api/cron/report-pull` giờ chạy 3 bước: report FBA → cấu trúc Ads → report Ads
+  (`?ads=0` để tắt, `?adsKinds=campaigns,targeting` để giới hạn). **Vercel Hobby chỉ cho 2 cron/ngày** nên
+  không thêm cron thứ ba; cron vẫn poll tối đa 2 lần rồi ghi trạng thái để lần chạy sau nối tiếp.
+
+### A1 chạy số thật + TACOS thật
+
+- `web/src/lib/data/ppc.ts` + `ppc-model.ts` đọc `vexim_ads_kpi`, `vexim_ads_campaigns`,
+  `vexim_ads_budget_events`, `vexim_ads_negative_suggestions`, `vexim_sku_profit`.
+- Màn **`/ppc`**: KPI (chi 7 ngày · ACOS 7 ngày · ROAS · **TACOS** · đơn từ quảng cáo), bảng campaign
+  (trạng thái ngân sách + ACOS 7/14 + ROAS + CTR/CPC + đơn), panel "Vì sao hết đơn giữa ngày"
+  (ngày cạn ngân sách, nói rõ *chưa biết giờ*), và danh sách việc phần 2/3 còn thiếu. Demo mode vẫn là
+  dữ liệu minh hoạ; **chưa có dữ liệu Ads ⇒ màn hình hiện đúng 2 lệnh cần chạy**, không hiện số 0 giả.
+- **Dashboard CEO** thêm thẻ "Chi ads 7 ngày · ACOS · TACOS" (NULL khi chưa nối Ads). TACOS dùng chung
+  một công thức với màn PPC (`computeTacos`): cùng tiền tệ + cùng cửa sổ 7 ngày có số, thiếu một trong
+  hai thì trả NULL chứ không đoán.
+
+### Module 0 — từ trang mô tả thành luồng authorize THẬT (SOP-11)
+
+- `GET /api/oauth/amazon/start?seller=<uuid>`: kiểm tra quyền đọc shop (RLS `vexim_shops`) → gọi RPC
+  `create_oauth_state` (state dùng một lần, TTL 30 phút) → chuyển sang Seller Central
+  (`/apps/authorize/consent?application_id=…&state=…&redirect_uri=…`, host theo vùng).
+- `GET /api/oauth/amazon/callback`: **5 chốt an toàn** — (1) state dùng một lần/đã hết hạn ⇒ dừng;
+  (2) `selling_partner_id` Amazon trả về phải khớp shop đang nối, **lệch ⇒ KHÔNG lưu token** (chống nối
+  nhầm shop); (3) token rỗng bị chặn (cả ở route lẫn RPC); (4) đổi code xong mới ghi DB; (5) luôn quay về
+  màn hình kèm lý do cụ thể (kể cả `access_denied`, `invalid_grant` — dịch sang tiếng Việt dễ hiểu).
+- `/module0/connect` giờ là **công cụ thật**: danh sách shop + trạng thái token (còn mấy ngày, cần
+  re-auth chưa, có profile Ads chưa) + nút Kết nối/Kết nối lại; DEMO mode vẫn hiện wizard mô tả như cũ.
+- **Nhắc re-authorize**: job `oauth-reminder.job.ts` đọc RPC `vexim_worker_oauth_soon` (view token lọc
+  theo `auth.uid()` nên service_role đọc ra 0 dòng — luật "còn ≤ notice_days là phải nhắc" nằm ở DB),
+  tạo cảnh báo `oauth_reauth_due` **một lần cho mỗi đợt** rồi `mark_oauth_notice`; authorize lại sẽ tự
+  reset cờ. Cron chạy bước này đầu tiên (token chết là mọi bước sau hỏng).
+
+### Kiểm chứng đợt này
+
+- `supabase/` (PGlite): **BƯỚC 21 mới — 490 kiểm tra, TẤT CẢ PASS** (bảng · RLS SELECT-only · 16 RPC chỉ
+  service_role · 10 view + hợp đồng cột · luật nhập (merge/skip/currency) · `apply_ads_spend` chỉ UPDATE ·
+  rule cảnh báo · `oauth_soon`).
+- `worker/` **427 test** (+38 test mới: AdsClient/registry/parser + 2 job Ads + job nhắc re-auth),
+  `web/` **161 test** (+9 test model A1), `npx tsc --noEmit` sạch, `next build` qua (thêm 2 route OAuth).
+- Đã commit: `71ed3b0` (0020) · `e0adcf5` (engine Ads) · `ab8d264` (job + Module 0 OAuth).
+
+### CÒN LẠI (đúng thứ tự)
+
+1. **Điền biến môi trường** (`.env.example` đã cập nhật): `AMAZON_ADS_*`, `AMAZON_SP_API_APP_ID`,
+   `AMAZON_SP_API_REDIRECT_URI`, `CRON_SECRET`. Sau đó chạy `worker:ads-sync` → `worker:ads-pull` là A1
+   có số thật.
+2. **Phần 2 Module 5**: A2 (chi tiết campaign, ad group → từ khoá/nhóm sản phẩm — dữ liệu đã có sẵn
+   trong `ads.targets` + `vexim_ads_targets`) và A3 (search term + duyệt negative, `ads.negative_suggestions`
+   đã có cột bằng chứng + độ tin cậy).
+3. **Phần 3 Module 5 (ghi)**: đổi ngân sách/bid/state + thêm negative lên Amazon — kèm **ngưỡng duyệt**
+   (tăng ngân sách > 30%/ngày cần trưởng phòng, SOP-05 bước 4) và ghi `iam.audit_logs` như `listing:publish`.
 
 ## Cập nhật 12/09 — MODULE 3 NÂNG CAO (phần 2): PHÍ theo FC + phí inbound noncompliance + cron tự kéo Reports API (migration 0019)
 
@@ -776,6 +1100,8 @@ nên không phụ thuộc bước này).
 - ✅ Tạo project Supabase (`pitmyzovjwflkyoqjbkz`) + set 14 biến môi trường trên Vercel — **xong 12/09**
 - ☐ **Chạy `0006` rồi `0007` trong SQL Editor** (dọn fixture test + tạo super_admin/alerts)
 - ☐ Chạy `0008` → `0009` → **`0010`** (wrapper RPC · shop production · hạ tầng Module 4/6/7)
+- ☐ **Chạy `0020` rồi `0021`** (Amazon Ads đọc + phần 2/3: hàng đợi duyệt · audit · revert) — 0021 cần chạy SAU 0020
+- ☐ **Chạy `0022_user_admin.sql`** (Module 0: quản trị người dùng thật — Sửa · Quyền · Khóa, khóa = mất quyền ở tầng RLS) — chạy SAU 0021
 - ☐ ✅ `0011`/`0012`/`0013` đã chạy · ☐ **`0014`** (trình soạn listing L3) · ☐ **`0015`** (bồi hoàn FBA + lợi nhuận SKU) · ☐ **`0016`** (Đợt A: giá vốn + ghi listing + `vexim_pricing` dùng giá vốn) · ☐ **`0017`** (Đợt B: doanh số 30 ngày + người phụ trách + giá trị tồn kho) · ☐ **`0018`** (Module 3 nâng cao: phân bổ tồn theo FC + lịch sử nhận hàng)
 - ☐ **Thêm `CRON_SECRET` trên Vercel** (Production + Preview) → Redeploy
 - ☐ `AMAZON_LWA_CLIENT_ID` / `_CLIENT_SECRET` / `_REFRESH_TOKEN` khi Developer Profile được duyệt — thiếu 3 biến này thì worker chỉ chạy demo trong bộ nhớ (an toàn, không ghi DB thật)

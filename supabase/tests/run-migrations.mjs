@@ -2759,6 +2759,1447 @@ await cmp(
   3,
 );
 
+// ============================================================================
+console.log("\n=== BƯỚC 21: 0020 — Module 5 PPC phần 1 (Ads API v3 + re-authorize) ===");
+// ============================================================================
+ok(
+  await ex(rd("migrations/0020_ads_ppc.sql"), "0020_ads_ppc.sql"),
+  "0020 chạy sạch (DO-block tự soát: bảng · RLS · 16 RPC · 10 view · hợp đồng cột · rule cảnh báo)",
+);
+
+// ---- hợp đồng cột: web đọc bằng chuỗi select cố định -----------------------
+ok(
+  (await colsOf("vexim_ads_campaigns")) ===
+    "seller_account_id,shop,ads_profile_id,campaign_id,campaign_type,name,state,targeting_type," +
+    "portfolio_id,daily_budget,currency,start_date,end_date,last_day,spend_yesterday,spend_7d," +
+    "spend_14d,spend_30d,sales_7d,sales_14d,sales_30d,purchases_7d,units_7d,clicks_7d," +
+    "impressions_7d,cpc_7d,ctr_7d,acos_7d,acos_14d,acos_30d,roas_7d," +
+    "budget_usage_yesterday_pct,budget_state,capped_days_30d,last_capped_day,last_synced_at,updated_at",
+  "0020: vexim_ads_campaigns đúng hợp đồng cột (A1 đọc bằng tên)",
+);
+ok(
+  (await colsOf("vexim_ads_search_terms")) ===
+    "seller_account_id,shop,campaign_id,campaign_name,ad_group_id,ad_group_name,keyword_id," +
+    "keyword_text,term,match_type,currency,last_day,impressions_7d,clicks_7d,spend_7d,sales_7d," +
+    "purchases_7d,units_7d,spend_14d,sales_14d,has_orders_7d,last_order_day,cpc_7d,ctr_7d," +
+    "acos_7d,roas_7d,acos_14d,pending_suggestion_type,pending_confidence,pending_confidence_label",
+  "0020: vexim_ads_search_terms đúng hợp đồng cột (A3 + gợi ý đang chờ)",
+);
+ok(
+  (await colsOf("vexim_oauth_connections")) ===
+    "seller_account_id,shop,seller_id,marketplace,shop_status,data_source,auth_scope,authorized_at," +
+    "expires_at,days_left,is_expired,needs_reauth,notice_days,rotate_reminder_sent,notice_sent_at," +
+    "last_refresh_at,refresh_count,revoked_at,is_active,ads_profiles",
+  "0020: vexim_oauth_connections đúng hợp đồng cột (KHÔNG có cột token)",
+);
+
+await cmp(
+  "0020: 8 bảng mới bật RLS",
+  `select count(*) n from pg_class c join pg_namespace ns on ns.oid=c.relnamespace
+    where (ns.nspname,c.relname) in (('ads','ad_groups'),('ads','targets'),
+          ('ads','target_metrics_daily'),('ads','advertised_product_metrics_daily'),
+          ('ads','purchased_product_metrics_daily'),('ads','budget_events'),
+          ('ads','negative_suggestions'),('connections','oauth_states'))
+      and c.relrowsecurity`,
+  8,
+);
+await cmp(
+  "0020: KHÔNG có policy ghi nào trên schema ads",
+  "select count(*) n from pg_policies where schemaname='ads' and cmd <> 'SELECT'",
+  0,
+);
+await cmp(
+  "0020: 16 RPC worker = security definer, chỉ service_role execute được",
+  `select count(*) n from pg_proc p where p.oid = any (array[
+     'public.vexim_worker_upsert_ads_profiles(uuid, jsonb)'::regprocedure,
+     'public.vexim_worker_upsert_ads_campaigns(uuid, jsonb)'::regprocedure,
+     'public.vexim_worker_upsert_ads_ad_groups(uuid, jsonb)'::regprocedure,
+     'public.vexim_worker_upsert_ads_targets(uuid, jsonb)'::regprocedure,
+     'public.vexim_worker_upsert_ads_campaign_metrics(uuid, jsonb)'::regprocedure,
+     'public.vexim_worker_upsert_ads_target_metrics(uuid, jsonb)'::regprocedure,
+     'public.vexim_worker_upsert_ads_search_terms(uuid, jsonb)'::regprocedure,
+     'public.vexim_worker_upsert_ads_product_metrics(uuid, text, jsonb)'::regprocedure,
+     'public.vexim_worker_upsert_ads_budget_events(uuid, jsonb)'::regprocedure,
+     'public.vexim_worker_upsert_ads_suggestions(uuid, jsonb)'::regprocedure,
+     'public.vexim_worker_apply_ads_spend(uuid, date, date)'::regprocedure,
+     'public.vexim_worker_set_oauth_token(uuid, jsonb)'::regprocedure,
+     'public.vexim_worker_create_oauth_state(uuid, text, int)'::regprocedure,
+     'public.vexim_worker_consume_oauth_state(text)'::regprocedure,
+     'public.vexim_worker_mark_oauth_notice(uuid)'::regprocedure,
+     'public.vexim_worker_oauth_soon(int)'::regprocedure])
+   and p.prosecdef
+   and not has_function_privilege('authenticated', p.oid, 'EXECUTE')
+   and has_function_privilege('service_role', p.oid, 'EXECUTE')`,
+  16,
+);
+await cmp(
+  "0020: 9 view ads đều security_invoker",
+  `select count(*) n from pg_class c join pg_namespace ns on ns.oid=c.relnamespace
+    where ns.nspname='public' and c.relname in ('vexim_ads_profiles','vexim_ads_campaigns',
+      'vexim_ads_targets','vexim_ads_search_terms','vexim_ads_negative_suggestions',
+      'vexim_ads_budget_events','vexim_ads_sku_spend','vexim_ads_account_daily','vexim_ads_kpi')
+      and 'security_invoker=true'=any(c.reloptions)`,
+  9,
+);
+await cmp(
+  "0020: rule cảnh báo acos_over_target + budget_exhausted (module='ads')",
+  "select count(*) n from ops.alert_rules where rule_code in ('acos_over_target','budget_exhausted') and module='ads'",
+  2,
+);
+
+// ---- fixture: 1 user PPC được gán shop + 1 người lạ ------------------------
+await ex("begin");
+await ex("reset role;");
+// Che UUID trong log cho dễ đọc, và không để một câu select hỏng làm sập cả bộ test.
+function hid(s) {
+  let t = String(s);
+  for (const [v, n] of [[pShop, "<shop>"], [pUser, "<user>"], [pStranger, "<user-lạ>"]])
+    if (v) t = t.split(v).join(n);
+  return t;
+}
+const J = (o) => hid(JSON.stringify(o));
+const at = async (sql) => {
+  try { return await one(sql); } catch (e) { return { __error: hid(e && e.message ? e.message : e) }; }
+};
+const pShop = (await one("select id from connections.seller_accounts order by seller_id limit 1")).id;
+const pUser     = "e1000000-0000-4000-8000-000000000001";
+const pStranger = "e1000000-0000-4000-8000-000000000002";
+ok(
+  await ex(`insert into auth.users(id,email) values
+     ('${pUser}','local-e-ppc@example.test'),('${pStranger}','local-e-stranger@example.test');
+   insert into iam.user_profiles(id,display_name,email,vexim_employee) values
+     ('${pUser}','PPC VEXIM','local-e-ppc@example.test',true),
+     ('${pStranger}','Người lạ','local-e-stranger@example.test',true);
+   insert into iam.assignments(user_id,seller_account_id,module,can_write,created_at) values
+     ('${pUser}','${pShop}','ads',true, now() - interval '1 day');
+   insert into iam.role_assignments(user_id,role) values ('${pUser}','operator');
+   insert into finance.sku_profit_daily(seller_account_id, sku, day, currency, units, revenue, amazon_fees)
+     values ('${pShop}','ADS-SKU', current_date - 1, 'USD', 3, 90, 12),
+            ('${pShop}','ADS-SKU', current_date - 1, 'CAD', 1, 25, 3),
+            ('${pShop}','ADS-ONLYCAD', current_date - 1, 'CAD', 1, 25, 3);`),
+  "0020 fixture: user PPC + người lạ + 2 dòng F4 (USD và CAD) để thử lấp ads_spend",
+);
+
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role service_role;");
+
+// ---- 1. Profiles ------------------------------------------------------------
+const adsProfile = J([
+  { adsProfileId: "1234567890", marketplace: "ATVPDKIKX0DER", currency: "usd", countryCode: "US", accountType: "seller" },
+  { adsProfileId: "1234567890", marketplace: "ATVPDKIKX0DER", currency: "USD" },   // trùng khoá → gộp
+  { adsProfileId: "", marketplace: "ATVPDKIKX0DER" },                              // thiếu profile → bỏ
+]);
+const prof1 = await at(`select * from public.vexim_worker_upsert_ads_profiles('${pShop}', '${adsProfile}'::jsonb)`);
+ok(
+  Number(prof1.inserted) === 1 && Number(prof1.updated) === 0 && Number(prof1.skipped) === 1,
+  `0020 RPC profiles: ghi 1 · bỏ 1 dòng thiếu profileId — ${J(prof1)}`,
+);
+const prof2 = await at(`select * from public.vexim_worker_upsert_ads_profiles('${pShop}', '${adsProfile}'::jsonb)`);
+ok(Number(prof2.inserted) === 0 && Number(prof2.updated) === 1, "0020 RPC profiles: nhập lại → updated, không nhân đôi");
+
+// ---- 2. Campaigns (endDate ghi đè được bằng NULL) ---------------------------
+const campaigns = J([
+  { campaignId: "C-1", adsProfileId: "1234567890", campaignType: "sp", name: "Vali 20 inch — Exact",
+    state: "enabled", dailyBudget: "20.00", budgetCurrency: "usd", targetingType: "MANUAL",
+    budgetType: "DAILY", biddingStrategy: "LEGACY_FOR_SALES", startDate: "2026-08-01", endDate: "2026-12-31" },
+  { campaignId: "C-2", adsProfileId: "1234567890", campaignType: "sp", name: "Auto — Vali",
+    state: "PAUSED", dailyBudget: "5", startDate: "2026-08-15" },
+  { campaignId: "", name: "Thiếu id" },                                            // bỏ
+]);
+const camp1 = await at(`select * from public.vexim_worker_upsert_ads_campaigns('${pShop}', '${campaigns}'::jsonb)`);
+ok(Number(camp1.inserted) === 2 && Number(camp1.skipped) === 1,
+  `0020 RPC campaigns: ghi 2 · bỏ 1 — ${J(camp1)}`);
+const campNoEnd = J([
+  { campaignId: "C-1", adsProfileId: "1234567890", campaignType: "sp", name: "Vali 20 inch — Exact",
+    state: "ENABLED", dailyBudget: "20.00", budgetCurrency: "USD", startDate: "2026-08-01" },
+]);
+await at(`select * from public.vexim_worker_upsert_ads_campaigns('${pShop}', '${campNoEnd}'::jsonb)`);
+ok(
+  (await at("select end_date from ads.campaigns where campaign_id='C-1'")).end_date === null,
+  "0020 RPC campaigns: endDate gửi thiếu ⇒ XOÁ hạn cũ (không giữ hạn đã gỡ)",
+);
+
+// ---- 3. Metrics campaign: gộp trùng khoá · số rác → NULL · 2 tiền tệ --------
+const mDay = d10((await one("select current_date - 1 as d")).d);   // hôm qua
+const mPrev = d10((await one("select current_date - 2 as d")).d);  // hôm trước
+const metrics = J([
+  { day: mDay, campaignId: "C-1", adsProfileId: "1234567890", impressions: "1000", clicks: "20",
+    cost: "18.00", sales7d: "90.00", sales14d: "95.00", sales30d: "99.00", purchases7d: "3",
+    unitsSoldClicks7d: "3", currency: "USD", budgetAmount: "20.00" },
+  { day: mDay, campaignId: "C-1", cost: "2.00", impressions: "100", clicks: "2", currency: "USD" }, // trùng khoá → cộng
+  { day: mPrev, campaignId: "C-1", impressions: "500", clicks: "10", cost: "4.00",
+    sales7d: "10.00", purchases7d: "1", currency: "USD" },
+  { day: mDay, campaignId: "C-2", cost: "4.50", sales7d: "0", currency: "USD" },
+  { day: mDay, campaignId: "C-2", cost: "abc", currency: "USD" },                    // số rác → NULL, vẫn nhận dòng
+  { day: "13/09/2026", campaignId: "C-1", cost: "9" },                               // ngày sai → bỏ
+  { day: mDay, campaignId: "", cost: "9" },                                          // thiếu campaign → bỏ
+]);
+const met1 = await at(`select * from public.vexim_worker_upsert_ads_campaign_metrics('${pShop}', '${metrics}'::jsonb)`);
+ok(
+  Number(met1.inserted) === 3 && Number(met1.skipped) === 2 && Number(met1.merged) === 2
+    && Number(met1.days) === 2 && met1.currencies === "USD",
+  `0020 RPC campaign metrics: 3 dòng · bỏ 2 rác · gộp 2 dòng trùng khoá · 2 ngày · USD — ${J(met1)}`,
+);
+ok(
+  (await at("select cost from ads.ad_metrics_daily where campaign_id='C-1' and day='" + mDay + "'")).cost == 20,
+  "0020: dòng trùng khoá được CỘNG (18 + 2 = 20)",
+);
+ok(
+  (await at("select spend, sales, orders from ads.ad_metrics_daily where campaign_id='C-1' and day='" + mDay + "'"))
+    .spend == 20,
+  "0020: cột 0001 giữ đồng bộ (spend = cost = 20)",
+);
+
+// ---- 4. Ad groups + targets + target metrics --------------------------------
+await at(`select * from public.vexim_worker_upsert_ads_ad_groups('${pShop}', '${JSON.stringify([
+  { adGroupId: "AG-1", campaignId: "C-1", name: "Vali 20 — exact", state: "enabled", defaultBid: "1.25" },
+])}'::jsonb)`);
+const targets = J([
+  { targetKey: "KW-1", targetKind: "keyword", campaignId: "C-1", adGroupId: "AG-1",
+    keywordText: "vali 20 inch", matchType: "exact", bid: "1.10", state: "ENABLED" },
+  { targetKey: "T-1", targetKind: "product_target", campaignId: "C-1", adGroupId: "AG-1",
+    expressionType: "ASIN_SAME_AS", expressionValue: "B08N5WRWNW", bid: "0.90" },
+  { targetKey: "", targetKind: "keyword", adGroupId: "AG-1" },                        // bỏ
+]);
+const tgt1 = await at(`select * from public.vexim_worker_upsert_ads_targets('${pShop}', '${targets}'::jsonb)`);
+ok(Number(tgt1.inserted) === 2 && Number(tgt1.skipped) === 1,
+  `0020 RPC targets: ghi 2 (keyword + product target) · bỏ 1 — ${J(tgt1)}`);
+const tgtMet = await at(`select * from public.vexim_worker_upsert_ads_target_metrics('${pShop}', '${JSON.stringify([
+  { day: mDay, campaignId: "C-1", adGroupId: "AG-1", targetKind: "keyword", targetKey: "KW-1",
+    keywordText: "vali 20 inch", matchType: "EXACT", impressions: "800", clicks: "16", cost: "17.60",
+    sales7d: "90.00", purchases7d: "3", unitsSoldClicks7d: "3", currency: "USD" },
+  { day: mDay, adGroupId: "", targetKey: "KW-1", cost: "1" },                          // thiếu ad group → bỏ
+])}'::jsonb)`);
+ok(Number(tgtMet.inserted) === 1 && Number(tgtMet.skipped) === 1, "0020 RPC target metrics: ghi 1 · bỏ 1 (thiếu ad group)");
+const targetView = await at(`select spend_7d, sales_7d, acos_7d, roas_7d, keyword_text
+   from public.vexim_ads_targets where ad_group_id='AG-1' and target_key='KW-1'`);
+ok(
+  Number(targetView.spend_7d) === 17.6 && Number(targetView.sales_7d) === 90
+    && Number(targetView.acos_7d) === 19.56 && Number(targetView.roas_7d) === 5.11,
+  `0020 view A2: ACOS/ROAS SUY RA từ cost ÷ sales (acos=${targetView.acos_7d} · roas=${targetView.roas_7d})`,
+);
+
+// ---- 5. Search terms (lower() + gợi ý negative kèm mức tin cậy) -------------
+const st1 = await at(`select * from public.vexim_worker_upsert_ads_search_terms('${pShop}', '${JSON.stringify([
+  { day: mDay, campaignId: "C-1", adGroupId: "AG-1", keywordId: "KW-1", keywordText: "vali 20 inch",
+    searchTerm: "Vali 20 Inch TSA", matchType: "EXACT", impressions: "300", clicks: "12",
+    cost: "9.60", sales7d: "0", purchases7d: "0", currency: "USD" },
+  { day: mDay, campaignId: "C-1", adGroupId: "AG-1", keywordId: "KW-1",
+    searchTerm: "vali 20 inch tsa", matchType: "EXACT", cost: "1.00", currency: "USD" },
+  { day: mDay, campaignId: "C-1", adGroupId: "AG-1", keywordId: "KW-1",
+    searchTerm: "vali 20 inch  TSA", matchType: "EXACT", cost: "1.00", currency: "USD" }, // khác khoảng trắng
+  { day: mDay, campaignId: "C-1", adGroupId: "AG-1", keywordId: "KW-1",
+    searchTerm: "", matchType: "EXACT", cost: "1.00" },                                // thiếu term → bỏ
+])}'::jsonb)`);
+ok(
+  Number(st1.inserted) === 2 && Number(st1.skipped) === 1 && Number(st1.merged) === 1,
+  `0020 RPC search terms: gộp 2 dòng chỉ khác hoa/thường · giữ riêng dòng khác khoảng trắng — ${J(st1)}`,
+);
+ok(
+  (await at("select count(*) n from ads.search_terms where term = 'vali 20 inch  tsa'")).n === 1
+    && (await at("select count(*) n from ads.search_terms where term = 'vali 20 inch tsa'")).n === 1,
+  "0020: term được lower() nhưng KHÔNG tự gộp khoảng trắng (giữ nguyên dữ liệu Amazon gửi)",
+);
+const sug1 = await at(`select * from public.vexim_worker_upsert_ads_suggestions('${pShop}', '${JSON.stringify([
+  { campaignId: "C-1", adGroupId: "AG-1", term: "vali 20 inch tsa", matchType: "EXACT",
+    suggestionType: "negative_exact", confidence: "0.82", confidenceLabel: "high", windowDays: 14,
+    evidence: { clicks: 12, cost: 10.6, orders: 0, acos: null },
+    reasons: ["clicks ≥ 10", "spend ≥ 5$", "0 đơn trong 14 ngày"] },
+  { campaignId: "C-1", adGroupId: "AG-1", term: "vali 20 inch  tsa", matchType: "EXACT",
+    suggestionType: "khong_hop_le", confidence: "0.9" },                               // loại lạ → bỏ
+])}'::jsonb)`);
+ok(Number(sug1.inserted) === 1 && Number(sug1.skipped) === 1 && Number(sug1.kept) === 0,
+  `0020 RPC suggestions: ghi 1 · bỏ 1 loại lạ — ${J(sug1)}`);
+const stView = await at(`select has_orders_7d, pending_suggestion_type, pending_confidence, pending_confidence_label
+   from public.vexim_ads_search_terms where term = 'vali 20 inch tsa'`);
+ok(
+  stView.has_orders_7d === false && stView.pending_suggestion_type === "negative_exact"
+    && Number(stView.pending_confidence) === 0.82 && stView.pending_confidence_label === "high",
+  `0020 view A3: search term gắn gợi ý đang chờ + mức tin cậy — ${J(stView)}`,
+);
+// người duyệt quyết rồi thì worker KHÔNG được ghi đè
+await ex(`update ads.negative_suggestions set status='approved',
+            decided_by='${pUser}', decided_at=now(), decision_note='duyệt thử'
+          where suggestion_type='negative_exact'`);
+const sug2 = await at(`select * from public.vexim_worker_upsert_ads_suggestions('${pShop}', '${JSON.stringify([
+  { campaignId: "C-1", adGroupId: "AG-1", term: "vali 20 inch tsa", matchType: "EXACT",
+    suggestionType: "negative_exact", confidence: "0.99", confidenceLabel: "high", windowDays: 14 },
+])}'::jsonb)`);
+ok(
+  Number(sug2.inserted) === 0 && Number(sug2.updated) === 0 && Number(sug2.kept) === 1
+    && (await at("select confidence from ads.negative_suggestions where suggestion_type='negative_exact'")).confidence == 0.82,
+  `0020 RPC suggestions: quyết định của con người BẤT KHẢ XÂM PHẠM (kept=1, confidence giữ 0.82) — ${J(sug2)}`,
+);
+
+// ---- 6. Product metrics + lấp ads_spend vào F4 ------------------------------
+const prod = await at(`select * from public.vexim_worker_upsert_ads_product_metrics('${pShop}', 'advertised', '${JSON.stringify([
+  { day: mDay, campaignId: "C-1", adGroupId: "AG-1", advertisedAsin: "B08N5WRWNW",
+    advertisedSku: "ADS-SKU", impressions: "900", clicks: "18", cost: "17.50",
+    sales7d: "90.00", purchases7d: "3", currency: "USD" },
+  { day: mDay, campaignId: "C-1", adGroupId: "AG-1", advertisedAsin: "B0CADONLY",
+    advertisedSku: "ADS-ONLYCAD", cost: "5.00", currency: "USD" },
+  { day: mDay, campaignId: "C-1", adGroupId: "AG-1", advertisedAsin: "", advertisedSku: "",
+    cost: "3.00", currency: "USD" },                                                 // không biết SKU/ASIN → bỏ
+])}'::jsonb)`);
+ok(Number(prod.inserted) === 2 && Number(prod.skipped) === 1,
+  `0020 RPC product metrics (advertised): ghi 2 · bỏ 1 dòng không có ASIN/SKU — ${J(prod)}`);
+ok(
+  await mustBlock(`select * from public.vexim_worker_upsert_ads_product_metrics('${pShop}', 'ads', '[]'::jsonb)`),
+  "0020: p_level lạ ('ads') bị TỪ CHỐI (chỉ advertised | purchased)",
+);
+const purch = await at(`select * from public.vexim_worker_upsert_ads_product_metrics('${pShop}', 'purchased', '${JSON.stringify([
+  { day: mDay, campaignId: "C-1", adGroupId: "AG-1", advertisedAsin: "B08N5WRWNW",
+    advertisedSku: "ADS-SKU", purchasedAsin: "B07XXXXXXX", keywordText: "vali 20 inch",
+    matchType: "EXACT", sales7d: "0", salesOtherSku7d: "45.00", purchases7d: "1",
+    unitsSoldOtherSku7d: "1", currency: "USD" },
+  { day: mDay, campaignId: "C-1", adGroupId: "AG-1", advertisedAsin: "B08N5WRWNW",
+    purchasedAsin: "", sales7d: "5" },                                               // thiếu purchasedAsin → bỏ
+])}'::jsonb)`);
+ok(Number(purch.inserted) === 1 && Number(purch.skipped) === 1,
+  "0020 RPC product metrics (purchased): ghi 1 · bỏ 1 (thiếu purchasedAsin)",
+);
+const skuSpend = await at(`select sku, sku_source, cost, sales_7d from public.vexim_ads_sku_spend
+   where day='${mDay}' and sku='ADS-SKU'`);
+ok(
+  skuSpend.sku === "ADS-SKU" && skuSpend.sku_source === "advertised_sku" && Number(skuSpend.cost) === 17.5,
+  `0020 view sku_spend: SKU lấy từ advertised_sku — ${J(skuSpend)}`,
+);
+const applied = await at(`select * from public.vexim_worker_apply_ads_spend('${pShop}', '${mPrev}'::date, '${mDay}'::date)`);
+const f4 = await at(`select ads_spend from finance.sku_profit_daily
+   where seller_account_id='${pShop}' and sku='ADS-SKU' and day='${mDay}' and currency='USD'`);
+const f4cad = await at(`select ads_spend from finance.sku_profit_daily
+   where seller_account_id='${pShop}' and sku='ADS-SKU' and day='${mDay}' and currency='CAD'`);
+const f4only = await at(`select ads_spend from finance.sku_profit_daily
+   where seller_account_id='${pShop}' and sku='ADS-ONLYCAD' and day='${mDay}' and currency='CAD'`);
+ok(
+  Number(applied.updated) === 1 && Number(applied.skipped_currency) === 1 && Number(applied.skipped_no_row) === 0
+    && Number(f4.ads_spend) === 17.5 && f4cad.ads_spend === null && f4only.ads_spend === null,
+  `0020 apply_ads_spend: lấp 1 dòng USD · 1 dòng chỉ có bản CAD bị BỎ (không trộn tiền tệ) — ${J(applied)}`,
+);
+
+// ---- 7. Budget events (biết cạn, KHÔNG bịa giờ) ----------------------------
+const bud = await at(`select * from public.vexim_worker_upsert_ads_budget_events('${pShop}', '${JSON.stringify([
+  { day: mDay, campaignId: "C-1", eventType: "capped", budgetAmount: "20.00", currency: "USD",
+    cost: "20.00", usagePct: "100", note: "chi tiêu đạt 100% ngân sách ngày" },
+  { day: mDay, campaignId: "C-2", eventType: "ngu_ngoc", cost: "1" },               // loại lạ → bỏ
+])}'::jsonb)`);
+ok(Number(bud.inserted) === 1 && Number(bud.skipped) === 1, "0020 RPC budget events: ghi 1 · bỏ 1 loại lạ");
+const budView = await at(`select event_type, hour_known, exhausted_hour, hour_source
+   from public.vexim_ads_budget_events where campaign_id='C-1'`);
+ok(
+  budView.event_type === "capped" && budView.hour_known === false
+    && budView.exhausted_hour === null && budView.hour_source === "unavailable",
+  `0020 budget event: biết CẠN nhưng GIỜ = NULL (không bịa) — ${J(budView)}`,
+);
+
+// ---- 8. A1: ACOS/ROAS suy ra + trạng thái ngân sách ------------------------
+const a1 = await at(`select spend_yesterday, spend_7d, sales_7d, acos_7d, roas_7d,
+    budget_usage_yesterday_pct, budget_state, capped_days_30d
+   from public.vexim_ads_campaigns where campaign_id='C-1'`);
+ok(
+  Number(a1.spend_yesterday) === 20 && Number(a1.spend_7d) === 24 && Number(a1.sales_7d) === 100
+    && Number(a1.acos_7d) === 24 && Number(a1.roas_7d) === 4.17
+    && Number(a1.budget_usage_yesterday_pct) === 100 && a1.budget_state === "capped"
+    && Number(a1.capped_days_30d) === 1,
+  `0020 view A1: spend hôm qua 20 · 7 ngày 24 · ACOS 24% · ROAS 4.17 · ngân sách capped — ${J(a1)}`,
+);
+const a1c2 = await at(`select budget_state, spend_yesterday, cost_placeholder
+   from (select budget_state, spend_yesterday, null::numeric as cost_placeholder
+         from public.vexim_ads_campaigns where campaign_id='C-2') t`);
+ok(a1c2.budget_state === "ok" && Number(a1c2.spend_yesterday) === 4.5,
+  `0020 view A1: campaign dưới ngân sách = 'ok' (C-2: ${J(a1c2)})`);
+
+// ---- 9. KPI + account daily (dashboard/TACOS) ------------------------------
+const kpi = await at(`select spend_7d, sales_7d, acos_7d, roas_7d, currency from public.vexim_ads_kpi`);
+ok(
+  Number(kpi.spend_7d) === 28.5 && Number(kpi.sales_7d) === 100 && Number(kpi.acos_7d) === 28.5
+    && kpi.currency === "USD",
+  `0020 view KPI: spend 7 ngày 28.5 (cả tài khoản) · ACOS 28.5% (nguồn TACOS cho dashboard) — ${J(kpi)}`,
+);
+const acct = await at(`select cost, sales_7d, cpc, acos_7d from public.vexim_ads_account_daily where day='${mDay}'`);
+ok(Number(acct.cost) === 24.5 && Number(acct.acos_7d) === 27.22,
+  `0020 view account_daily: cost 24.5 · ACOS 27.22% — ${J(acct)}`);
+
+// ---- 10. Luồng re-authorize ------------------------------------------------
+const tok1 = await at(`select * from public.vexim_worker_set_oauth_token('${pShop}', '${JSON.stringify({
+  refreshToken: "Atzr|REFRESH-1", authScope: "sellingpartnerapi::ads", connectedBy: pUser, noticeDays: 30,
+})}'::jsonb)`);
+ok(
+  Number(tok1.days_left) === 364 || Number(tok1.days_left) === 365,
+  `0020 RPC oauth token: lưu token mới, hạn 365 ngày (days_left=${tok1.days_left}) · replaced=${tok1.replaced}`,
+);
+ok(tok1.replaced === false, "0020: lần authorize đầu → replaced=false");
+await ex(`update connections.oauth_tokens set expires_at = now() + interval '10 days',
+            rotate_reminder_sent = true, notice_sent_at = now() where seller_account_id='${pShop}'`);
+// Cron nhắc re-auth: view vexim_oauth_connections lọc theo iam.can_read_seller_account()
+// (dựa vào auth.uid()) nên service_role đọc ra 0 dòng ⇒ cron dùng RPC riêng.
+const soon = await at(`select * from public.vexim_worker_oauth_soon()`);
+ok(
+  Number(soon.days_left) === 10 && soon.needs_reauth === true && soon.already_noticed === true
+    && soon.token_active === true && Number(soon.notice_days) === 30 && soon.seller_account_id === pShop
+    && Number(soon.ads_profiles) === 1,
+  `0020 RPC oauth_soon: token còn 10 ngày ⇒ lọt danh sách nhắc (đã nhắc trước đó = true) — ${J(soon)}`,
+);
+ok(
+  (await at(`select count(*)::int n from public.vexim_worker_oauth_soon(5)`)).n === 0
+    && (await at(`select count(*)::int n from public.vexim_worker_oauth_soon(60)`)).n === 1,
+  "0020 RPC oauth_soon: p_days=5 (chưa tới hạn) → 0 dòng · p_days=60 → 1 dòng (đọc được hạn của từng shop)",
+);
+const tok2 = await at(`select * from public.vexim_worker_set_oauth_token('${pShop}', '${JSON.stringify({
+  refreshToken: "Atzr|REFRESH-2", authScope: "sellingpartnerapi::ads",
+})}'::jsonb)`);
+ok(
+  tok2.replaced === true && Number(tok2.refresh_count) === 2
+    && (await at("select rotate_reminder_sent, notice_sent_at from connections.oauth_tokens")).rotate_reminder_sent === false,
+  "0020 RPC oauth token: re-authorize reset cờ nhắc + tăng refresh_count (không im lặng giữ cờ cũ)",
+);
+const stCreate = await at(`select * from public.vexim_worker_create_oauth_state('${pShop}', '/module0/connect', 30)`);
+const stConsume = await at(`select * from public.vexim_worker_consume_oauth_state('${stCreate.state}')`);
+ok(
+  stConsume.ok === true && stConsume.seller_account_id === pShop && stConsume.redirect_to === "/module0/connect",
+  "0020 RPC oauth state: state dùng một lần trả đúng shop + đường dẫn quay lại",
+);
+const stAgain = await at(`select * from public.vexim_worker_consume_oauth_state('${stCreate.state}')`);
+ok(stAgain.ok === false, `0020 RPC oauth state: dùng LẦN 2 bị từ chối (${stAgain.message})`);
+const stBad = await at(`select * from public.vexim_worker_consume_oauth_state('khong-ton-tai')`);
+ok(stBad.ok === false, "0020 RPC oauth state: state lạ bị từ chối (không ném lỗi để callback hiển thị được)");
+await ex(`update connections.oauth_states set expires_at = now() - interval '1 minute'
+          where state = '${stCreate.state}'`);
+const expState = await at(`select * from public.vexim_worker_create_oauth_state('${pShop}', null, 30)`);
+await ex(`update connections.oauth_states set expires_at = now() - interval '1 minute' where state = '${expState.state}'`);
+ok(
+  (await at(`select * from public.vexim_worker_consume_oauth_state('${expState.state}')`)).ok === false,
+  "0020 RPC oauth state: state hết hạn bị từ chối",
+);
+const notice = await at(`select * from public.vexim_worker_mark_oauth_notice('${pShop}')`);
+ok(notice.rotate_reminder_sent === true, "0020 RPC oauth notice: đánh dấu đã nhắc re-auth");
+ok(
+  await mustBlock(`select * from public.vexim_worker_set_oauth_token('${pShop}', '{"refreshToken": ""}'::jsonb)`),
+  "0020 CHẶN: token rỗng bị từ chối (không ghi đè token tốt bằng chuỗi rỗng)",
+);
+
+// ---- 11. RLS: user PPC đọc được shop mình, người lạ không thấy gì ----------
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role authenticated;");
+await ex(`select set_config('request.jwt.claim.sub','${pUser}',false);`);
+await cmp(
+  "0020 RLS: user PPC đọc được campaign của shop mình",
+  `select count(*) n from public.vexim_ads_campaigns where seller_account_id='${pShop}'`,
+  2,
+);
+await cmp(
+  "0020 RLS: user PPC đọc được search term + gợi ý negative",
+  `select count(*) n from public.vexim_ads_search_terms where seller_account_id='${pShop}'`,
+  2,
+);
+await cmp(
+  "0020 RLS: user PPC thấy trạng thái token của shop mình (view cố ý không security_invoker)",
+  `select count(*) n from public.vexim_oauth_connections where seller_account_id='${pShop}'`,
+  1,
+);
+ok(
+  await mustBlock(`insert into ads.campaigns(seller_account_id,ads_profile_id,campaign_id,campaign_type,name)
+     values ('${pShop}','x','HACK','sp','HACK')`),
+  "0020 CHẶN: authenticated không ghi thẳng campaign",
+);
+ok(
+  await mustBlock(`insert into ads.negative_suggestions(seller_account_id,campaign_id,term,suggestion_type)
+     values ('${pShop}','C-1','hack','negative_exact')`),
+  "0020 CHẶN: authenticated không tự tạo gợi ý negative",
+);
+ok(
+  await mustBlock(`select * from public.vexim_worker_upsert_ads_campaigns('${pShop}','[]'::jsonb)`),
+  "0020 CHẶN: RPC campaigns chỉ dành cho service_role",
+);
+ok(
+  await mustBlock(`select * from public.vexim_worker_oauth_soon()`),
+  "0020 CHẶN: RPC danh sách sắp hết hạn token chỉ dành cho service_role (cron)",
+);
+ok(
+  await mustBlock(`select * from public.vexim_worker_apply_ads_spend('${pShop}', current_date, current_date)`),
+  "0020 CHẶN: RPC lấp ads_spend chỉ dành cho service_role",
+);
+ok(
+  await mustBlock(`select * from public.vexim_worker_set_oauth_token('${pShop}','{"refreshToken":"x"}'::jsonb)`),
+  "0020 CHẶN: RPC lưu token chỉ dành cho service_role (web không ghi được token)",
+);
+await cmp(
+  "0020 RLS: authenticated KHÔNG đọc được bảng token (kể cả user có quyền với shop)",
+  `select count(*) n from connections.oauth_tokens where seller_account_id='${pShop}'`,
+  0,
+);
+
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role authenticated;");
+await ex(`select set_config('request.jwt.claim.sub','${pStranger}',false);`);
+await cmp(
+  "0020 RLS: người lạ không thấy campaign của shop",
+  `select count(*) n from public.vexim_ads_campaigns where seller_account_id='${pShop}'`,
+  0,
+);
+await cmp(
+  "0020 RLS: người lạ KHÔNG thấy trạng thái token (view lọc bằng can_read_seller_account)",
+  `select count(*) n from public.vexim_oauth_connections where seller_account_id='${pShop}'`,
+  0,
+);
+
+await ex("rollback;");
+await ex("reset role;");
+
+// ---- 12. idempotent --------------------------------------------------------
+ok(
+  await ex(rd("migrations/0020_ads_ppc.sql"), "0020 lần 2"),
+  "0020 idempotent (chạy lại không lỗi, không đổi hợp đồng cột)",
+);
+ok(
+  (await colsOf("vexim_ads_campaigns")).endsWith("capped_days_30d,last_capped_day,last_synced_at,updated_at"),
+  "0020 lần 2: hợp đồng cột view A1 giữ nguyên",
+);
+await cmp(
+  "0020 lần 2: index unique không bị tạo trùng",
+  `select count(*) n from pg_indexes where indexname in
+     ('uq_ads_ad_groups_key','uq_ads_targets_key','uq_ads_target_metrics_key','uq_ads_search_terms_key',
+      'uq_ads_advertised_product_key','uq_ads_purchased_product_key','uq_ads_budget_events_key',
+      'uq_ads_negative_suggestions_key')`,
+  8,
+);
+
+
+// ============================================================================
+console.log("\n=== BƯỚC 22: 0021 — Module 5 P2/P3 (duyệt ngưỡng · audit · revert) ===");
+// ============================================================================
+ok(
+  await ex(rd("migrations/0021_ads_write_approval_audit.sql"), "0021_ads_write_approval_audit.sql"),
+  "0021 chạy sạch (DO-block tự soát: bảng · RLS · ngưỡng duyệt · trigger · RPC · view)",
+);
+
+// ---- hợp đồng cột của view mới (web đọc bằng chuỗi select cố định) ----------
+ok(
+  (await colsOf("vexim_ads_ad_groups")) ===
+    "seller_account_id,shop,ads_profile_id,campaign_id,campaign_name,campaign_state,ad_group_id," +
+    "name,state,default_bid,currency,last_day,spend_7d,sales_7d,purchases_7d,clicks_7d,impressions_7d," +
+    "target_count,enabled_targets,cpc_7d,ctr_7d,acos_7d,roas_7d,updated_at",
+  "0021: vexim_ads_ad_groups đúng hợp đồng cột (A2 đọc bằng tên)",
+);
+ok(
+  (await colsOf("vexim_ads_changes")) ===
+    "id,seller_account_id,shop,ads_profile_id,entity_type,entity_key,campaign_id,ad_group_id," +
+    "entity_label,action,payload,before_value,after_value,before_text,after_text,currency,reason," +
+    "suggestion_id,requires_approval,approval_reason,status,requested_by,requested_by_name," +
+    "requested_at,decided_by,decided_by_name,decided_at,decision_note,applied_at,error,attempts," +
+    "revert_of,reverted_by,source,is_open,can_revert,created_at,updated_at",
+  "0021: vexim_ads_changes đúng hợp đồng cột (hàng đợi + duyệt)",
+);
+ok(
+  (await colsOf("vexim_ads_negative_keywords")) ===
+    "id,seller_account_id,shop,campaign_id,campaign_name,ad_group_id,ad_group_name,keyword_id," +
+    "keyword_text,match_type,state,source,change_request_id,created_at,updated_at",
+  "0021: vexim_ads_negative_keywords đúng hợp đồng cột",
+);
+ok(
+  (await colsOf("vexim_ads_audit")) ===
+    "id,created_at,seller_account_id,shop,module,action,entity,before_value,after_value,before_text," +
+    "after_text,result,actor_id,actor_name",
+  "0021: vexim_ads_audit đúng hợp đồng cột (nhật ký thao tác)",
+);
+ok(
+  (await colsOf("vexim_ads_search_terms")).endsWith(
+    "pending_suggestion_id,pending_suggestion_type,pending_confidence,pending_confidence_label," +
+      "pending_reasons,pending_evidence,negative_keyword_id,negative_match_type",
+  ),
+  "0021: view A3 có thêm id gợi ý (để duyệt) + cờ đã chặn negative",
+);
+
+await cmp(
+  "0021: 2 bảng mới bật RLS",
+  `select count(*) n from pg_class c join pg_namespace ns on ns.oid=c.relnamespace
+    where (ns.nspname,c.relname) in (('ads','change_requests'),('ads','negative_keywords'))
+      and c.relrowsecurity`,
+  2,
+);
+await cmp(
+  "0021: KHÔNG có policy ghi nào trên schema ads (chỉ ghi qua RPC)",
+  "select count(*) n from pg_policies where schemaname='ads' and cmd <> 'SELECT'",
+  0,
+);
+await cmp(
+  "0021: 5 RPC cho web — security definer, authenticated gọi được",
+  `select count(*) n from pg_proc p where p.oid = any (array[
+     'public.vexim_request_ads_change(uuid, jsonb)'::regprocedure,
+     'public.vexim_decide_ads_change(uuid, text, text)'::regprocedure,
+     'public.vexim_cancel_ads_change(uuid, text)'::regprocedure,
+     'public.vexim_revert_ads_change(uuid, text)'::regprocedure,
+     'public.vexim_decide_ads_suggestion(uuid, text, text)'::regprocedure])
+   and p.prosecdef and has_function_privilege('authenticated', p.oid, 'EXECUTE')`,
+  5,
+);
+await cmp(
+  "0021: 2 hàm HỎI QUYỀN cho UI (ẩn/hiện nút; quyền thật vẫn do RPC kiểm)",
+  `select count(*) n from pg_proc p where p.oid = any (array[
+     'public.vexim_can_ads_approve()'::regprocedure,
+     'public.vexim_can_write_ads(uuid)'::regprocedure])
+   and p.prosecdef and has_function_privilege('authenticated', p.oid, 'EXECUTE')`,
+  2,
+);
+await cmp(
+  "0021: 4 RPC worker — CHỈ service_role gọi được",
+  `select count(*) n from pg_proc p where p.oid = any (array[
+     'public.vexim_worker_claim_ads_changes(uuid, int)'::regprocedure,
+     'public.vexim_worker_record_ads_change(uuid, boolean, jsonb, text)'::regprocedure,
+     'public.vexim_worker_upsert_ads_negative_keywords(uuid, jsonb)'::regprocedure,
+     'public.vexim_worker_release_ads_change(uuid, text)'::regprocedure])
+   and p.prosecdef
+   and not has_function_privilege('authenticated', p.oid, 'EXECUTE')
+   and has_function_privilege('service_role', p.oid, 'EXECUTE')`,
+  4,
+);
+await cmp(
+  "0021 khối 0: KHÔNG còn policy nào tự tham chiếu iam.role_assignments/user_profiles (nguồn đệ quy)",
+  `select count(*) n from pg_policies
+    where qual like '%role_assignments%' or coalesce(with_check,'') like '%role_assignments%'
+       or qual like '%user_profiles%'   or coalesce(with_check,'') like '%user_profiles%'`,
+  0,
+);
+await cmp(
+  "0021: helper duyệt + 2 hàm luật ngưỡng tồn tại",
+  `select count(*) n from pg_proc p join pg_namespace ns on ns.oid=p.pronamespace
+    where (ns.nspname='iam' and p.proname='is_ads_approver')
+       or (ns.nspname='ads' and p.proname in ('approval_reason','approval_reason_state','change_request_guard'))`,
+  4,
+);
+
+// ---- fixture: operator (người yêu cầu) · trưởng phòng PPC (duyệt) · trưởng phòng Listing · người lạ
+await ex("begin");
+await ex("reset role;");
+const qShop     = (await one("select id from connections.seller_accounts order by seller_id limit 1")).id;
+const qOp       = "e2000000-0000-4000-8000-000000000001";   // operator PPC (có quyền ghi shop)
+const qLead     = "e2000000-0000-4000-8000-000000000002";   // trưởng phòng PPC (được duyệt)
+const qLeadList = "e2000000-0000-4000-8000-000000000003";   // trưởng phòng Listing (KHÔNG được duyệt ads)
+const qStranger = "e2000000-0000-4000-8000-000000000004";
+const H = (s) => {
+  let t = String(s);
+  for (const [v, n] of [[qShop, "<shop>"], [qOp, "<op>"], [qLead, "<lead-ppc>"],
+                        [qLeadList, "<lead-listing>"], [qStranger, "<user-lạ>"]])
+    if (v) t = t.split(v).join(n);
+  return t;
+};
+const Q = (o) => H(JSON.stringify(o));
+const q = async (sql) => {
+  try { return await one(sql); } catch (e) { return { __error: H(e && e.message ? e.message : e) }; }
+};
+
+ok(
+  await ex(`insert into auth.users(id,email) values
+     ('${qOp}','e2-op@example.test'),('${qLead}','e2-lead@example.test'),
+     ('${qLeadList}','e2-lead-listing@example.test'),('${qStranger}','e2-stranger@example.test');
+   insert into iam.user_profiles(id,display_name,email,vexim_employee) values
+     ('${qOp}','PPC Operator','e2-op@example.test',true),
+     ('${qLead}','Trưởng phòng PPC','e2-lead@example.test',true),
+     ('${qLeadList}','Trưởng phòng Listing','e2-lead-listing@example.test',true),
+     ('${qStranger}','Người lạ','e2-stranger@example.test',true);
+   insert into iam.assignments(user_id,seller_account_id,module,can_write) values
+     ('${qOp}','${qShop}','ads',true),
+     ('${qLead}','${qShop}','ads',true),
+     ('${qLeadList}','${qShop}','ads',true);
+   insert into iam.role_assignments(user_id,role,department_id) values
+     ('${qOp}','operator',(select id from iam.departments where code='ppc')),
+     ('${qLead}','dept_lead',(select id from iam.departments where code='ppc')),
+     ('${qLeadList}','dept_lead',(select id from iam.departments where code='listing'));`),
+  "0021 fixture: operator PPC · trưởng phòng PPC · trưởng phòng Listing · người lạ",
+);
+
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role service_role;");
+
+// campaign C-W1 (ngân sách 100) + C-W2 (ngân sách 60) + 3 keyword để thử bid/state
+await q(`select * from public.vexim_worker_upsert_ads_campaigns('${qShop}', '${JSON.stringify([
+  { campaignId: "C-W1", adsProfileId: "P-9", campaignType: "sp", name: "Vali 24 inch — Manual",
+    state: "ENABLED", dailyBudget: "100.00", budgetCurrency: "USD", startDate: "2026-08-01" },
+  { campaignId: "C-W2", adsProfileId: "P-9", campaignType: "sp", name: "Auto — Vali",
+    state: "ENABLED", dailyBudget: "60.00", budgetCurrency: "USD", startDate: "2026-08-01" },
+])}'::jsonb)`);
+await q(`select * from public.vexim_worker_upsert_ads_ad_groups('${qShop}', '${JSON.stringify([
+  { adGroupId: "AG-W1", campaignId: "C-W1", name: "Vali 24 — exact", state: "ENABLED", defaultBid: "1.00" },
+])}'::jsonb)`);
+await q(`select * from public.vexim_worker_upsert_ads_targets('${qShop}', '${JSON.stringify([
+  { targetKey: "KW-W1", targetKind: "keyword", campaignId: "C-W1", adGroupId: "AG-W1",
+    keywordText: "vali 24 inch", matchType: "EXACT", bid: "1.00", state: "ENABLED" },
+  { targetKey: "KW-W2", targetKind: "keyword", campaignId: "C-W1", adGroupId: "AG-W1",
+    keywordText: "vali 24 inch tsa", matchType: "EXACT", bid: "2.00", state: "PAUSED" },
+])}'::jsonb)`);
+
+// ---- 1. NGƯỠNG DUYỆT: ≤30% tự chạy · >30% chờ trưởng phòng ------------------
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role authenticated;");
+await ex(`select set_config('request.jwt.claim.sub','${qOp}',false);`);
+
+const reqSmall = await q(`select * from public.vexim_request_ads_change('${qShop}',
+   '{"action":"set_budget","entityType":"campaign","entityKey":"C-W1","value":"120","reason":"SOP-05: nới nhẹ cho campaign ACOS tốt"}'::jsonb)`);
+ok(
+  reqSmall.status === "approved" && reqSmall.requires_approval === false
+    && Number(reqSmall.before_value.value) === 100 && Number(reqSmall.after_value.value) === 120
+    && reqSmall.approval_reason === null,
+  `0021 ngưỡng: tăng 20% (100 → 120) TỰ DUYỆT, before/after đọc từ DB — ${Q(reqSmall)}`,
+);
+const reqBig = await q(`select * from public.vexim_request_ads_change('${qShop}',
+   '{"action":"set_budget","entityType":"campaign","entityKey":"C-W2","value":"90","reason":"SOP-05: campaign tốt, cần gấp đôi ngân sách"}'::jsonb)`);
+ok(
+  reqBig.status === "pending_approval" && reqBig.requires_approval === true
+    && String(reqBig.approval_reason).includes("50")
+    && String(reqBig.approval_reason).includes("> 30%")
+    && String(reqBig.approval_reason).includes("PPC"),
+  `0021 ngưỡng: tăng 50% (60 → 90) PHẢI CHỜ duyệt, nêu rõ % vượt — ${Q(reqBig)}`,
+);
+const wInbox = await q(`select count(*)::int n, max(entity_label)::text ten,
+     max(requested_by_name)::text nguoi_yeu_cau
+   from public.vexim_ads_changes where status='pending_approval' and entity_key='C-W2'`);
+ok(
+  wInbox.n === 1 && wInbox.nguoi_yeu_cau === "PPC Operator",
+  `0021: yêu cầu vượt ngưỡng nằm trong hàng đợi, có TÊN người yêu cầu (RLS đã vá) — ${Q(wInbox)}`,
+);
+
+// Client KHÔNG tự khai ngưỡng được: gửi requiresApproval=false vẫn bị DB tính lại.
+const forged = await q(`select * from public.vexim_request_ads_change('${qShop}',
+   '{"action":"set_bid","entityType":"keyword","entityKey":"KW-W1","value":"1.50","requiresApproval":false}'::jsonb)`);
+ok(
+  forged.requires_approval === true && forged.status === "pending_approval",
+  `0021 ANG TOÀN: client khai requiresApproval=false vẫn bị DB tính lại (bid 1.00 → 1.50 = +50%) — ${Q(forged)}`,
+);
+ok(
+  await mustBlock(`select * from public.vexim_decide_ads_change('${reqBig.change_id}','approve',null)`),
+  "0021 CHẶN: operator KHÔNG phải trưởng phòng PPC không duyệt được yêu cầu",
+);
+ok(
+  await mustBlock(`select * from public.vexim_request_ads_change('${qStranger}','{}'::jsonb)`),
+  "0021 CHẶN: người không có quyền ghi shop cũng không tạo được yêu cầu",
+);
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role authenticated;");
+await ex(`select set_config('request.jwt.claim.sub','${qLeadList}',false);`);
+ok(
+  await mustBlock(`select * from public.vexim_decide_ads_change('${reqBig.change_id}','approve',null)`),
+  "0021 CHẶN: trưởng phòng LISTING không duyệt được thay đổi quảng cáo (đúng phòng ban mới có quyền)",
+);
+
+// ---- 2. Trưởng phòng PPC duyệt + audit -------------------------------------
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role authenticated;");
+await ex(`select set_config('request.jwt.claim.sub','${qLead}',false);`);
+const decided = await q(`select * from public.vexim_decide_ads_change('${reqBig.change_id}','approve','Đồng ý: ROAS 4.5, nới để không cạn sớm')`);
+ok(
+  decided.status === "approved" && String(decided.decided_by) === qLead,
+  `0021 duyệt: trưởng phòng PPC duyệt yêu cầu 50% — ${Q(decided)}`,
+);
+const auditCounts = await q(`select
+     count(*) filter (where action='ads.change_approve')::int            as duyet,
+     count(*) filter (where action='ads.budget_change_request')::int     as yeu_cau_ngan_sach,
+     count(*) filter (where action='ads.bid_change_request')::int        as yeu_cau_bid,
+     count(*)::int                                                      as tong,
+     max(actor_name)::text                                              as nguoi_thao_tac
+   from public.vexim_ads_audit where seller_account_id='${qShop}'`);
+ok(
+  auditCounts.duyet === 1 && auditCounts.yeu_cau_ngan_sach === 2
+    && auditCounts.yeu_cau_bid === 1 && auditCounts.nguoi_thao_tac !== null,
+  `0021 audit: yêu cầu + quyết định duyệt đều có dấu trong iam.audit_logs kèm TÊN người thao tác — ${Q(auditCounts)}`,
+);
+
+// ---- 3. Worker claim → ghi kết quả → cập nhật cục bộ ------------------------
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role service_role;");
+// Claim trả MỌI yêu cầu đã duyệt (2 dòng) ⇒ tự chọn đúng dòng theo giá trị mong đợi.
+const wClaimRows = (await db.query(
+  `select * from public.vexim_worker_claim_ads_changes('${qShop}', 10)`)).rows;
+const wClaim = wClaimRows.find((r) => Number(r.after_value.value) === 120);
+ok(
+  wClaimRows.length === 2 && wClaim !== undefined
+    && wClaimRows.every((r) => Number(r.attempts) === 1)
+    && wClaimRows.some((r) => Number(r.after_value.value) === 90),
+  `0021 worker claim: nhận 2 yêu cầu ĐÃ duyệt (C-W1 100→120 · C-W2 60→90), attempts=1, dòng vượt ngưỡng chưa duyệt KHÔNG bị claim — ${JSON.stringify(wClaimRows.map((r) => [r.entity_key, r.after_value.value, r.status]))}`,
+);
+const rec1 = await q(`select * from public.vexim_worker_record_ads_change('${wClaim.change_id}', true, '{"ok":true}'::jsonb, null)`);
+const cw1 = await q(`select daily_budget from ads.campaigns where campaign_id='${wClaim.entity_key}'`);
+ok(
+  rec1.status === "applied" && rec1.mirrored === true && Number(cw1.daily_budget) === Number(wClaim.after_value.value),
+  `0021 worker áp dụng: status=applied, ngân sách cục bộ C-W1 = ${cw1.daily_budget} — ${Q(rec1)}`,
+);
+ok(
+  Number((await q(`select status from ads.change_requests where id='${wClaim.change_id}'`)).status === "applied") === 1,
+  "0021 worker claim: dòng vừa ghi kết quả đã chốt applied, dòng còn lại vẫn applying (chưa ghi)",
+);
+
+// Đã applied là BẰNG CHỨNG: trigger chặn sửa nội dung (chạy cả với service_role).
+ok(
+  await mustBlock(`update ads.change_requests set after_value = '{"value": 999}'::jsonb where id='${wClaim.change_id}'`),
+  "0021 CHẶN: không sửa được nội dung yêu cầu đã applied (bằng chứng audit)",
+);
+
+// ---- 4. REVERT 1-click ------------------------------------------------------
+// Lấy yêu cầu vừa applied của C-W2 (đã duyệt 50%) — chưa ghi lên Amazon ⇒ claim + ghi kết quả trước.
+const cw2Change = await q(`select id, entity_key from ads.change_requests
+   where entity_key='C-W2' and status='applying' limit 1`);
+if (cw2Change.id) {
+  await q(`select * from public.vexim_worker_record_ads_change('${cw2Change.id}', true, '{"ok":true}'::jsonb, null)`);
+}
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role authenticated;");
+await ex(`select set_config('request.jwt.claim.sub','${qOp}',false);`);
+const cw2 = await q(`select daily_budget from ads.campaigns where campaign_id='C-W2'`);
+ok(Number(cw2.daily_budget) === 90, `0021: sau khi worker ghi, ngân sách C-W2 = ${cw2.daily_budget} (90)`);
+const revert = await q(`select * from public.vexim_revert_ads_change('${cw2Change.id}','Revert: ngân sách tăng chưa hiệu quả')`);
+ok(
+  revert.status === "approved" && Number(revert.before_value.value) === 90 && Number(revert.after_value.value) === 60
+    && revert.requires_approval === false,
+  `0021 revert: đảo 90 → 60 (giảm nên không cần duyệt), dòng MỚI chứ không sửa dòng cũ — ${Q(revert)}`,
+);
+ok(
+  (await q(`select reverted_by from public.vexim_ads_changes where id='${cw2Change.id}'`)).reverted_by === revert.change_id,
+  "0021 revert: dòng gốc được đánh dấu reverted_by (lịch sử đọc được cả hai chiều)",
+);
+ok(
+  (await q(`select can_revert from public.vexim_ads_changes where id='${cw2Change.id}'`)).can_revert === false,
+  "0021 revert: dòng đã bị đảo KHÔNG còn nút Revert (chống đảo hai lần)",
+);
+
+// ---- 5. set_state: dừng thì tự do, bật lại thì phải duyệt -------------------
+const pause = await q(`select * from public.vexim_request_ads_change('${qShop}',
+   '{"action":"set_state","entityType":"campaign","entityKey":"C-W1","value":"PAUSED","reason":"SOP-04: tạm dừng để xem lại"}'::jsonb)`);
+ok(
+  pause.status === "approved" && pause.requires_approval === false,
+  `0021 set_state: TẠM DỪNG tự chạy (hành động chặn chi tiêu, không cần chờ duyệt) — ${Q(pause)}`,
+);
+// Worker ghi lệnh tạm dừng đó (đúng luồng thật) rồi mới xin bật lại.
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role service_role;");
+const pClaim = (await db.query(
+  `select * from public.vexim_worker_claim_ads_changes('${qShop}', 10)`)).rows.find((r) => r.action === "set_state");
+const pApplied = await q(`select * from public.vexim_worker_record_ads_change('${pClaim.change_id}', true, '{"ok":true}'::jsonb, null)`);
+const pausedState = await q(`select state from ads.campaigns where campaign_id='C-W1'`);
+ok(
+  pApplied.status === "applied" && pausedState.state === "PAUSED",
+  `0021 set_state: worker tạm dừng C-W1 trên Amazon rồi gương về DB (state=${pausedState.state})`,
+);
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role authenticated;");
+await ex(`select set_config('request.jwt.claim.sub','${qOp}',false);`);
+const resume = await q(`select * from public.vexim_request_ads_change('${qShop}',
+   '{"action":"set_state","entityType":"campaign","entityKey":"C-W1","value":"ENABLED","reason":"Mở lại sau khi đã tối ưu"}'::jsonb)`);
+ok(
+  resume.requires_approval === true && resume.status === "pending_approval"
+    && String(resume.approval_reason).includes("PPC"),
+  `0021 set_state: BẬT LẠI campaign đang dừng PHẢI chờ trưởng phòng PPC (tiền bắt đầu chảy) — ${Q(resume)}`,
+);
+
+// ---- 5b. Khối 0: RLS hết đệ quy — đọc được tên người dùng/người duyệt ---------
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role authenticated;");
+await ex(`select set_config('request.jwt.claim.sub','${qLead}',false);`);
+const selfProf = await q(`select display_name, email from iam.user_profiles where id='${qLead}'`);
+const otherProf = await q(`select count(*)::int n from iam.user_profiles where id='${qOp}'`);
+const myRoles = await q(`select count(*)::int n from iam.role_assignments where user_id='${qLead}'`);
+const myAssign = await q(`select count(*)::int n from iam.assignments where user_id='${qLead}'`);
+const alertRules = await q(`select count(*)::int n from ops.alert_rules`);
+const templates = await q(`select count(*)::int n from ops.task_templates`);
+ok(
+  selfProf.display_name === "Trưởng phòng PPC" && otherProf.n === 0 && myRoles.n >= 1 && myAssign.n === 1,
+  `0021 khối 0: user đọc được hồ sơ của MÌNH (${Q(selfProf)}) · vai trò của mình (${myRoles.n}) · assignment (${myAssign.n}) · KHÔNG thấy hồ sơ người khác (${otherProf.n})`,
+);
+ok(
+  alertRules.n > 0 && templates.n > 0,
+  `0021 khối 0: hết đệ quy ⇒ đọc được ops.alert_rules (${alertRules.n}) + ops.task_templates (${templates.n}) — trước đây báo lỗi đệ quy`,
+);
+ok(
+  await mustBlock(`update iam.user_profiles set display_name='HACK' where id='${qOp}'`),
+  "0021 khối 0: vá lỗi KHÔNG nới quyền — vẫn không sửa được hồ sơ người khác",
+);
+
+// ---- 5c. 429/5xx: worker TRẢ LẠI hàng đợi để lần sau thử tiếp (không báo thất bại oan) ----
+// Tạo một yêu cầu GIẢM bid (tự duyệt) để có dòng 'approved' cho worker claim.
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role authenticated;");
+await ex(`select set_config('request.jwt.claim.sub','${qOp}',false);`);
+const bidDown = await q(`select * from public.vexim_request_ads_change('${qShop}',
+   '{"action":"set_bid","entityType":"keyword","entityKey":"KW-W2","value":"1.90","reason":"SOP-04 b4: hạ bid sau khi giảm hiệu quả"}'::jsonb)`);
+ok(
+  bidDown.status === "approved" && bidDown.requires_approval === false,
+  `0021 ngưỡng: GIẢM bid (2.00 → 1.90) tự duyệt — chỉ tăng mới cần trưởng phòng — ${Q(bidDown)}`,
+);
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role service_role;");
+const throttleClaim = (await db.query(
+  `select * from public.vexim_worker_claim_ads_changes('${qShop}', 10)`)).rows;
+const throttleOne = throttleClaim[0];
+const released = await q(`select * from public.vexim_worker_release_ads_change('${throttleOne.change_id}', 'Amazon báo 429 — thử lại lần chạy sau')`);
+const afterRelease = await q(`select status, attempts, api_response -> 'released' as released
+   from ads.change_requests where id='${throttleOne.change_id}'`);
+ok(
+  released.status === "approved" && Number(released.attempts) === 1
+    && afterRelease.status === "approved" && afterRelease.released === true,
+  `0021 429: yêu cầu được TRẢ LẠI hàng đợi (approved) chứ không thành failed — ${Q(released)}`,
+);
+const reclaim = (await db.query(
+  `select * from public.vexim_worker_claim_ads_changes('${qShop}', 10)`)).rows
+  .find((r) => r.change_id === throttleOne.change_id);
+ok(
+  reclaim !== undefined && Number(reclaim.attempts) === 2,
+  `0021 429: claim lần 2 nhận lại đúng yêu cầu đó, attempts=2 (không mất dấu) — ${Q(reclaim ?? {})}`,
+);
+const rerecord = await q(`select * from public.vexim_worker_record_ads_change('${reclaim.change_id}', true, '{"ok":true}'::jsonb, null)`);
+ok(
+  rerecord.status === "applied",
+  `0021 429: sáng hôm sau Amazon nhận ⇒ applied, không cần người duyệt lại — ${Q(rerecord)}`,
+);
+
+// ---- 6. Negative keyword: duyệt gợi ý A3 → hàng đợi → worker → gương --------
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role service_role;");
+await q(`select * from public.vexim_worker_upsert_ads_search_terms('${qShop}', '${JSON.stringify([
+  { day: mDay, campaignId: "C-W1", adGroupId: "AG-W1", keywordId: "KW-W1", keywordText: "vali 24 inch",
+    searchTerm: "vali 24 inch size 20", matchType: "EXACT", impressions: "220", clicks: "18",
+    cost: "15.20", sales7d: "0", purchases7d: "0", currency: "USD" },
+])}'::jsonb)`);
+await q(`select * from public.vexim_worker_upsert_ads_suggestions('${qShop}', '${JSON.stringify([
+  { campaignId: "C-W1", adGroupId: "AG-W1", term: "vali 24 inch size 20", matchType: "EXACT",
+    suggestionType: "negative_exact", confidence: "0.85", confidenceLabel: "high", windowDays: 14,
+    evidence: { clicks: 18, cost: 15.2, orders: 0 }, reasons: ["clicks ≥ 10", "0 đơn"] },
+])}'::jsonb)`);
+const a3Before = await q(`select pending_suggestion_id, pending_confidence, negative_keyword_id
+   from public.vexim_ads_search_terms where term='vali 24 inch size 20'`);
+ok(
+  a3Before.pending_suggestion_id !== null || a3Before.__error === undefined,
+  `0021 A3: gợi ý đang chờ hiện kèm id để duyệt (id=${H(a3Before.pending_suggestion_id)})`,
+);
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role authenticated;");
+await ex(`select set_config('request.jwt.claim.sub','${qOp}',false);`);
+const dec = await q(`select * from public.vexim_decide_ads_suggestion('${a3Before.pending_suggestion_id}','approve',null)`);
+ok(
+  dec.status === "approved" && dec.change_id !== null,
+  `0021 gợi ý: duyệt ⇒ TỰ SINH yêu cầu thêm negative (đi cùng một đường ghi) — ${Q(dec)}`,
+);
+ok(
+  await mustBlock(`select * from public.vexim_decide_ads_suggestion('${a3Before.pending_suggestion_id}','approve',null)`),
+  "0021 CHẶN: gợi ý đã quyết định thì không duyệt lại được (quyết định của người bất khả xâm phạm)",
+);
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role service_role;");
+const negClaim = await q(`select * from public.vexim_worker_claim_ads_changes('${qShop}', 10)`);
+const negApplied = await q(`select * from public.vexim_worker_record_ads_change('${negClaim.change_id}', true, '{"keywordId":"NEG-1"}'::jsonb, null)`);
+const negMirror = await q(`select keyword_text, match_type, keyword_id, source from ads.negative_keywords
+   where ad_group_id='AG-W1' limit 1`);
+ok(
+  negApplied.status === "applied" && negMirror.keyword_text === "vali 24 inch size 20"
+    && negMirror.match_type === "NEGATIVE_EXACT" && negMirror.keyword_id === "NEG-1"
+    && negApplied.suggestion_applied === true,
+  `0021 negative: ghi lên Amazon xong → gương ads.negative_keywords có dòng + gợi ý A3 tự đóng (applied) — ${Q(negMirror)} ${Q(negApplied)}`,
+);
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role authenticated;");
+await ex(`select set_config('request.jwt.claim.sub','${qOp}',false);`);
+const stAfter = await q(`select negative_keyword_id, negative_match_type, spend_7d
+   from public.vexim_ads_search_terms where term='vali 24 inch size 20'`);
+ok(
+  stAfter.negative_keyword_id !== null && stAfter.negative_match_type === "NEGATIVE_EXACT"
+    && Number(stAfter.spend_7d) === 15.2,
+  `0021 A3: sau khi chặn, search term hiện cờ negative_keyword_id (không còn nút Thêm negative) — ${Q(stAfter)}`,
+);
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role service_role;");
+ok(
+  (await q(`select count(*)::int n from public.vexim_ads_audit where action='ads.negative_add_applied'`)).n === 1,
+  "0021 audit: lần áp dụng negative cũng ghi iam.audit_logs (kết quả + keywordId Amazon trả về)",
+);
+
+// ---- 7. Thất bại từ Amazon: ghi lỗi + audit, KHÔNG giả thành công -----------
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role authenticated;");
+await ex(`select set_config('request.jwt.claim.sub','${qOp}',false);`);
+const bidReq = await q(`select * from public.vexim_request_ads_change('${qShop}',
+   '{"action":"set_bid","entityType":"keyword","entityKey":"KW-W2","value":"2.10"}'::jsonb)`);
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role service_role;");
+const bidBeforeFail = (await q(`select bid from ads.targets where target_key='KW-W2'`)).bid;
+const bidClaim = await q(`select * from public.vexim_worker_claim_ads_changes('${qShop}', 10)`);
+const bidFail = await q(`select * from public.vexim_worker_record_ads_change('${bidClaim.change_id}', false, '{"code":"INVALID_ARGUMENT"}'::jsonb, 'Bid vượt trần cho phép của Amazon')`);
+const bidAfterFail = (await q(`select bid from ads.targets where target_key='KW-W2'`)).bid;
+ok(
+  bidFail.status === "failed" && Number(bidAfterFail) === Number(bidBeforeFail)
+    && (await q(`select count(*)::int n from public.vexim_ads_audit where action='ads.change_failed'`)).n === 1,
+  `0021 thất bại: Amazon từ chối ⇒ status=failed, bid cục bộ GIỮ NGUYÊN ${bidBeforeFail} (KHÔNG ghi giá trị chưa được Amazon nhận), có audit lỗi — ${Q(bidFail)}`,
+);
+ok(
+  bidReq.status !== "applied" && (await q(`select error from ads.change_requests where id='${bidClaim.change_id}'`)).error !== null,
+  "0021 thất bại: lý do lỗi được lưu để người vận hành đọc (không im lặng nuốt lỗi)",
+);
+
+// ---- 8. Chống trùng & chặn gọi sai trạng thái ------------------------------
+ok(
+  await mustBlock(`select * from public.vexim_request_ads_change('${qShop}',
+     '{"action":"set_state","entityType":"campaign","entityKey":"C-W2","value":"ENABLED"}'::jsonb)`),
+  "0021 CHẶN: cùng đối tượng + cùng hành động đang bay ⇒ không tạo yêu cầu trùng",
+);
+ok(
+  await mustBlock(`select * from public.vexim_worker_record_ads_change('${bidClaim.change_id}', true, null, null)`),
+  "0021 CHẶN: worker không ghi kết quả cho dòng đã failed (chỉ dòng đang applying)",
+);
+ok(
+  await mustBlock(`select * from public.vexim_request_ads_change('${qShop}',
+     '{"action":"set_budget","entityType":"keyword","entityKey":"KW-W1","value":"5"}'::jsonb)`),
+  "0021 CHẶN: set_budget cho keyword bị từ chối (sai đối tượng — Amazon cũng sẽ từ chối)",
+);
+ok(
+  await mustBlock(`select * from public.vexim_request_ads_change('${qShop}',
+     '{"action":"set_budget","entityType":"campaign","entityKey":"C-KHONG-CO","value":"5"}'::jsonb)`),
+  "0021 CHẶN: đổi ngân sách campaign không có trong DB (phải ads:sync trước)",
+);
+ok(
+  await mustBlock(`insert into ads.change_requests(seller_account_id,entity_type,entity_key,action,status)
+     values ('${qShop}','campaign','C-W1','set_budget','applied')`),
+  "0021 CHẶN: không tạo thẳng dòng 'applied' (chống giả lịch sử đã ghi lên Amazon)",
+);
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role authenticated;");
+await ex(`select set_config('request.jwt.claim.sub','${qOp}',false);`);
+ok(
+  await mustBlock(`insert into ads.negative_keywords(seller_account_id,ad_group_id,keyword_text,match_type)
+     values ('${qShop}','AG-W1','x','NEGATIVE_EXACT')`),
+  "0021 CHẶN: authenticated không ghi thẳng gương negative (chỉ worker qua RPC)",
+);
+ok(
+  await mustBlock(`delete from ads.change_requests where status='applied'`),
+  "0021 CHẶN: authenticated không xoá được hàng đợi (không có grant DELETE)",
+);
+
+// ---- 9. RLS: đọc theo shop, người lạ không thấy gì -------------------------
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role authenticated;");
+await ex(`select set_config('request.jwt.claim.sub','${qOp}',false);`);
+const rlsMine = await q(`select
+     (select count(*)::int from public.vexim_ads_changes where seller_account_id='${qShop}')            as hang_doi,
+     (select count(*)::int from public.vexim_ads_ad_groups where seller_account_id='${qShop}')         as ad_groups,
+     (select count(*)::int from public.vexim_ads_negative_keywords where seller_account_id='${qShop}') as da_chan`);
+ok(
+  rlsMine.hang_doi >= 5 && rlsMine.ad_groups === 1 && rlsMine.da_chan === 1,
+  `0021 RLS: người có quyền đọc được hàng đợi (${rlsMine.hang_doi}) · ad group A2 (${rlsMine.ad_groups}) · negative đã chặn (${rlsMine.da_chan})`,
+);
+await ex("reset role;");
+await ex("select set_config('request.jwt.claim.sub','',false);");
+await ex("set role authenticated;");
+await ex(`select set_config('request.jwt.claim.sub','${qStranger}',false);`);
+ok(
+  (await q(`select count(*)::int n from public.vexim_ads_changes where seller_account_id='${qShop}'`)).n === 0
+    && (await q(`select count(*)::int n from public.vexim_ads_ad_groups where seller_account_id='${qShop}'`)).n === 0
+    && (await q(`select count(*)::int n from public.vexim_ads_audit where seller_account_id='${qShop}'`)).n === 0,
+  "0021 RLS: người lạ không thấy hàng đợi / ad group / nhật ký thao tác của shop khác",
+);
+
+await ex("rollback;");
+await ex("reset role;");
+
+// ---- 10. idempotent ---------------------------------------------------------
+ok(
+  await ex(rd("migrations/0021_ads_write_approval_audit.sql"), "0021 lần 2"),
+  "0021 idempotent (chạy lại không lỗi, không đổi hợp đồng cột)",
+);
+ok(
+  (await colsOf("vexim_ads_changes")).endsWith("is_open,can_revert,created_at,updated_at"),
+  "0021 lần 2: hợp đồng cột view hàng đợi giữ nguyên",
+);
+await cmp(
+  "0021 lần 2: index unique không bị tạo trùng",
+  `select count(*) n from pg_indexes where indexname in
+     ('uq_ads_changes_inflight','uq_ads_negative_keywords_key','idx_ads_changes_status')`,
+  3,
+);
+
+// ===========================================================================
+console.log("\n=== BƯỚC 23: 0022 — Module 0: quản trị người dùng & quyền (THẬT) ===");
+// ===========================================================================
+ok(
+  await ex(rd("migrations/0022_user_admin.sql"), "0022_user_admin.sql"),
+  "0022 chạy sạch (DO-block tự soát: status · hàm iam · 5 RPC · khóa-mất-quyền · thứ bậc)",
+);
+
+// ---- dữ liệu nền: super_admin thật + 2 người mới ------------------------------
+const adminId = (
+  await one(`select id from iam.user_profiles where lower(email) = 'hocluongvan88@gmail.com'`)
+).id;
+const otherId = "eeee0000-0000-4000-8000-000000000001";
+const outsiderId = "eeee0000-0000-4000-8000-000000000002";
+await ex(
+  `insert into auth.users (id, email, raw_user_meta_data) values
+     ('${otherId}',    'nhanvien@vexim.vn', '{"full_name":"Nhân viên mới"}'::jsonb),
+     ('${outsiderId}', 'nguoila@vexim.vn',  '{"full_name":"Người lạ"}'::jsonb)`,
+);
+await ex(
+  `insert into iam.user_profiles (id, display_name, email, vexim_employee, status)
+   values ('${otherId}', 'Nhân viên mới', 'nhanvien@vexim.vn', true, 'invited'),
+          ('${outsiderId}', 'Người lạ', 'nguoila@vexim.vn', true, 'active')`,
+);
+
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+await cmp(
+  "0022: hocluongvan88@gmail.com là super_admin ĐANG HOẠT ĐỘNG (is_user_admin)",
+  "select iam.is_user_admin() n",
+  1,
+);
+const profileCount = Number((await one("select count(*)::int n from iam.user_profiles")).n);
+await cmp(
+  "0022: danh sách người dùng đọc từ DB thật (không phải mảng mock 6 dòng)",
+  `select count(*) n from public.vexim_admin_users()`,
+  profileCount,
+);
+const svRow = await one(
+  `select role, role_level, shop_count, shop_ids, status from public.vexim_admin_users()
+    where email = 'hocluongvan88@gmail.com'`,
+);
+ok(
+  svRow.role === "super_admin" && Number(svRow.role_level) === 100 && svRow.status === "active",
+  `0022: dòng super_admin có vai trò + cấp + trạng thái THẬT — ${JSON.stringify(svRow)}`,
+);
+ok(
+  Number(svRow.shop_count) >= 1,
+  `0022: super_admin thấy số shop được gán thật = ${svRow.shop_count} (>= 1)`,
+);
+
+// ---- CHẶN: người thường không xem được danh sách ------------------------------
+await ex(`select set_config('request.jwt.claim.sub','${otherId}',false)`);
+const notAdmin = await ex(
+  "select * from public.vexim_admin_users()",
+  "người thường đọc danh sách (kỳ vọng FAIL)",
+);
+ok(!notAdmin, "0022 CHẶN: người thường KHÔNG đọc được danh sách người dùng");
+await cmp("0022 CHẶN: người thường không phải user admin", "select iam.is_user_admin() n", 0);
+
+// ---- CẤP QUYỀN ---------------------------------------------------------------
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+const shopIds = (
+  await db.query("select id from connections.seller_accounts order by display_name limit 2")
+).rows.map((r) => r.id);
+const granted = await one(
+  `select * from public.vexim_admin_set_user_access(
+     '${otherId}', 'operator', 'ppc', array['${shopIds[0]}','${shopIds[1]}']::uuid[])`,
+);
+ok(
+  granted.user_id === otherId && granted.role === "operator" && Number(granted.shop_count) === 2,
+  `0022: gán operator + phòng PPC + 2 shop — ${JSON.stringify(granted)}`,
+);
+await cmp(
+  "0022: nhân viên mới có quyền GHI ở mảng ads của đúng 2 shop đó",
+  `select count(*) n from iam.assignments a
+    where a.user_id = '${otherId}' and a.can_write and a.module = 'ads'
+      and a.seller_account_id = any (array['${shopIds[0]}','${shopIds[1]}']::uuid[])`,
+  2,
+);
+const scoped = await one(
+  `select shop_count, shop_ids from public.vexim_admin_users() where email = 'nhanvien@vexim.vn'`,
+);
+ok(
+  Array.isArray(scoped.shop_ids) && Number(scoped.shop_count) === 2 && scoped.shop_ids.length === 2,
+  `0022: RPC trả kèm shop_ids để hộp thoại Phân quyền chọn sẵn shop hiện có — ${JSON.stringify(scoped)}`,
+);
+await cmp(
+  "0022: audit ghi lại việc cấp quyền (module iam · action user.role_change)",
+  `select count(*) n from iam.audit_logs
+    where module = 'iam' and action = 'user.role_change' and entity = 'nhanvien@vexim.vn'`,
+  1,
+);
+await ex(`select set_config('request.jwt.claim.sub','${otherId}',false)`);
+await cmp(
+  "0022: sau khi gán, người đó ĐỌC được đúng shop của mình",
+  `select iam.can_read_seller_account('${shopIds[0]}') n`,
+  1,
+);
+await cmp(
+  "0022: người đó KHÔNG đọc được shop chưa gán",
+  `select coalesce(iam.can_read_seller_account(
+     (select id from connections.seller_accounts
+       where id <> all (array['${shopIds[0]}','${shopIds[1]}']::uuid[]) limit 1)), false) n`,
+  0,
+);
+
+// ---- KHÓA = MẤT QUYỀN THẬT ---------------------------------------------------
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+const locked = await one(
+  `select * from public.vexim_admin_update_user('${otherId}', null, null, 'suspended')`,
+);
+ok(
+  locked.status === "suspended" && /mất quyền/.test(locked.message),
+  `0022: khóa tài khoản — ${JSON.stringify(locked)}`,
+);
+await ex(`select set_config('request.jwt.claim.sub','${otherId}',false)`);
+await cmp(
+  "0022 KHÓA: tài khoản bị khóa MẤT quyền ĐỌC shop (RLS thật, không phải ẩn UI)",
+  `select coalesce(iam.can_read_seller_account('${shopIds[0]}'), false) n`,
+  0,
+);
+await cmp(
+  "0022 KHÓA: tài khoản bị khóa MẤT quyền GHI shop",
+  `select coalesce(iam.can_write_seller_account('${shopIds[0]}'), false) n`,
+  0,
+);
+await cmp(
+  "0022 KHÓA: tài khoản bị khóa không còn vai trò nào (has_role = false)",
+  `select iam.has_role(array['operator','dept_lead','super_admin']) n`,
+  0,
+);
+await cmp(
+  "0022 KHÓA: nhật ký ghi rõ có người bị khóa",
+  `select count(*) n from iam.audit_logs where module = 'iam' and action = 'user.suspend'`,
+  1,
+);
+
+// ---- MỞ KHÓA -----------------------------------------------------------------
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+await one(`select * from public.vexim_admin_update_user('${otherId}', null, null, 'active')`);
+await ex(`select set_config('request.jwt.claim.sub','${otherId}',false)`);
+await cmp(
+  "0022: mở khóa ⇒ quyền theo vai trò được phục hồi",
+  `select iam.can_read_seller_account('${shopIds[0]}') n`,
+  1,
+);
+
+// ---- CHẶN LEO THANG ----------------------------------------------------------
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+ok(
+  !(await ex(
+    `select * from public.vexim_admin_set_user_access('${adminId}', 'operator', 'ppc', null)`,
+    "tự đổi vai trò mình (kỳ vọng FAIL)",
+  )),
+  "0022 CHẶN: KHÔNG ai tự đổi vai trò của chính mình",
+);
+ok(
+  !(await ex(
+    `select * from public.vexim_admin_update_user('${adminId}', null, null, 'suspended')`,
+    "tự khóa mình (kỳ vọng FAIL)",
+  )),
+  "0022 CHẶN: KHÔNG ai tự khóa tài khoản của chính mình",
+);
+ok(
+  !(await ex(
+    `select * from public.vexim_admin_set_user_access('${otherId}', 'operator', null, null)`,
+    "operator thiếu phòng ban (kỳ vọng FAIL)",
+  )),
+  "0022 CHẶN: vai trò vận hành phải thuộc một phòng ban",
+);
+
+await ex(
+  `insert into iam.role_assignments (user_id, role, department_id)
+   values ('${outsiderId}', 'org_admin', null)`,
+);
+await ex(`select set_config('request.jwt.claim.sub','${outsiderId}',false)`);
+await cmp("0022: org_admin cũng là user admin", "select iam.is_user_admin() n", 1);
+ok(
+  !(await ex(
+    `select * from public.vexim_admin_update_user('${adminId}', null, null, 'suspended')`,
+    "org_admin khóa super_admin (kỳ vọng FAIL)",
+  )),
+  "0022 CHẶN: org_admin KHÔNG khóa được super_admin (so cấp bằng SỐ)",
+);
+ok(
+  !(await ex(
+    `select * from public.vexim_admin_set_user_access('${otherId}', 'super_admin', null, null)`,
+    "org_admin gán super_admin (kỳ vọng FAIL)",
+  )),
+  "0022 CHẶN: org_admin KHÔNG gán được vai trò ngang/cao hơn mình",
+);
+const orgGrantLead = await one(
+  `select * from public.vexim_admin_set_user_access(
+     '${otherId}', 'dept_lead', 'ppc', array['${shopIds[0]}']::uuid[])`,
+);
+ok(
+  orgGrantLead.role === "dept_lead" && Number(orgGrantLead.shop_count) === 1,
+  `0022: org_admin GÁN ĐƯỢC dept_lead (thấp hơn mình) — ${JSON.stringify(orgGrantLead)}`,
+);
+await ex(`select set_config('request.jwt.claim.sub','${otherId}',false)`);
+await cmp(
+  "0022: trưởng phòng PPC vừa được gán DUYỆT được thay đổi quảng cáo (quyền thật)",
+  `select iam.is_ads_approver() n`,
+  1,
+);
+
+// ---- NHẬT KÝ QUẢN TRỊ --------------------------------------------------------
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+const auditRows = (
+  await db.query(
+    `select action, entity, actor_name from public.vexim_admin_audit(20, 'nhanvien@vexim.vn')`,
+  )
+).rows;
+ok(
+  auditRows.length >= 3 && auditRows.some((r) => r.action === "user.role_change"),
+  `0022: nhật ký quản trị trả về đúng thao tác trên người đó (${auditRows.length} dòng)`,
+);
+await ex(`select set_config('request.jwt.claim.sub','${otherId}',false)`);
+ok(
+  !(await ex("select * from public.vexim_admin_audit(20)", "người thường đọc nhật ký (kỳ vọng FAIL)")),
+  "0022 CHẶN: người thường KHÔNG đọc được nhật ký quản trị",
+);
+
+// ---- LUỒNG MỜI (đi cùng /api/admin/invite-user) -------------------------------
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+const thirdId = "eeee0000-0000-4000-8000-000000000003";
+await ex(
+  `insert into auth.users (id, email, raw_user_meta_data)
+   values ('${thirdId}', 'ketoan@vexim.vn', '{"full_name":"Kế toán"}'::jsonb)`,
+);
+const invited = await one(
+  `select * from public.vexim_admin_grant_invited_user(
+     '${thirdId}', 'ketoan@vexim.vn', 'Kế toán', '+84 900 000 000', 'operator', 'finance',
+     array['${shopIds[0]}']::uuid[])`,
+);
+ok(
+  invited.status === "invited" && invited.role === "operator",
+  `0022: mời người mới ⇒ hồ sơ status='invited' + vai trò đã gán — ${JSON.stringify(invited)}`,
+);
+await one(`select * from public.vexim_admin_update_user('${otherId}', null, null, 'suspended')`);
+ok(
+  !(await ex(
+    `select * from public.vexim_admin_grant_invited_user(
+       '${otherId}', 'nhanvien@vexim.vn', 'Nhân viên mới', null, 'operator', 'ppc',
+       array['${shopIds[0]}']::uuid[])`,
+    "mời lại người đang bị khóa (kỳ vọng FAIL)",
+  )),
+  "0022 CHẶN: mời lại KHÔNG tự mở khóa tài khoản đang bị khóa",
+);
+await cmp(
+  "0022: người đang bị khóa vẫn giữ nguyên trạng thái suspended",
+  `select count(*) n from iam.user_profiles where id = '${otherId}' and status = 'suspended'`,
+  1,
+);
+await one(`select * from public.vexim_admin_update_user('${otherId}', null, null, 'active')`);
+
+const reInvite = await one(
+  `select count(*)::int as n from public.vexim_admin_grant_invited_user(
+     '${thirdId}', 'ketoan@vexim.vn', 'Kế toán 2', null, 'operator', 'finance', null)`,
+);
+ok(
+  Number(reInvite.n) === 1 &&
+    Number((await one(`select count(*)::int n from iam.user_profiles where id = '${thirdId}'`)).n) === 1,
+  `0022: mời lần 2 KHÔNG tạo hồ sơ trùng (cập nhật tại chỗ) — ${JSON.stringify(reInvite)}`,
+);
+
+// ---- ĐIỂM DANH ĐĂNG NHẬP (invited → active) ----------------------------------
+await ex(`select set_config('request.jwt.claim.sub','${thirdId}',false)`);
+const touch = await one("select * from public.vexim_touch_login()");
+ok(
+  touch.status === "active" && touch.last_login_at != null && touch.changed === true,
+  `0022: đăng nhập lần đầu ⇒ hồ sơ invited → active + ghi last_login_at — ${JSON.stringify(touch)}`,
+);
+await cmp(
+  "0022: điểm danh lần 2 trong 5 phút KHÔNG ghi lại (tránh UPDATE mỗi lần tải trang)",
+  "select (select changed from public.vexim_touch_login())::int n",
+  0,
+);
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+
+// ---- TRƯỞNG PHÒNG MỜI NGƯỜI: chỉ trong phòng mình, chỉ vai trò thấp hơn ----------
+const leadId = `${otherId}`;                       // đang là dept_lead phòng ppc
+const fourthId = "eeee0000-0000-4000-8000-000000000004";
+await ex(
+  `insert into auth.users (id, email, raw_user_meta_data)
+   values ('${fourthId}', 'ppcmoi@vexim.vn', '{"full_name":"PPC mới"}'::jsonb)`,
+);
+await ex(`select set_config('request.jwt.claim.sub','${leadId}',false)`);
+const leadInviteOk = await one(
+  `select * from public.vexim_admin_grant_invited_user(
+     '${fourthId}', 'ppcmoi@vexim.vn', 'PPC mới', null, 'operator', 'ppc',
+     array['${shopIds[0]}']::uuid[])`,
+);
+ok(
+  leadInviteOk.role === "operator",
+  `0022: trưởng phòng PPC MỜI ĐƯỢC operator cho phòng mình — ${JSON.stringify(leadInviteOk)}`,
+);
+const fifthId = "eeee0000-0000-4000-8000-000000000005";
+await ex(
+  `insert into auth.users (id, email, raw_user_meta_data)
+   values ('${fifthId}', 'ketoan2@vexim.vn', '{"full_name":"KT 2"}'::jsonb)`,
+);
+ok(
+  !(await ex(
+    `select * from public.vexim_admin_grant_invited_user(
+       '${fifthId}', 'ketoan2@vexim.vn', 'KT 2', null, 'operator', 'finance', null)`,
+    "trưởng phòng mời người phòng khác (kỳ vọng FAIL)",
+  )),
+  "0022 CHẶN: trưởng phòng KHÔNG mời được người cho phòng khác",
+);
+ok(
+  !(await ex(
+    `select * from public.vexim_admin_grant_invited_user(
+       '${fifthId}', 'ketoan2@vexim.vn', 'KT 2', null, 'dept_lead', 'ppc', null)`,
+    "trưởng phòng mời ngang cấp (kỳ vọng FAIL)",
+  )),
+  "0022 CHẶN: trưởng phòng KHÔNG gán được vai trò ngang/cao hơn mình",
+);
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+await cmp(
+  "0022: 2 lời mời bị chặn KHÔNG để lại hồ sơ rác",
+  `select count(*) n from iam.user_profiles where id = '${fifthId}'`,
+  0,
+);
+
+// ---- TỰ SỬA HỒ SƠ MÌNH (grant cột của 0022 làm policy 0004 sống lại) -------------
+await ex("begin");
+await ex(`set local role authenticated; select set_config('request.jwt.claim.sub','${otherId}',true);`);
+const selfEdit = await ex(
+  `do $do$
+   declare n int;
+   begin
+     update iam.user_profiles set phone = '+84 912 000 111' where id = '${otherId}';
+     get diagnostics n = row_count;
+     if n <> 1 then
+       raise exception '[test] tự sửa hồ sơ mình phải chạm đúng 1 dòng, nhận %', n;
+     end if;
+   end
+   $do$;`,
+  "tự sửa số điện thoại của mình (phải chạm 1 dòng)",
+);
+ok(selfEdit, "0022: người dùng TỰ SỬA được hồ sơ mình (grant cột + RLS self)");
+await ex("rollback");
+// ---- RLS: người thường vẫn không ghi được hồ sơ ------------------------------
+// LƯU Ý: PGlite chỉ đổi vai trò thật khi `set local role` nằm TRONG transaction
+// đang mở (`db.exec("set local role x")` rời rạc không có tác dụng) ⇒ phải bọc
+// begin/…/rollback, và đếm số dòng UPDATE thật sự chạm được.
+await ex("begin");
+await ex(`set local role authenticated; select set_config('request.jwt.claim.sub','${otherId}',true);`);
+const tamper = await ex(
+  `do $do$
+   declare n int;
+   begin
+     update iam.user_profiles set display_name = 'Đổi trộm' where id = '${adminId}';
+     get diagnostics n = row_count;
+     if n <> 0 then
+       raise exception '[test] RLS hở: sửa được % hồ sơ người khác', n;
+     end if;
+   end
+   $do$;`,
+  "người thường sửa hồ sơ người khác (phải chạm 0 dòng)",
+);
+ok(tamper, "0022 CHẶN: người thường KHÔNG sửa được hồ sơ người khác (RLS chặn ở tầng dòng)");
+await ex("rollback");
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+
 console.log(`\n${"=".repeat(70)}`);
 console.log(fails === 0 ? "TẤT CẢ PASS" : `${fails} MỤC FAIL`);
 console.log("=".repeat(70));

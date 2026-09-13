@@ -1,4 +1,4 @@
-import { Chip, NoAccess, PageHeader, Panel, tableCls } from "@/components/ui";
+import { Chip, MockDataNotice, NoAccess, PageHeader, Panel, tableCls } from "@/components/ui";
 import { requireSession } from "@/lib/auth/session";
 import { auditLogs } from "@/lib/data/mock";
 import type { PersonaKey } from "@/lib/roles";
@@ -11,6 +11,10 @@ export default async function AuditLogPage() {
 
   return (
     <>
+      {session.mode === "supabase" ? (
+        <MockDataNotice what={<>Bảng dưới đọc từ mảng viết cứng trong `lib/data/mock.ts`; nhật ký THẬT đang nằm ở
+        `iam.audit_logs` (màn `/module0/users` đã hiện nhật ký thao tác quản trị thật).</>} />
+      ) : null}
       <PageHeader
         title="Nhật ký thao tác (audit log)"
         sub="iam.audit_logs · append-only"

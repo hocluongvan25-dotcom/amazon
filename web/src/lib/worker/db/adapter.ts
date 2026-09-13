@@ -532,6 +532,293 @@ export type ReportRequestRow = ReportRequestInput & {
   attempts: number;
 };
 
+
+/* ============================================================================
+ * MODULE 5 PHẦN 1 — AMAZON ADS (khớp migration 0020)
+ *
+ * Luật ghi giống 0016..0019: `null` = "nguồn không cho biết"; khoá tự nhiên
+ * NOT NULL DEFAULT '' ở DB nên adapter truyền chuỗi rỗng chứ không truyền null.
+ * ==========================================================================*/
+
+/** (inserted, updated, skipped = thiếu khoá, merged = trùng khoá trong cùng lô) */
+export type AdsEntityCounts = {
+  inserted: number;
+  updated: number;
+  skipped: number;
+  merged: number;
+};
+
+/** Metrics: thêm số ngày + danh sách tiền tệ (log "kéo được mấy ngày, tiền gì"). */
+export type AdsMetricCounts = AdsEntityCounts & {
+  days: number | null;
+  currencies: string | null;
+};
+
+/** Gợi ý negative: `kept` = số gợi ý ĐÃ CÓ QUYẾT ĐỊNH của con người nên giữ nguyên. */
+export type AdsSuggestionCounts = {
+  inserted: number;
+  updated: number;
+  skipped: number;
+  kept: number;
+};
+
+/** Lấp ads_spend vào F4: chỉ UPDATE dòng lợi nhuận đã có, không tạo dòng mới. */
+export type AdsSpendCounts = {
+  updated: number;
+  skippedNoRow: number;
+  skippedCurrency: number;
+};
+
+/* ---- Module 5 phần 3 (0021): HÀNG ĐỢI GHI lên Amazon Ads ---- */
+
+export type AdsChangeAction =
+  | "set_budget"
+  | "set_bid"
+  | "set_state"
+  | "add_negative_exact"
+  | "add_negative_phrase";
+
+/**
+ * Một yêu cầu ghi đã được DUYỆT, worker vừa nhận (claim) để thực thi.
+ * `beforeValue`/`afterValue` là jsonb `{value: …}` — giữ nguyên dạng của DB để
+ * job không phải đoán kiểu (số cho bid/budget, chuỗi cho state/negative).
+ */
+export type AdsChangeRow = {
+  changeId: string;
+  entityType: string;
+  entityKey: string;
+  campaignId: string;
+  adGroupId: string;
+  action: AdsChangeAction;
+  payload: Record<string, unknown>;
+  beforeValue: Record<string, unknown> | null;
+  afterValue: Record<string, unknown> | null;
+  adsProfileId: string;
+  currency: string | null;
+  entityLabel: string;
+  suggestionId: string | null;
+  attempts: number;
+};
+
+export type AdsChangeRecordInput = {
+  changeId: string;
+  ok: boolean;
+  /** phản hồi Amazon (đã rút gọn) — lưu vào api_response để đối chiếu về sau */
+  api?: Record<string, unknown> | null;
+  error?: string | null;
+};
+
+export type AdsChangeRecordResult = {
+  changeId: string;
+  status: "applied" | "failed" | string;
+  /** true = đã cập nhật bản ghi cục bộ (campaigns/targets/negative_keywords) */
+  mirrored: boolean;
+  keywordId: string | null;
+  /** true = gợi ý A3 gắn với yêu cầu này đã được đóng (applied) */
+  suggestionApplied: boolean;
+};
+
+export type AdsChangeReleaseResult = {
+  changeId: string;
+  status: string;
+  attempts: number;
+};
+
+export type AdsProfileRowInput = {
+  adsProfileId: string;
+  marketplace: string;
+  currency?: string | null;
+  countryCode?: string | null;
+  accountType?: string | null;
+  managerAccountId?: string | null;
+  source?: string | null;
+};
+
+/**
+ * Profile Ads đã lưu (đọc qua view `public.vexim_ads_profiles` của 0020).
+ * Runner dùng để biết profile nào + tiền tệ nào cho report (report v3 không trả
+ * cột currency, mà tiền tệ sai thì mọi con số ACOS/TACOS đều sai theo).
+ */
+export type AdsProfileRow = {
+  adsProfileId: string;
+  marketplace: string;
+  currency: string | null;
+};
+
+export type AdsCampaignRowInput = {
+  campaignId: string;
+  name: string;
+  adsProfileId?: string | null;
+  campaignType?: string | null;
+  state?: string | null;
+  targetingType?: string | null;
+  portfolioId?: string | null;
+  dailyBudget?: number | string | null;
+  budgetCurrency?: string | null;
+  budgetType?: string | null;
+  biddingStrategy?: string | null;
+  startDate?: string | null;
+  /** null CÓ CHỦ Ý = campaign đã gỡ hạn (0020 ghi đè được bằng NULL) */
+  endDate?: string | null;
+};
+
+export type AdsAdGroupRowInput = {
+  adGroupId: string;
+  campaignId?: string | null;
+  name?: string | null;
+  state?: string | null;
+  defaultBid?: number | null;
+  adsProfileId?: string | null;
+  currency?: string | null;
+};
+
+export type AdsTargetRowInput = {
+  targetKey: string;
+  targetKind: "keyword" | "product_target";
+  adGroupId?: string | null;
+  campaignId?: string | null;
+  keywordText?: string | null;
+  matchType?: string | null;
+  expressionType?: string | null;
+  expressionValue?: string | null;
+  bid?: number | null;
+  state?: string | null;
+  adsProfileId?: string | null;
+};
+
+export type AdsCampaignMetricRowInput = {
+  day: string;
+  campaignId: string;
+  adsProfileId?: string | null;
+  impressions?: number | null;
+  clicks?: number | null;
+  cost?: number | null;
+  sales7d?: number | null;
+  sales14d?: number | null;
+  sales30d?: number | null;
+  purchases7d?: number | null;
+  purchases14d?: number | null;
+  purchases30d?: number | null;
+  unitsSoldClicks7d?: number | null;
+  unitsSoldClicks14d?: number | null;
+  unitsSoldClicks30d?: number | null;
+  units7d?: number | null;
+  currency?: string | null;
+  budgetAmount?: number | null;
+};
+
+export type AdsTargetMetricRowInput = AdsCampaignMetricRowInput & {
+  adGroupId: string;
+  targetKey: string;
+  targetKind?: string | null;
+  keywordText?: string | null;
+  matchType?: string | null;
+  expressionType?: string | null;
+  expressionValue?: string | null;
+};
+
+export type AdsSearchTermRowInput = AdsCampaignMetricRowInput & {
+  adGroupId: string;
+  searchTerm: string;
+  keywordId?: string | null;
+  keywordText?: string | null;
+  matchType?: string | null;
+};
+
+export type AdsProductMetricRowInput = AdsCampaignMetricRowInput & {
+  adGroupId?: string | null;
+  advertisedAsin?: string | null;
+  advertisedSku?: string | null;
+  /** chỉ có ở report `purchased` */
+  purchasedAsin?: string | null;
+  keywordText?: string | null;
+  matchType?: string | null;
+  salesOtherSku7d?: number | null;
+  salesOtherSku14d?: number | null;
+  salesOtherSku30d?: number | null;
+  unitsSoldOtherSku7d?: number | null;
+  unitsSoldOtherSku14d?: number | null;
+  unitsSoldOtherSku30d?: number | null;
+};
+
+export type AdsBudgetEventRowInput = {
+  day: string;
+  campaignId: string;
+  eventType: string;
+  adsProfileId?: string | null;
+  budgetAmount?: number | null;
+  currency?: string | null;
+  cost?: number | null;
+  usagePct?: number | null;
+  /** null khi hourSource='unavailable' (report v3 không có giờ) */
+  exhaustedHour?: number | null;
+  hourSource?: string | null;
+  note?: string | null;
+};
+
+export type AdsSuggestionRowInput = {
+  campaignId: string;
+  term: string;
+  suggestionType: string;
+  adGroupId?: string | null;
+  matchType?: string | null;
+  confidence?: number | null;
+  confidenceLabel?: string | null;
+  windowDays?: number | null;
+  evidence?: unknown;
+  reasons?: unknown;
+  keywordId?: string | null;
+  keywordText?: string | null;
+  targetKind?: string | null;
+  adsProfileId?: string | null;
+};
+
+/* ---- Module 0: token platform + luồng re-authorize ---- */
+
+export type OauthTokenInput = {
+  refreshToken: string;
+  authScope?: string | null;
+  authorizedAt?: string | null;
+  expiresAt?: string | null;
+  /** số ngày nhắc trước khi hết hạn (clamp 1..120 → mặc định 30) */
+  noticeDays?: number | null;
+  connectedBy?: string | null;
+};
+
+export type OauthTokenResult = {
+  id: string;
+  authorizedAt: string | null;
+  expiresAt: string | null;
+  daysLeft: number | null;
+  refreshCount: number | null;
+  /** true = đã THAY token cũ (re-authorize), false = lần authorize đầu */
+  replaced: boolean;
+};
+
+export type OauthStateResult = { state: string; expiresAt: string | null };
+
+export type OauthConsumeResult = {
+  ok: boolean;
+  sellerAccountId: string | null;
+  redirectTo: string | null;
+  message: string;
+};
+
+export type OauthSoonRow = {
+  sellerAccountId: string;
+  shop: string | null;
+  sellerId: string | null;
+  marketplace: string | null;
+  authorizedAt: string | null;
+  expiresAt: string | null;
+  daysLeft: number | null;
+  noticeDays: number | null;
+  needsReauth: boolean;
+  alreadyNoticed: boolean;
+  tokenActive: boolean;
+  adsProfiles: number;
+};
+
 export interface DbAdapter {
   upsertInventorySnapshot(row: InventorySnapshotRow): Promise<void>;
   upsertInventoryDaily(row: InventoryDailyRow): Promise<void>;
@@ -669,6 +956,81 @@ export interface DbAdapter {
     to: string,
     limit?: number,
   ): Promise<FinancialEventQueryRow[]>;
+
+  /* ---- Module 5 phần 1 (0020): Amazon Ads ---- */
+  /** /v2/profiles — 1 shop có thể có nhiều profile (mỗi marketplace một cái). */
+  upsertAdsProfiles(sellerAccountId: string, rows: AdsProfileRowInput[]): Promise<AdsEntityCounts>;
+  /** Đọc lại profile đã lưu (runner cần ads_profile_id + currency cho report). */
+  listAdsProfiles(sellerAccountId: string): Promise<AdsProfileRow[]>;
+  /** Campaign Management v3 `/sp/campaigns/list` */
+  upsertAdsCampaigns(sellerAccountId: string, rows: AdsCampaignRowInput[]): Promise<AdsEntityCounts>;
+  /** Campaign Management v3 `/sp/adGroups/list` */
+  upsertAdsAdGroups(sellerAccountId: string, rows: AdsAdGroupRowInput[]): Promise<AdsEntityCounts>;
+  /** Keywords + product targets (một hàm vì màn A2 hiển thị chung một bảng) */
+  upsertAdsTargets(sellerAccountId: string, rows: AdsTargetRowInput[]): Promise<AdsEntityCounts>;
+  /** Metrics campaign theo NGÀY (report spCampaigns, cửa sổ 7/14/30 ngày) */
+  upsertAdsCampaignMetrics(
+    sellerAccountId: string,
+    rows: AdsCampaignMetricRowInput[],
+  ): Promise<AdsMetricCounts>;
+  /** Metrics theo keyword/target (report spTargeting) */
+  upsertAdsTargetMetrics(
+    sellerAccountId: string,
+    rows: AdsTargetMetricRowInput[],
+  ): Promise<AdsMetricCounts>;
+  /** Search term thật của người mua (report spSearchTerm) */
+  upsertAdsSearchTerms(
+    sellerAccountId: string,
+    rows: AdsSearchTermRowInput[],
+  ): Promise<AdsMetricCounts>;
+  /** Theo ASIN/SKU: `advertised` (spAdvertisedProduct) hoặc `purchased` (spPurchasedProduct) */
+  upsertAdsProductMetrics(
+    sellerAccountId: string,
+    level: "advertised" | "purchased",
+    rows: AdsProductMetricRowInput[],
+  ): Promise<AdsMetricCounts>;
+  /** Sự kiện ngân sách (capped/under_delivery/budget_increased…) */
+  upsertAdsBudgetEvents(
+    sellerAccountId: string,
+    rows: AdsBudgetEventRowInput[],
+  ): Promise<AdsEntityCounts>;
+  /**
+   * Gợi ý negative của worker. Gợi ý đã được con người quyết (approved/rejected)
+   * thì job KHÔNG ghi đè — trả về ở `kept` (SOP-04 bước 3).
+   */
+  upsertAdsSuggestions(
+    sellerAccountId: string,
+    rows: AdsSuggestionRowInput[],
+  ): Promise<AdsSuggestionCounts>;
+  /**
+   * Lấp `finance.sku_profit_daily.ads_spend` từ report spAdvertisedProduct.
+   * CHỈ cập nhật dòng đã có (không tạo dòng lợi nhuận) và CHỈ cùng tiền tệ.
+   */
+  applyAdsSpend(sellerAccountId: string, from: string, to: string): Promise<AdsSpendCounts>;
+
+  /* ---- Module 5 phần 3 (0021): chiều GHI lên Amazon Ads ---- */
+  /**
+   * Nhận các yêu cầu ĐÃ DUYỆT của một shop (approved → applying, +1 attempts).
+   * KHÔNG bao giờ trả về dòng `pending_approval`: ngưỡng 30%/ngày phải được
+   * người duyệt TRƯỚC khi có request nào gửi lên Amazon (SOP-05 bước 4).
+   */
+  claimAdsChanges(sellerAccountId: string, limit?: number): Promise<AdsChangeRow[]>;
+  /** Ghi kết quả Amazon trả về (applied/failed) + cập nhật cục bộ + audit. */
+  recordAdsChange(input: AdsChangeRecordInput): Promise<AdsChangeRecordResult>;
+  /** 429/5xx: trả yêu cầu về 'approved' để lần chạy sau thử tiếp. */
+  releaseAdsChange(changeId: string, reason: string): Promise<AdsChangeReleaseResult>;
+
+  /* ---- Module 0 (0020): token platform + re-authorize ---- */
+  saveOauthToken(sellerAccountId: string, token: OauthTokenInput): Promise<OauthTokenResult>;
+  createOauthState(
+    sellerAccountId: string,
+    redirectTo?: string | null,
+    ttlMinutes?: number | null,
+  ): Promise<OauthStateResult>;
+  consumeOauthState(state: string): Promise<OauthConsumeResult>;
+  markOauthNotice(sellerAccountId: string): Promise<{ rotateReminderSent: boolean }>;
+  /** Shop sắp/đã hết hạn token — cron nhắc re-auth dùng hàm này (service_role). */
+  listOauthSoon(days?: number | null): Promise<OauthSoonRow[]>;
 }
 
 /* ---- helper cho luật nhập report PHÍ (0019) trong MockDbAdapter ---- */
@@ -851,6 +1213,55 @@ export class MockDbAdapter implements DbAdapter {
   healthIssues: AccountHealthIssueRowInput[] = [];
   settlements: SettlementRowInput[] = [];
   financialEvents: FinancialEventRowInput[] = [];
+
+  /* ---- Module 5 phần 1 (0020): Amazon Ads ---- */
+  adsProfiles: (AdsProfileRowInput & { sellerAccountId: string })[] = [];
+  adsCampaigns: (AdsCampaignRowInput & { sellerAccountId: string })[] = [];
+  adsAdGroups: (AdsAdGroupRowInput & { sellerAccountId: string })[] = [];
+  adsTargets: (AdsTargetRowInput & { sellerAccountId: string })[] = [];
+  adsCampaignMetrics: (AdsCampaignMetricRowInput & { sellerAccountId: string })[] = [];
+  adsTargetMetrics: (AdsTargetMetricRowInput & { sellerAccountId: string })[] = [];
+  adsSearchTerms: (AdsSearchTermRowInput & { sellerAccountId: string })[] = [];
+  adsAdvertisedProducts: (AdsProductMetricRowInput & { sellerAccountId: string })[] = [];
+  adsPurchasedProducts: (AdsProductMetricRowInput & { sellerAccountId: string })[] = [];
+  adsBudgetEvents: (AdsBudgetEventRowInput & { sellerAccountId: string })[] = [];
+  adsSuggestions: (AdsSuggestionRowInput & { sellerAccountId: string; status: string })[] = [];
+  /* Module 5 phần 3 (0021) — hàng đợi ghi + gương negative */
+  adsChanges: (Omit<AdsChangeRow, "changeId"> & {
+    changeId: string;
+    sellerAccountId: string;
+    status: string;
+    apiResponse: Record<string, unknown> | null;
+    error: string | null;
+    appliedAt: string | null;
+  })[] = [];
+  adsNegativeKeywords: {
+    sellerAccountId: string;
+    adsProfileId: string;
+    campaignId: string;
+    adGroupId: string;
+    keywordId: string;
+    keywordText: string;
+    matchType: string;
+    changeRequestId: string;
+  }[] = [];
+  oauthTokens: (OauthTokenInput & {
+    sellerAccountId: string;
+    authorizedAt: string;
+    expiresAt: string;
+    refreshCount: number;
+    rotateReminderSent: boolean;
+    noticeSentAt: string | null;
+    lastRefreshAt: string | null;
+  })[] = [];
+  oauthStates: {
+    state: string;
+    sellerAccountId: string;
+    redirectTo: string | null;
+    expiresAt: string;
+    usedAt: string | null;
+  }[] = [];
+  private oauthStateSeq = 0;
   private sellingDays: Record<string, number[]> = {};
 
   seedSellingDays(sellerAccountId: string, sku: string, days: number[]): void {
@@ -1425,5 +1836,560 @@ export class MockDbAdapter implements DbAdapter {
       }
     }
     return [...bySku.values()].map(({ sku, unitCost, currency }) => ({ sku, unitCost, currency }));
+  }
+
+  /* ==========================================================================
+   * MODULE 5 PHẦN 1 (0020) — Amazon Ads
+   * Mock giữ ĐÚNG luật của RPC trong DB (idempotent theo khoá tự nhiên, `null`
+   * = chưa biết, KHÔNG trộn tiền tệ, quyết định của con người bất khả xâm phạm)
+   * để test job không "xanh giả".
+   * ========================================================================*/
+
+  private adsKey(sellerAccountId: string, parts: unknown[]): string {
+    return [sellerAccountId, ...parts.map((v) => String(v ?? ""))].join("\u0001");
+  }
+
+  private adsUpsert<T extends object>(
+    store: (T & { sellerAccountId: string })[],
+    sellerAccountId: string,
+    rows: T[],
+    keyOf: (row: T & { sellerAccountId: string }) => string,
+    isValid: (row: T & { sellerAccountId: string }) => boolean,
+  ): AdsEntityCounts {
+    let inserted = 0;
+    let updated = 0;
+    let skipped = 0;
+    let merged = 0;
+    const seen = new Set<string>();
+    for (const raw of rows) {
+      const row = { ...(raw as object), sellerAccountId } as T & { sellerAccountId: string };
+      if (!isValid(row)) {
+        skipped++;
+        continue;
+      }
+      const key = keyOf(row);
+      if (seen.has(key)) {
+        merged++;
+        continue;
+      }
+      seen.add(key);
+      const i = store.findIndex((x) => keyOf(x) === key);
+      if (i >= 0) {
+        store[i] = { ...store[i], ...row };
+        updated++;
+      } else {
+        store.push(row);
+        inserted++;
+      }
+    }
+    return { inserted, updated, skipped, merged };
+  }
+
+  private adsMetricSummary<T extends { day?: string; currency?: string | null }>(
+    rows: (T & { sellerAccountId: string })[],
+  ): { days: number | null; currencies: string | null } {
+    const days = new Set(rows.map((r) => String(r.day ?? "")).filter((d) => d !== ""));
+    const currencies = new Set(
+      rows.map((r) => String(r.currency ?? "").toUpperCase()).filter((c) => c !== ""),
+    );
+    return {
+      days: days.size,
+      currencies: [...currencies].sort().join(", ") || null,
+    };
+  }
+
+  async upsertAdsProfiles(
+    sellerAccountId: string,
+    rows: AdsProfileRowInput[],
+  ): Promise<AdsEntityCounts> {
+    return this.adsUpsert(
+      this.adsProfiles,
+      sellerAccountId,
+      rows,
+      (r) => this.adsKey(r.sellerAccountId, [r.adsProfileId, r.marketplace]),
+      (r) => r.adsProfileId !== "" && r.marketplace !== "",
+    );
+  }
+
+  async listAdsProfiles(sellerAccountId: string): Promise<AdsProfileRow[]> {
+    return this.adsProfiles
+      .filter((p) => p.sellerAccountId === sellerAccountId)
+      .map((p) => ({
+        adsProfileId: p.adsProfileId,
+        marketplace: p.marketplace,
+        currency: p.currency ?? null,
+      }));
+  }
+
+  async upsertAdsCampaigns(
+    sellerAccountId: string,
+    rows: AdsCampaignRowInput[],
+  ): Promise<AdsEntityCounts> {
+    return this.adsUpsert(
+      this.adsCampaigns,
+      sellerAccountId,
+      rows,
+      (r) => this.adsKey(r.sellerAccountId, [r.campaignId]),
+      (r) => r.campaignId !== "" && String(r.name ?? "") !== "",
+    );
+  }
+
+  async upsertAdsAdGroups(
+    sellerAccountId: string,
+    rows: AdsAdGroupRowInput[],
+  ): Promise<AdsEntityCounts> {
+    return this.adsUpsert(
+      this.adsAdGroups,
+      sellerAccountId,
+      rows,
+      (r) => this.adsKey(r.sellerAccountId, [r.adGroupId]),
+      (r) => r.adGroupId !== "",
+    );
+  }
+
+  async upsertAdsTargets(
+    sellerAccountId: string,
+    rows: AdsTargetRowInput[],
+  ): Promise<AdsEntityCounts> {
+    return this.adsUpsert(
+      this.adsTargets,
+      sellerAccountId,
+      rows,
+      (r) => this.adsKey(r.sellerAccountId, [r.adGroupId, r.targetKind, r.targetKey, r.matchType]),
+      (r) => r.targetKey !== "",
+    );
+  }
+
+  async upsertAdsCampaignMetrics(
+    sellerAccountId: string,
+    rows: AdsCampaignMetricRowInput[],
+  ): Promise<AdsMetricCounts> {
+    const counts = this.adsUpsert(
+      this.adsCampaignMetrics,
+      sellerAccountId,
+      rows,
+      (r) => this.adsKey(r.sellerAccountId, [r.day, r.campaignId]),
+      (r) => r.day !== "" && r.campaignId !== "",
+    );
+    return { ...counts, ...this.adsMetricSummary(this.adsCampaignMetrics) };
+  }
+
+  async upsertAdsTargetMetrics(
+    sellerAccountId: string,
+    rows: AdsTargetMetricRowInput[],
+  ): Promise<AdsMetricCounts> {
+    const counts = this.adsUpsert(
+      this.adsTargetMetrics,
+      sellerAccountId,
+      rows,
+      (r) => this.adsKey(r.sellerAccountId, [r.day, r.adGroupId, r.targetKey, r.matchType]),
+      (r) => r.day !== "" && r.adGroupId !== "" && r.targetKey !== "",
+    );
+    return { ...counts, ...this.adsMetricSummary(this.adsTargetMetrics) };
+  }
+
+  async upsertAdsSearchTerms(
+    sellerAccountId: string,
+    rows: AdsSearchTermRowInput[],
+  ): Promise<AdsMetricCounts> {
+    const counts = this.adsUpsert(
+      this.adsSearchTerms,
+      sellerAccountId,
+      rows,
+      (r) => this.adsKey(r.sellerAccountId, [r.day, r.searchTerm.toLowerCase()]),
+      (r) => r.day !== "" && String(r.searchTerm ?? "").trim() !== "",
+    );
+    return { ...counts, ...this.adsMetricSummary(this.adsSearchTerms) };
+  }
+
+  async upsertAdsProductMetrics(
+    sellerAccountId: string,
+    level: "advertised" | "purchased",
+    rows: AdsProductMetricRowInput[],
+  ): Promise<AdsMetricCounts> {
+    if (level !== "advertised" && level !== "purchased") {
+      throw new Error(`upsertAdsProductMetrics: level lạ "${level}" (chỉ advertised | purchased)`);
+    }
+    const store = level === "advertised" ? this.adsAdvertisedProducts : this.adsPurchasedProducts;
+    const counts = this.adsUpsert(
+      store,
+      sellerAccountId,
+      rows,
+      (r) =>
+        this.adsKey(r.sellerAccountId, [
+          r.day,
+          r.advertisedSku || r.advertisedAsin,
+          level === "purchased" ? r.purchasedAsin : "",
+        ]),
+      (r) =>
+        r.day !== "" &&
+        (String(r.advertisedSku ?? "") !== "" || String(r.advertisedAsin ?? "") !== "") &&
+        (level === "advertised" || String(r.purchasedAsin ?? "") !== ""),
+    );
+    return { ...counts, ...this.adsMetricSummary(store) };
+  }
+
+  async upsertAdsBudgetEvents(
+    sellerAccountId: string,
+    rows: AdsBudgetEventRowInput[],
+  ): Promise<AdsEntityCounts> {
+    const ALLOWED = new Set([
+      "capped",
+      "exhausted_suspected",
+      "under_delivery",
+      "budget_increased",
+    ]);
+    return this.adsUpsert(
+      this.adsBudgetEvents,
+      sellerAccountId,
+      rows,
+      (r) => this.adsKey(r.sellerAccountId, [r.day, r.campaignId, r.eventType]),
+      (r) => r.day !== "" && r.campaignId !== "" && ALLOWED.has(r.eventType),
+    );
+  }
+
+  async upsertAdsSuggestions(
+    sellerAccountId: string,
+    rows: AdsSuggestionRowInput[],
+  ): Promise<AdsSuggestionCounts> {
+    const ALLOWED = new Set([
+      "negative_exact",
+      "negative_phrase",
+      "pause_keyword",
+      "lower_bid",
+    ]);
+    let inserted = 0;
+    let updated = 0;
+    let skipped = 0;
+    let kept = 0;
+    for (const raw of rows) {
+      const row = { ...raw, sellerAccountId };
+      if (!ALLOWED.has(row.suggestionType) || String(row.term ?? "").trim() === "") {
+        skipped++;
+        continue;
+      }
+      const key = this.adsKey(sellerAccountId, [
+        row.campaignId,
+        row.adGroupId,
+        row.term.toLowerCase(),
+        row.matchType,
+        row.suggestionType,
+      ]);
+      const i = this.adsSuggestions.findIndex((x) => this.adsKey(x.sellerAccountId, [
+        x.campaignId, x.adGroupId, x.term.toLowerCase(), x.matchType, x.suggestionType,
+      ]) === key);
+      if (i >= 0) {
+        // Con người đã quyết (approved/rejected) ⇒ worker KHÔNG ghi đè.
+        if (this.adsSuggestions[i].status !== "pending") {
+          kept++;
+          continue;
+        }
+        this.adsSuggestions[i] = { ...this.adsSuggestions[i], ...row };
+        updated++;
+      } else {
+        this.adsSuggestions.push({ ...row, status: "pending" });
+        inserted++;
+      }
+    }
+    return { inserted, updated, skipped, kept };
+  }
+
+  async applyAdsSpend(
+    sellerAccountId: string,
+    from: string,
+    to: string,
+  ): Promise<AdsSpendCounts> {
+    const spend = new Map<string, { day: string; sku: string; currency: string; cost: number }>();
+    for (const r of this.adsAdvertisedProducts) {
+      if (r.sellerAccountId !== sellerAccountId) continue;
+      const sku = String(r.advertisedSku ?? "").trim();
+      const day = String(r.day ?? "");
+      const currency = String(r.currency ?? "").toUpperCase();
+      if (sku === "" || day === "" || currency === "" || r.cost === null || r.cost === undefined) continue;
+      if (day < from || day > to) continue;
+      const key = `${day}|${sku}|${currency}`;
+      const prev = spend.get(key);
+      spend.set(key, { day, sku, currency, cost: (prev?.cost ?? 0) + Number(r.cost) });
+    }
+    let updated = 0;
+    let skippedNoRow = 0;
+    let skippedCurrency = 0;
+    for (const s of spend.values()) {
+      const sameDay = this.skuProfit.filter(
+        (p) => p.sellerAccountId === sellerAccountId && p.day === s.day && p.sku === s.sku,
+      );
+      if (sameDay.length === 0) {
+        skippedNoRow++;
+        continue;
+      }
+      const sameCurrency = sameDay.filter((p) => p.currency.toUpperCase() === s.currency);
+      if (sameCurrency.length === 0) {
+        skippedCurrency++;
+        continue;
+      }
+      for (const p of sameCurrency) {
+        p.adsSpend = s.cost;
+        updated++;
+      }
+    }
+    return { updated, skippedNoRow, skippedCurrency };
+  }
+
+  /* ---- Module 0: token platform + re-authorize ---- */
+
+  /* ==========================================================================
+   * MODULE 5 PHẦN 3 (0021) — HÀNG ĐỢI GHI
+   * Mock giữ đúng luật của DB: chỉ claim dòng 'approved'; ghi kết quả mới đổi
+   * trạng thái + cập nhật bản ghi cục bộ; thất bại thì KHÔNG ghi giá trị chưa
+   * được Amazon nhận (nếu không, test sẽ "xanh" trên một DB đang sai).
+   * ========================================================================*/
+
+  /** Dựng sẵn một yêu cầu cho test/job (thay cho RPC request của web). */
+  seedAdsChange(
+    row: Omit<AdsChangeRow, "changeId"> & {
+      changeId?: string;
+      sellerAccountId: string;
+      status?: string;
+    },
+  ): AdsChangeRow {
+    const changeId = row.changeId ?? `chg-${this.adsChanges.length + 1}`;
+    this.adsChanges.push({
+      ...row,
+      changeId,
+      status: row.status ?? "approved",
+      apiResponse: null,
+      error: null,
+      appliedAt: null,
+    });
+    return { ...row, changeId } as AdsChangeRow;
+  }
+
+  async claimAdsChanges(sellerAccountId: string, limit = 20): Promise<AdsChangeRow[]> {
+    const max = Math.min(Math.max(limit, 1), 200);
+    const out: AdsChangeRow[] = [];
+    for (const c of this.adsChanges) {
+      if (out.length >= max) break;
+      if (c.sellerAccountId !== sellerAccountId) continue;
+      if (c.status !== "approved") continue;
+      c.status = "applying";
+      c.attempts += 1;
+      out.push(this.adsChangeView(c));
+    }
+    return out;
+  }
+
+  async recordAdsChange(input: AdsChangeRecordInput): Promise<AdsChangeRecordResult> {
+    const c = this.adsChanges.find((x) => x.changeId === input.changeId);
+    if (!c) throw new Error(`recordAdsChange: không thấy yêu cầu ${input.changeId}`);
+    if (c.status !== "applying") {
+      throw new Error(`recordAdsChange: yêu cầu đang ở '${c.status}' — chỉ ghi kết quả cho dòng đang applying`);
+    }
+
+    if (!input.ok) {
+      c.status = "failed";
+      c.error = input.error ?? "Amazon từ chối (không có thông báo)";
+      c.apiResponse = input.api ?? null;
+      return { changeId: c.changeId, status: "failed", mirrored: false, keywordId: null, suggestionApplied: false };
+    }
+
+    c.status = "applied";
+    c.appliedAt = new Date().toISOString();
+    c.apiResponse = input.api ?? null;
+    c.error = null;
+
+    const after = String(c.afterValue?.value ?? "");
+    let mirrored = false;
+    let keywordId: string | null = null;
+
+    if (c.action === "set_budget") {
+      const camp = this.adsCampaigns.find(
+        (x) => x.sellerAccountId === c.sellerAccountId && x.campaignId === c.entityKey,
+      );
+      if (camp) {
+        camp.dailyBudget = Number(after);
+        mirrored = true;
+      }
+    } else if (c.action === "set_bid") {
+      const t = this.adsTargets.find(
+        (x) => x.sellerAccountId === c.sellerAccountId && x.targetKind === "keyword" && x.targetKey === c.entityKey,
+      );
+      if (t) {
+        t.bid = Number(after);
+        mirrored = true;
+      }
+    } else if (c.action === "set_state") {
+      if (c.entityType === "campaign") {
+        const camp = this.adsCampaigns.find(
+          (x) => x.sellerAccountId === c.sellerAccountId && x.campaignId === c.entityKey,
+        );
+        if (camp) {
+          camp.state = after;
+          mirrored = true;
+        }
+      } else {
+        const t = this.adsTargets.find(
+          (x) => x.sellerAccountId === c.sellerAccountId && x.targetKind === "keyword" && x.targetKey === c.entityKey,
+        );
+        if (t) {
+          t.state = after;
+          mirrored = true;
+        }
+      }
+    } else {
+      keywordId = String(input.api?.keywordId ?? "") || null;
+      this.adsNegativeKeywords.push({
+        sellerAccountId: c.sellerAccountId,
+        adsProfileId: c.adsProfileId,
+        campaignId: c.campaignId,
+        adGroupId: c.adGroupId,
+        keywordId: keywordId ?? "",
+        keywordText: after,
+        matchType: c.action === "add_negative_phrase" ? "NEGATIVE_PHRASE" : "NEGATIVE_EXACT",
+        changeRequestId: c.changeId,
+      });
+      mirrored = true;
+    }
+
+    // Mock không tự sinh uuid như DB ⇒ tìm gợi ý theo id (nếu có) hoặc theo
+    // (campaign, term) — đúng khoá tự nhiên mà RPC 0020 dùng để gộp dòng.
+    let suggestionApplied = false;
+    if (c.suggestionId) {
+      const sug =
+        this.adsSuggestions.find((x) => (x as { id?: string }).id === c.suggestionId) ??
+        this.adsSuggestions.find(
+          (x) => x.campaignId === c.campaignId && x.term.toLowerCase() === c.entityKey.toLowerCase(),
+        );
+      if (sug) {
+        sug.status = "applied";
+        suggestionApplied = true;
+      }
+    }
+
+    return { changeId: c.changeId, status: "applied", mirrored, keywordId, suggestionApplied };
+  }
+
+  async releaseAdsChange(changeId: string, reason: string): Promise<AdsChangeReleaseResult> {
+    const c = this.adsChanges.find((x) => x.changeId === changeId);
+    if (!c) throw new Error(`releaseAdsChange: không thấy yêu cầu ${changeId}`);
+    if (c.status !== "applying") {
+      throw new Error(`releaseAdsChange: chỉ trả lại hàng đợi được dòng đang applying (đang: ${c.status})`);
+    }
+    c.status = "approved";
+    c.apiResponse = { released: true, reason, attempts: c.attempts };
+    return { changeId: c.changeId, status: "approved", attempts: c.attempts };
+  }
+
+  private adsChangeView(c: MockDbAdapter["adsChanges"][number]): AdsChangeRow {
+    const {
+      changeId, entityType, entityKey, campaignId, adGroupId, action, payload,
+      beforeValue, afterValue, adsProfileId, currency, entityLabel, suggestionId, attempts,
+    } = c;
+    return {
+      changeId, entityType, entityKey, campaignId, adGroupId, action,
+      payload: payload ?? {}, beforeValue, afterValue, adsProfileId,
+      currency: currency ?? null, entityLabel, suggestionId: suggestionId ?? null, attempts,
+    };
+  }
+
+  async saveOauthToken(
+    sellerAccountId: string,
+    token: OauthTokenInput,
+  ): Promise<OauthTokenResult> {
+    const refreshToken = String(token.refreshToken ?? "").trim();
+    if (refreshToken === "") {
+      throw new Error("saveOauthToken: refreshToken rỗng — từ chối ghi đè token tốt bằng chuỗi rỗng");
+    }
+    const authorizedAt = token.authorizedAt ?? new Date().toISOString();
+    const expiresAt =
+      token.expiresAt ?? new Date(Date.parse(authorizedAt) + 365 * 86_400_000).toISOString();
+    const noticeDaysRaw = Number(token.noticeDays ?? 30);
+    const noticeDays = noticeDaysRaw >= 1 && noticeDaysRaw <= 120 ? noticeDaysRaw : 30;
+    const existing = this.oauthTokens.find((t) => t.sellerAccountId === sellerAccountId);
+    const replaced = existing !== undefined;
+    const row = {
+      ...token,
+      refreshToken,
+      sellerAccountId,
+      noticeDays,
+      authorizedAt,
+      expiresAt,
+      refreshCount: (existing?.refreshCount ?? 0) + 1,
+      rotateReminderSent: false,
+      noticeSentAt: null,
+      lastRefreshAt: new Date().toISOString(),
+    };
+    if (existing) this.oauthTokens[this.oauthTokens.indexOf(existing)] = row;
+    else this.oauthTokens.push(row);
+    return {
+      id: `mock-oauth-${sellerAccountId}`,
+      authorizedAt,
+      expiresAt,
+      daysLeft: Math.max(0, Math.floor((Date.parse(expiresAt) - Date.now()) / 86_400_000)),
+      refreshCount: row.refreshCount,
+      replaced,
+    };
+  }
+
+  async createOauthState(
+    sellerAccountId: string,
+    redirectTo?: string | null,
+    ttlMinutes?: number | null,
+  ): Promise<OauthStateResult> {
+    const ttl = Math.min(Math.max(Math.round(ttlMinutes ?? 30), 1), 1440);
+    this.oauthStateSeq += 1;
+    const state = `mock-state-${this.oauthStateSeq}-${Math.random().toString(16).slice(2, 10)}`;
+    const expiresAt = new Date(Date.now() + ttl * 60_000).toISOString();
+    this.oauthStates.push({ state, sellerAccountId, redirectTo: redirectTo ?? null, expiresAt, usedAt: null });
+    return { state, expiresAt };
+  }
+
+  async consumeOauthState(state: string): Promise<OauthConsumeResult> {
+    const row = this.oauthStates.find((s) => s.state === state);
+    if (!row) {
+      return { ok: false, sellerAccountId: null, redirectTo: null, message: "state không tồn tại (có thể đã bị dùng hoặc hết hạn)" };
+    }
+    if (row.usedAt !== null) {
+      return { ok: false, sellerAccountId: null, redirectTo: null, message: "state đã được dùng rồi" };
+    }
+    if (Date.parse(row.expiresAt) <= Date.now()) {
+      return { ok: false, sellerAccountId: null, redirectTo: null, message: "state đã hết hạn" };
+    }
+    row.usedAt = new Date().toISOString();
+    return { ok: true, sellerAccountId: row.sellerAccountId, redirectTo: row.redirectTo, message: "ok" };
+  }
+
+  async markOauthNotice(sellerAccountId: string): Promise<{ rotateReminderSent: boolean }> {
+    const row = this.oauthTokens.find((t) => t.sellerAccountId === sellerAccountId);
+    if (!row) throw new Error("markOauthNotice: shop chưa có token — không có gì để nhắc");
+    row.rotateReminderSent = true;
+    row.noticeSentAt = new Date().toISOString();
+    return { rotateReminderSent: true };
+  }
+
+  async listOauthSoon(days?: number | null): Promise<OauthSoonRow[]> {
+    const now = Date.now();
+    return this.oauthTokens
+      .filter((t) => {
+        const limitDays = days ?? t.noticeDays ?? 30;
+        return Date.parse(t.expiresAt) <= now + limitDays * 86_400_000;
+      })
+      .map((t) => {
+        const daysLeft = Math.max(0, Math.floor((Date.parse(t.expiresAt) - now) / 86_400_000));
+        return {
+          sellerAccountId: t.sellerAccountId,
+          shop: null,
+          sellerId: null,
+          marketplace: null,
+          authorizedAt: t.authorizedAt,
+          expiresAt: t.expiresAt,
+          daysLeft,
+          noticeDays: t.noticeDays ?? 30,
+          needsReauth: daysLeft <= (t.noticeDays ?? 30),
+          alreadyNoticed: t.rotateReminderSent,
+          tokenActive: Date.parse(t.expiresAt) > now,
+          adsProfiles: this.adsProfiles.filter((p) => p.sellerAccountId === t.sellerAccountId).length,
+        };
+      })
+      .sort((a, b) => String(a.expiresAt).localeCompare(String(b.expiresAt)));
   }
 }

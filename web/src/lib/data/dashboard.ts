@@ -1,10 +1,12 @@
 /**
  * Supabase reader cho Dashboard CEO — tổng hợp KPI từ nhiều views.
  * Đọc: vexim_orders, vexim_inventory_latest, vexim_listings, vexim_pricing,
- *       vexim_settlements, vexim_shop_health, ops.my_alerts
+ *       vexim_settlements, vexim_shop_health, ops.my_alerts,
+ *       vexim_ads_kpi + vexim_sku_profit (Module 5: chi ads & TACOS THẬT)
  */
 
 import { createClient } from "@/lib/supabase/server";
+import { computeTacos } from "./ppc-model";
 
 export type DashboardStats = {
   // Orders
@@ -26,6 +28,12 @@ export type DashboardStats = {
   healthShopsTotal: number;
   // Alerts
   openAlerts: number;
+  // Ads (Module 5) — null khi shop chưa nối Amazon Ads
+  adsSpend7d: number | null;
+  adsAcos7d: number | null;
+  adsCurrency: string | null;
+  /** TACOS thật = chi ads 7 ngày ÷ doanh thu sản phẩm 7 ngày (F4), cùng tiền tệ */
+  tacos: number | null;
 };
 
 async function countRows(
@@ -58,6 +66,7 @@ export async function readDashboardStats(): Promise<DashboardStats> {
     pricingData,
     settlementData,
     healthData,
+    adsData,
     alertCount,
   ] = await Promise.all([
     // Orders — tổng đơn
@@ -110,6 +119,34 @@ export async function readDashboardStats(): Promise<DashboardStats> {
       return data as Record<string, unknown>[];
     })(),
 
+    // Ads (Module 5) — chi tiêu 7 ngày của shop có chi lớn nhất (1 dòng/tiền tệ,
+    // KHÔNG cộng USD với CAD) + doanh thu sản phẩm 7 ngày để tính TACOS.
+    (async () => {
+      const { data, error } = await client
+        .from("vexim_ads_kpi")
+        .select("seller_account_id,currency,last_day,spend_7d,acos_7d")
+        .order("spend_7d", { ascending: false, nullsFirst: false })
+        .limit(5);
+      if (error || !data || data.length === 0) return null;
+      const main = data[0] as {
+        seller_account_id: string;
+        currency: string | null;
+        last_day: string | null;
+        spend_7d: number | null;
+        acos_7d: number | null;
+      };
+      if (!main.last_day || main.spend_7d === null) return { main, revenue: [] };
+      const last = Date.parse(`${main.last_day}T00:00:00Z`);
+      const from = new Date(last - 6 * 86_400_000).toISOString().slice(0, 10);
+      const { data: rev } = await client
+        .from("vexim_sku_profit")
+        .select("day,currency,revenue")
+        .eq("seller_account_id", main.seller_account_id)
+        .gte("day", from)
+        .lte("day", main.last_day);
+      return { main, revenue: (rev ?? []) as { day: string; currency: string; revenue: number | null }[] };
+    })(),
+
     // Alerts — đếm mở
     (async () => {
       const { data, error } = await client
@@ -158,6 +195,11 @@ export async function readDashboardStats(): Promise<DashboardStats> {
     (r) => r.tone === "green" || r.account_status === "NORMAL",
   ).length;
 
+  // Ads stats — TACOS dùng CHUNG công thức với màn PPC (computeTacos) để hai nơi
+  // không bao giờ lệch nhau.
+  const adsSpend7d = adsData ? adsData.main.spend_7d : null;
+  const tacos = adsData ? computeTacos(adsData.main, adsData.revenue) : null;
+
   return {
     orderCount,
     lowStockSku,
@@ -171,5 +213,9 @@ export async function readDashboardStats(): Promise<DashboardStats> {
     healthShopsOk,
     healthShopsTotal,
     openAlerts: alertCount,
+    adsSpend7d,
+    adsAcos7d: adsData ? adsData.main.acos_7d : null,
+    adsCurrency: adsData ? adsData.main.currency : null,
+    tacos,
   };
 }

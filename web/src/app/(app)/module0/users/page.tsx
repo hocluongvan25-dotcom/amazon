@@ -1,135 +1,86 @@
-import { Chip, NoAccess, PageHeader, Panel, tableCls } from "@/components/ui";
+import { NoAccess, PageHeader, Panel } from "@/components/ui";
 import { requireSession } from "@/lib/auth/session";
-import { users } from "@/lib/data/mock";
+import { readUsersSnapshot } from "@/lib/data/users-admin";
 import type { PersonaKey } from "@/lib/roles";
+import { UsersBoard } from "./UsersBoard";
 
 /**
- * Quản lý người dùng & quyền — chỉ CEO (super_admin/org_admin) được truy cập.
- * DEMO MODE: 6 user cứng theo wireframe; SUPABASE MODE: query iam.user_profiles.
+ * Người dùng & phân quyền (Module 0).
+ *
+ * HAI CHẾ ĐỘ, MỘT GIAO DIỆN:
+ *   • SUPABASE MODE: bảng đọc `public.vexim_admin_users()` — RPC security definer
+ *     tự kiểm `iam.is_user_admin()` và TỪ CHỐI người không phải admin. Quyền
+ *     quyết định ở DB, không ở `persona` của web (persona trong supabase mode
+ *     hiện luôn là "ceo" — xem TODO Tier 1 ở `lib/auth/session.ts`, nên KHÔNG được
+ *     dùng nó để chặn trang này).
+ *   • DEMO MODE (chưa cấu hình Supabase): KHÔNG hiển thị dòng người dùng nào.
+ *     Danh sách nhân viên giả trong `mock.ts` đã bị xoá 13/09/2026, và bản "5 dòng
+ *     giả lập @vexim.example" cũng đã bị xoá theo yêu cầu — bảng để trắng kèm lời
+ *     giải thích, vì một dòng giả trong màn PHÂN QUYỀN vẫn là lời hứa sai.
  */
-const ALLOWED: PersonaKey[] = ["ceo"];
+const DEMO_ALLOWED: PersonaKey[] = ["ceo"];
 
 export default async function UsersPage() {
   const session = await requireSession();
-  if (!ALLOWED.includes(session.persona)) return <NoAccess />;
+
+  if (session.mode === "supabase") {
+    const snapshot = await readUsersSnapshot();
+    if (!snapshot.ok) {
+      return (
+        <>
+          <PageHeader
+            title="Người dùng & phân quyền"
+            sub="iam.user_profiles · iam.role_assignments"
+            desc="Danh sách người dùng chỉ dành cho Super Admin / Org Admin (chặn ở tầng database)."
+          />
+          <NoAccess />
+          <Panel title="Vì sao bị chặn" hint="thông điệp từ database">
+            <p className="text-[12.5px] text-muted">{snapshot.message}</p>
+            <p className="mt-2 text-[12px] text-soft">
+              Quyền xem/sửa người dùng do <code>iam.is_user_admin()</code> quyết định trong
+              migration 0022 — không phải do giao diện ẩn nút.
+            </p>
+          </Panel>
+        </>
+      );
+    }
+
+    return (
+      <>
+        <PageHeader
+          title="Người dùng & phân quyền"
+          sub={`${snapshot.users.length} hồ sơ thật · iam.user_profiles · iam.role_assignments`}
+          desc="Vai trò (RBAC) + gán người ↔ shop ↔ module. Sửa · Quyền · Khóa đều là thao tác thật, ghi iam.audit_logs; khóa tài khoản cắt quyền ngay ở tầng RLS."
+        />
+        <UsersBoard
+          demo={false}
+          users={snapshot.users}
+          me={snapshot.me}
+          departments={snapshot.departments}
+          shops={snapshot.shops}
+          audit={snapshot.audit}
+        />
+      </>
+    );
+  }
+
+  if (!DEMO_ALLOWED.includes(session.persona)) return <NoAccess />;
 
   return (
     <>
       <PageHeader
         title="Người dùng & phân quyền"
-        sub={`${users.length} tài khoản · iam.user_profiles · iam.role_assignments`}
-        desc="Vai trò hệ thống (RBAC) + gán user ↔ shop ↔ module. Phân quyền thực thi bằng RLS ở tầng database — không chỉ ẩn giao diện."
+        sub="chế độ demo — không hiển thị dữ liệu người dùng giả"
+        desc="Bảng người dùng đọc thẳng iam.user_profiles (RLS + iam.is_user_admin()). Chế độ demo không có kết nối Supabase nên bảng để trắng; Sửa · Quyền · Khóa sẽ hoạt động khi đăng nhập bằng tài khoản thật."
       />
-
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <a
-          href="/module0/users/new"
-          className="h-9 rounded-full bg-accent px-4 py-2 text-[12.5px] font-extrabold text-white transition hover:bg-accent-ink"
-        >
-          ＋ Thêm người dùng
-        </a>
-        <button
-          disabled
-          title="Mời nhân viên theo link (chuyển sang SUPABASE MODE sẽ mở)"
-          className="h-9 cursor-not-allowed rounded-full border border-dashed border-line px-4 py-2 text-[12.5px] font-bold text-soft"
-        >
-          🔗 Mời theo link
-        </button>
-        <button
-          disabled
-          className="h-9 cursor-not-allowed rounded-full border border-dashed border-line px-4 py-2 text-[12.5px] font-bold text-soft"
-        >
-          ⬇ Import CSV
-        </button>
-      </div>
-
-      <Panel title={`${users.length} tài khoản`} hint="Super Admin và Org Admin có thể sửa/phân quyền người khác">
-        <table className={tableCls.table}>
-          <thead>
-            <tr>
-              <th className={tableCls.th}>Tên</th>
-              <th className={tableCls.th}>Email</th>
-              <th className={tableCls.th}>Vai trò</th>
-              <th className={tableCls.th}>Phòng</th>
-              <th className={tableCls.th}>Phạm vi shop</th>
-              <th className={tableCls.th}>Trạng thái</th>
-              <th className={tableCls.th}>Thao tác</th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.map((u) => (
-              <tr key={u.email}>
-                <td className={`${tableCls.td} font-bold`}>{u.name}</td>
-                <td className={tableCls.td}>{u.email}</td>
-                <td className={tableCls.td}>
-                  <Chip tone="blue">{u.role}</Chip>
-                </td>
-                <td className={tableCls.td}>{u.department}</td>
-                <td className={tableCls.td}>{u.shops}</td>
-                <td className={tableCls.td}>
-                  <Chip tone={u.status === "active" ? "green" : "gray"}>
-                    {u.status === "active" ? "Đang hoạt động" : "Đã mời"}
-                  </Chip>
-                </td>
-                <td className={tableCls.td}>
-                  <div className="flex gap-1.5">
-                    <button
-                      disabled
-                      className="h-7 cursor-not-allowed rounded-md border border-dashed border-line px-2 text-[11px] font-bold text-soft"
-                      title="Sửa thông tin"
-                    >
-                      Sửa
-                    </button>
-                    <button
-                      disabled
-                      className="h-7 cursor-not-allowed rounded-md border border-dashed border-line px-2 text-[11px] font-bold text-soft"
-                      title="Phân quyền lại"
-                    >
-                      Quyền
-                    </button>
-                    <button
-                      disabled
-                      className="h-7 cursor-not-allowed rounded-md border border-dashed border-line px-2 text-[11px] font-bold text-red"
-                      title="Khóa tài khoản"
-                    >
-                      Khóa
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Panel>
-
-      <Panel title="Phân cấp vai trò (RBAC)" hint="khớp migration 0001_init.sql — session.persona bám đúng bảng này">
-        <div className="grid grid-cols-1 gap-2 text-[13px] sm:grid-cols-2 lg:grid-cols-3">
-          {[
-            ["Super Admin", "Toàn hệ thống VEXIM", "Có thể gán mọi role", 100],
-            ["Org Admin", "1 doanh nghiệp (nhóm shop)", "Gán dept-lead/operator/analyst/client", 80],
-            ["Dept Lead", "Trưởng phòng", "Duyệt thao tác rủi ro · Gán operator/analyst", 50],
-            ["Operator", "Nhân viên vận hành", "Không gán quyền cho ai", 30],
-            ["Analyst / Viewer", "Chỉ đọc", "Xuất báo cáo", 20],
-            ["Client Viewer", "Khách hàng", "Chỉ đọc shop của mình", 10],
-          ].map(([role, desc, canAssign, lvl]) => (
-            <div key={role} className="rounded-[10px] border border-line px-3 py-2.5">
-              <div className="flex items-center justify-between">
-                <div className="font-bold">{role}</div>
-                <span className="rounded-full bg-bg px-2 py-0.5 text-[10.5px] font-extrabold text-soft">
-                  level {lvl}
-                </span>
-              </div>
-              <div className="mt-0.5 text-[12px] text-soft">{desc}</div>
-              <div className="mt-1 text-[11.5px] text-muted">▸ {canAssign}</div>
-            </div>
-          ))}
-        </div>
-        <p className="mt-3 text-[11.5px] font-semibold text-soft">
-          Quy tắc: chỉ role ở level CAO HƠN mới được gán/sửa role cấp dưới. Không thể tự nâng quyền
-          cho chính mình. Khóa/kích hoạt tài khoản = soft delete (chuyển status disabled). Mọi thay
-          đổi quyền đều ghi vào audit_log (actor + thời gian + cũ→mới).
-        </p>
-      </Panel>
+      <UsersBoard
+        demo
+        users={[]}
+        me={null}
+        departments={[]}
+        shops={[]}
+        audit={[]}
+      />
     </>
   );
 }

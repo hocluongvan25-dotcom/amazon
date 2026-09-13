@@ -17,8 +17,7 @@ import type {
   SkuProfitRow,
   SkuStockRow,
   SyncJobRow,
-  UserRow,
-} from "@/lib/types";
+  } from "@/lib/types";
 
 export const dataMode = "mock" as const;
 
@@ -159,17 +158,13 @@ export const reimbursements: ReimbursementRow[] = [
 ];
 
 /* ---------- Client Viewer ---------- */
-export const clientKpis: KpiCardData[] = [
-  { label: "Doanh thu tháng này", value: "$186,400", sub: "▲ 11% so tháng trước", tone: "up" },
-  { label: "Đơn hàng tháng", value: "5,120", sub: "▲ 6%", tone: "up" },
-  { label: "Sức khỏe tài khoản", value: "Tốt", sub: "AHR 780 · không vi phạm", tone: "up" },
-  { label: "Kỳ thanh toán tới", value: "$23,900", sub: "chiếu toán 24/09", tone: "flat" },
-];
-
-export const clientReports: MiniItemData[] = [
-  { icon: "📄", title: "Báo cáo tuần 37", sub: "doanh thu · quảng cáo · tồn kho · 3 hành động đề xuất", right: "đã gửi 08/09", tone: "flat" },
-  { icon: "📄", title: "Báo cáo tháng 08", sub: "đầy đủ settlement & lợi nhuận SKU", right: "đã gửi 02/09", tone: "flat" },
-];
+/* Cổng khách hàng (`/client`): ĐÃ XOÁ 13/09/2026 hai hằng số `clientKpis` /
+ * `clientReports` — KPI doanh thu/đơn/sức khỏe/kỳ thanh toán và 2 "báo cáo định kỳ"
+ * viết cứng. Trang `/client` không có nhánh đọc DB nên khách hàng mở production là
+ * thấy số bịa của một doanh nghiệp không tồn tại. Nay trang đọc `vexim_order_daily` ·
+ * `vexim_shop_health` · `vexim_settlements` · `vexim_sku_sales_30d` (RLS theo shop
+ * của khách) và ghi "chưa có dữ liệu" ở chỗ chưa đồng bộ — xem
+ * `lib/data/client-portal.ts` + `lib/client-model.ts`. */
 
 /* ---------- Module 0: sync health ---------- */
 export const syncJobs: SyncJobRow[] = [
@@ -198,15 +193,13 @@ export const auditLogs: AuditRow[] = [
   { time: "10/09 16:03", actor: "Minh (Kho vận)", module: "pricing", action: "price.update", entity: "XMO-950-BLK", change: "$29.99 → $31.99 (+6.7%)", result: "error" },
 ];
 
-/* ---------- Module 0: users ---------- */
-export const users: UserRow[] = [
-  { name: "Nguyễn Hải Anh", email: "haianh@vexim.vn", role: "Dept Lead", department: "Vận hành & Health", shops: "14 shop", status: "active" },
-  { name: "Trần Mỹ Linh", email: "mylinh@vexim.vn", role: "Dept Lead", department: "Kho vận & FBA", shops: "9 shop", status: "active" },
-  { name: "Lê Tuấn", email: "tuan@vexim.vn", role: "Operator", department: "PPC", shops: "5 shop được gán", status: "active" },
-  { name: "Nguyễn Hà", email: "ha@vexim.vn", role: "Operator", department: "Đơn hàng & CSKH", shops: "6 shop", status: "active" },
-  { name: "Trịnh Lan", email: "lan@vexim.vn", role: "Operator", department: "Listing & Nội dung", shops: "14 shop", status: "active" },
-  { name: "Đại diện Doanh nghiệp A", email: "contact@khacha-a.vn", role: "Client Viewer", department: "—", shops: "2 shop (chỉ đọc)", status: "invited" },
-];
+/* ---------- Module 0: users ----------
+ * ĐÃ XOÁ 13/09/2026: mảng `users` gồm 6 tài khoản viết cứng (email dạng tên@vexim.vn)
+ * KHÔNG hề tồn tại trong DB mà vẫn hiện trên màn Người dùng ⇒ người dùng thật
+ * tưởng đó là nhân viên đã mời. Màn `/module0/users` nay đọc
+ * `public.vexim_admin_users()` (migration 0022); chế độ demo dùng dữ liệu giả lập
+ * ghi rõ trong `(app)/module0/users/demo-users.ts`.
+ */
 
 /* ---------- Module 4: Đơn hàng (O1–O4) — mock ---------- */
 import type { FbmRow, OrderDetailMock, OrderRow, ReturnRow, ViolationRow } from "@/lib/types";
@@ -1113,27 +1106,36 @@ export const notificationsByPersona: Record<string, NotificationItem[]> = {
   client: [],
 };
 
-/* ---------- Trang cá nhân ---------- */
+/* ---------- Trang cá nhân (CHẾ ĐỘ DEMO) ----------
+ * ĐỔI 13/09/2026: dữ liệu 4 persona trước đây là NGƯỜI BỊA có tên/email/số điện thoại
+ * thật-trông-như-thật (tên người + email công ty + số điện thoại). Màn
+ * Người dùng đã bị xoá vì lý do đó, phần này cũng vậy: demo chỉ cần biết "đang là
+ * persona nào", không cần một nhân viên tưởng tượng. Email dùng đuôi `.invalid`
+ * (miền dành riêng cho ví dụ, không bao giờ tồn tại thật).
+ *
+ * Ở chế độ SUPABASE, trang cá nhân đọc `iam.user_profiles` của người đang đăng nhập
+ * (xem `(app)/profile/ProfileClient.tsx`) — dữ liệu dưới đây KHÔNG dùng tới.
+ */
 export const profileByPersona: Record<string, Profile> = {
   ceo: {
-    name: "Nguyễn Hải Anh", email: "haianh@vexim.vn", role: ROLE_LABEL.super_admin,
-    department: "Điều phối", phone: "+84 912 345 678", avatarInitials: "NA",
-    joinedAt: "01/03/2024", lastLogin: "11/09/2026 13:40", mfaEnabled: true,
+    name: "Persona CEO (demo)", email: "ceo@demo.invalid", role: ROLE_LABEL.super_admin,
+    department: "Điều phối", phone: "—", avatarInitials: "CEO",
+    joinedAt: "—", lastLogin: "phiên demo", mfaEnabled: false,
   },
   lead_fulfill: {
-    name: "Trần Mỹ Linh", email: "mylinh@vexim.vn", role: ROLE_LABEL.dept_lead,
-    department: "Kho vận & FBA", phone: "+84 988 765 432", avatarInitials: "MT",
-    joinedAt: "15/05/2024", lastLogin: "11/09/2026 08:15", mfaEnabled: true,
+    name: "Persona Trưởng phòng Kho vận (demo)", email: "kho-van@demo.invalid", role: ROLE_LABEL.dept_lead,
+    department: "Kho vận & FBA", phone: "—", avatarInitials: "KV",
+    joinedAt: "—", lastLogin: "phiên demo", mfaEnabled: false,
   },
   op_ppc: {
-    name: "Lê Tuấn", email: "tuan@vexim.vn", role: ROLE_LABEL.operator,
-    department: "Quảng cáo (PPC)", phone: "+84 904 111 222", avatarInitials: "TQ",
-    joinedAt: "02/01/2025", lastLogin: "11/09/2026 09:02", mfaEnabled: false,
+    name: "Persona Nhân viên PPC (demo)", email: "ppc@demo.invalid", role: ROLE_LABEL.operator,
+    department: "Quảng cáo (PPC)", phone: "—", avatarInitials: "PPC",
+    joinedAt: "—", lastLogin: "phiên demo", mfaEnabled: false,
   },
   client: {
-    name: "Đại diện Doanh nghiệp A", email: "contact@khacha-a.vn", role: ROLE_LABEL.client_viewer,
-    department: "—", phone: "—", avatarInitials: "DA",
-    joinedAt: "10/08/2026", lastLogin: "09/09/2026 16:30", mfaEnabled: false,
+    name: "Persona Khách hàng (demo)", email: "khach@demo.invalid", role: ROLE_LABEL.client_viewer,
+    department: "—", phone: "—", avatarInitials: "KH",
+    joinedAt: "—", lastLogin: "phiên demo", mfaEnabled: false,
   },
 };
 

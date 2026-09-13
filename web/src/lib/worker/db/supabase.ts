@@ -59,6 +59,30 @@ import type {
   ReturnRowInput,
   SettlementRowInput,
   SyncJobRecord,
+  AdsAdGroupRowInput,
+  AdsBudgetEventRowInput,
+  AdsCampaignMetricRowInput,
+  AdsCampaignRowInput,
+  AdsEntityCounts,
+  AdsMetricCounts,
+  AdsProductMetricRowInput,
+  AdsProfileRow,
+  AdsProfileRowInput,
+  AdsSearchTermRowInput,
+  AdsSuggestionCounts,
+  AdsSuggestionRowInput,
+  AdsChangeRow,
+  AdsChangeRecordInput,
+  AdsChangeRecordResult,
+  AdsChangeReleaseResult,
+  AdsSpendCounts,
+  AdsTargetMetricRowInput,
+  AdsTargetRowInput,
+  OauthConsumeResult,
+  OauthSoonRow,
+  OauthStateResult,
+  OauthTokenInput,
+  OauthTokenResult,
 } from "./adapter.ts";
 import { normalizeReportRequestStatus } from "./adapter.ts";
 import { buildListingPayload, type ListingUpsertPayload } from "./listing-payload.ts";
@@ -115,6 +139,30 @@ const RPC_PATHS = {
   upsertStorageFees: "/rest/v1/rpc/vexim_worker_upsert_storage_fees",
   upsertNoncompliance: "/rest/v1/rpc/vexim_worker_upsert_noncompliance",
   setReportRequest: "/rest/v1/rpc/vexim_worker_set_report_request",
+
+  /* ---- Module 5 phần 1 (0020): Amazon Ads ---- */
+  upsertAdsProfiles: "/rest/v1/rpc/vexim_worker_upsert_ads_profiles",
+  upsertAdsCampaigns: "/rest/v1/rpc/vexim_worker_upsert_ads_campaigns",
+  upsertAdsAdGroups: "/rest/v1/rpc/vexim_worker_upsert_ads_ad_groups",
+  upsertAdsTargets: "/rest/v1/rpc/vexim_worker_upsert_ads_targets",
+  upsertAdsCampaignMetrics: "/rest/v1/rpc/vexim_worker_upsert_ads_campaign_metrics",
+  upsertAdsTargetMetrics: "/rest/v1/rpc/vexim_worker_upsert_ads_target_metrics",
+  upsertAdsSearchTerms: "/rest/v1/rpc/vexim_worker_upsert_ads_search_terms",
+  upsertAdsProductMetrics: "/rest/v1/rpc/vexim_worker_upsert_ads_product_metrics",
+  upsertAdsBudgetEvents: "/rest/v1/rpc/vexim_worker_upsert_ads_budget_events",
+  upsertAdsSuggestions: "/rest/v1/rpc/vexim_worker_upsert_ads_suggestions",
+  applyAdsSpend: "/rest/v1/rpc/vexim_worker_apply_ads_spend",
+  /* Module 5 phần 3 (0021) — hàng đợi ghi lên Amazon Ads */
+  claimAdsChanges: "/rest/v1/rpc/vexim_worker_claim_ads_changes",
+  recordAdsChange: "/rest/v1/rpc/vexim_worker_record_ads_change",
+  releaseAdsChange: "/rest/v1/rpc/vexim_worker_release_ads_change",
+
+  /* ---- Module 0 (0020): token platform + re-authorize ---- */
+  setOauthToken: "/rest/v1/rpc/vexim_worker_set_oauth_token",
+  createOauthState: "/rest/v1/rpc/vexim_worker_create_oauth_state",
+  consumeOauthState: "/rest/v1/rpc/vexim_worker_consume_oauth_state",
+  markOauthNotice: "/rest/v1/rpc/vexim_worker_mark_oauth_notice",
+  oauthSoon: "/rest/v1/rpc/vexim_worker_oauth_soon",
 } as const;
 
 /**
@@ -1036,5 +1084,309 @@ export class SupabaseDbAdapter implements DbAdapter {
         body: { p_seller: sellerAccountId, p_rows: payload },
       });
     }
+  }
+
+  /* ==========================================================================
+   * MODULE 5 PHẦN 1 (0020) — AMAZON ADS + TOKEN PLATFORM
+   * Mọi đường ghi đều đi qua RPC security-definer chỉ service_role cấp quyền
+   * (web/authenticated KHÔNG gọi được): xem section 20 của 0020.
+   * ========================================================================*/
+
+  private adsCounts(result: unknown): { inserted: number; updated: number; skipped: number; merged: number } {
+    const row = (Array.isArray(result) ? result[0] : result) as Record<string, unknown> | undefined;
+    return {
+      inserted: Number(row?.inserted ?? 0),
+      updated: Number(row?.updated ?? 0),
+      skipped: Number(row?.skipped ?? 0),
+      merged: Number(row?.merged ?? 0),
+    };
+  }
+
+  private adsMetricCounts(result: unknown): AdsMetricCounts {
+    const row = (Array.isArray(result) ? result[0] : result) as Record<string, unknown> | undefined;
+    return {
+      ...this.adsCounts(result),
+      days: row?.days === null || row?.days === undefined ? null : Number(row.days),
+      currencies: row?.currencies === null || row?.currencies === undefined ? null : String(row.currencies),
+    };
+  }
+
+  async upsertAdsProfiles(
+    sellerAccountId: string,
+    rows: AdsProfileRowInput[],
+  ): Promise<AdsEntityCounts> {
+    const result = await this.request<unknown[]>("POST", RPC_PATHS.upsertAdsProfiles, {
+      body: { p_seller: sellerAccountId, p_rows: rows },
+    });
+    return this.adsCounts(result);
+  }
+
+  /**
+   * Đọc profile đã lưu qua VIEW public (schema `ads` không expose cho PostgREST
+   * — mọi đường đọc/ghi của web & worker đều đi qua view `vexim_*` + RPC).
+   */
+  async listAdsProfiles(sellerAccountId: string): Promise<AdsProfileRow[]> {
+    const rows = await this.request<Record<string, unknown>[]>("GET", "/rest/v1/vexim_ads_profiles", {
+      search: {
+        seller_account_id: `eq.${sellerAccountId}`,
+        select: "ads_profile_id,marketplace,currency",
+      },
+    });
+    return (rows ?? []).map((r) => ({
+      adsProfileId: String(r.ads_profile_id ?? ""),
+      marketplace: String(r.marketplace ?? ""),
+      currency: r.currency ? String(r.currency) : null,
+    }));
+  }
+
+  async upsertAdsCampaigns(
+    sellerAccountId: string,
+    rows: AdsCampaignRowInput[],
+  ): Promise<AdsEntityCounts> {
+    const result = await this.request<unknown[]>("POST", RPC_PATHS.upsertAdsCampaigns, {
+      body: { p_seller: sellerAccountId, p_rows: rows },
+    });
+    return this.adsCounts(result);
+  }
+
+  async upsertAdsAdGroups(
+    sellerAccountId: string,
+    rows: AdsAdGroupRowInput[],
+  ): Promise<AdsEntityCounts> {
+    const result = await this.request<unknown[]>("POST", RPC_PATHS.upsertAdsAdGroups, {
+      body: { p_seller: sellerAccountId, p_rows: rows },
+    });
+    return this.adsCounts(result);
+  }
+
+  async upsertAdsTargets(
+    sellerAccountId: string,
+    rows: AdsTargetRowInput[],
+  ): Promise<AdsEntityCounts> {
+    const result = await this.request<unknown[]>("POST", RPC_PATHS.upsertAdsTargets, {
+      body: { p_seller: sellerAccountId, p_rows: rows },
+    });
+    return this.adsCounts(result);
+  }
+
+  async upsertAdsCampaignMetrics(
+    sellerAccountId: string,
+    rows: AdsCampaignMetricRowInput[],
+  ): Promise<AdsMetricCounts> {
+    const result = await this.request<unknown[]>("POST", RPC_PATHS.upsertAdsCampaignMetrics, {
+      body: { p_seller: sellerAccountId, p_rows: rows },
+    });
+    return this.adsMetricCounts(result);
+  }
+
+  async upsertAdsTargetMetrics(
+    sellerAccountId: string,
+    rows: AdsTargetMetricRowInput[],
+  ): Promise<AdsMetricCounts> {
+    const result = await this.request<unknown[]>("POST", RPC_PATHS.upsertAdsTargetMetrics, {
+      body: { p_seller: sellerAccountId, p_rows: rows },
+    });
+    return this.adsMetricCounts(result);
+  }
+
+  async upsertAdsSearchTerms(
+    sellerAccountId: string,
+    rows: AdsSearchTermRowInput[],
+  ): Promise<AdsMetricCounts> {
+    const result = await this.request<unknown[]>("POST", RPC_PATHS.upsertAdsSearchTerms, {
+      body: { p_seller: sellerAccountId, p_rows: rows },
+    });
+    return this.adsMetricCounts(result);
+  }
+
+  async upsertAdsProductMetrics(
+    sellerAccountId: string,
+    level: "advertised" | "purchased",
+    rows: AdsProductMetricRowInput[],
+  ): Promise<AdsMetricCounts> {
+    const result = await this.request<unknown[]>("POST", RPC_PATHS.upsertAdsProductMetrics, {
+      body: { p_seller: sellerAccountId, p_level: level, p_rows: rows },
+    });
+    return this.adsMetricCounts(result);
+  }
+
+  async upsertAdsBudgetEvents(
+    sellerAccountId: string,
+    rows: AdsBudgetEventRowInput[],
+  ): Promise<AdsEntityCounts> {
+    const result = await this.request<unknown[]>("POST", RPC_PATHS.upsertAdsBudgetEvents, {
+      body: { p_seller: sellerAccountId, p_rows: rows },
+    });
+    return this.adsCounts(result);
+  }
+
+  async upsertAdsSuggestions(
+    sellerAccountId: string,
+    rows: AdsSuggestionRowInput[],
+  ): Promise<AdsSuggestionCounts> {
+    const result = await this.request<Record<string, unknown>[]>(
+      "POST",
+      RPC_PATHS.upsertAdsSuggestions,
+      { body: { p_seller: sellerAccountId, p_rows: rows } },
+    );
+    const row = result?.[0];
+    return {
+      inserted: Number(row?.inserted ?? 0),
+      updated: Number(row?.updated ?? 0),
+      skipped: Number(row?.skipped ?? 0),
+      kept: Number(row?.kept ?? 0),
+    };
+  }
+
+  async applyAdsSpend(
+    sellerAccountId: string,
+    from: string,
+    to: string,
+  ): Promise<AdsSpendCounts> {
+    const result = await this.request<Record<string, unknown>[]>("POST", RPC_PATHS.applyAdsSpend, {
+      body: { p_seller: sellerAccountId, p_from: from, p_to: to },
+    });
+    const row = result?.[0];
+    return {
+      updated: Number(row?.updated ?? 0),
+      skippedNoRow: Number(row?.skipped_no_row ?? 0),
+      skippedCurrency: Number(row?.skipped_currency ?? 0),
+    };
+  }
+
+  /* ---- Module 5 phần 3 (0021): hàng đợi ghi lên Amazon Ads ---- */
+
+  async claimAdsChanges(sellerAccountId: string, limit?: number): Promise<AdsChangeRow[]> {
+    const result = await this.request<Record<string, unknown>[]>("POST", RPC_PATHS.claimAdsChanges, {
+      body: { p_seller: sellerAccountId, p_limit: limit ?? 20 },
+    });
+    return (result ?? []).map((r) => ({
+      changeId: String(r.change_id ?? ""),
+      entityType: String(r.entity_type ?? ""),
+      entityKey: String(r.entity_key ?? ""),
+      campaignId: String(r.campaign_id ?? ""),
+      adGroupId: String(r.ad_group_id ?? ""),
+      action: String(r.action ?? "") as AdsChangeRow["action"],
+      payload: (r.payload ?? {}) as Record<string, unknown>,
+      beforeValue: (r.before_value ?? null) as Record<string, unknown> | null,
+      afterValue: (r.after_value ?? null) as Record<string, unknown> | null,
+      adsProfileId: String(r.ads_profile_id ?? ""),
+      currency: r.currency === null || r.currency === undefined ? null : String(r.currency),
+      entityLabel: String(r.entity_label ?? ""),
+      suggestionId: r.suggestion_id === null || r.suggestion_id === undefined ? null : String(r.suggestion_id),
+      attempts: Number(r.attempts ?? 0),
+    }));
+  }
+
+  async recordAdsChange(input: AdsChangeRecordInput): Promise<AdsChangeRecordResult> {
+    const result = await this.request<Record<string, unknown>[]>("POST", RPC_PATHS.recordAdsChange, {
+      body: {
+        p_change_id: input.changeId,
+        p_ok: input.ok === true,
+        p_api: input.api ?? null,
+        p_error: input.error ?? null,
+      },
+    });
+    const row = result?.[0];
+    return {
+      changeId: String(row?.change_id ?? input.changeId),
+      status: String(row?.status ?? (input.ok ? "applied" : "failed")),
+      mirrored: row?.mirrored === true,
+      keywordId: row?.keyword_id === null || row?.keyword_id === undefined ? null : String(row.keyword_id),
+      suggestionApplied: row?.suggestion_applied === true,
+    };
+  }
+
+  async releaseAdsChange(changeId: string, reason: string): Promise<AdsChangeReleaseResult> {
+    const result = await this.request<Record<string, unknown>[]>("POST", RPC_PATHS.releaseAdsChange, {
+      body: { p_change_id: changeId, p_reason: reason },
+    });
+    const row = result?.[0];
+    return {
+      changeId: String(row?.change_id ?? changeId),
+      status: String(row?.status ?? "approved"),
+      attempts: Number(row?.attempts ?? 0),
+    };
+  }
+
+  /* ---- Module 0: token platform + re-authorize ---- */
+
+  async saveOauthToken(
+    sellerAccountId: string,
+    token: OauthTokenInput,
+  ): Promise<OauthTokenResult> {
+    const result = await this.request<Record<string, unknown>[]>("POST", RPC_PATHS.setOauthToken, {
+      body: { p_seller: sellerAccountId, p_token: token },
+    });
+    const row = result?.[0];
+    return {
+      id: String(row?.id ?? ""),
+      authorizedAt: row?.authorized_at ? String(row.authorized_at) : null,
+      expiresAt: row?.expires_at ? String(row.expires_at) : null,
+      daysLeft: row?.days_left === null || row?.days_left === undefined ? null : Number(row.days_left),
+      refreshCount:
+        row?.refresh_count === null || row?.refresh_count === undefined
+          ? null
+          : Number(row.refresh_count),
+      replaced: row?.replaced === true,
+    };
+  }
+
+  async createOauthState(
+    sellerAccountId: string,
+    redirectTo?: string | null,
+    ttlMinutes?: number | null,
+  ): Promise<OauthStateResult> {
+    const result = await this.request<Record<string, unknown>[]>("POST", RPC_PATHS.createOauthState, {
+      body: { p_seller: sellerAccountId, p_redirect_to: redirectTo ?? null, p_ttl_min: ttlMinutes ?? 30 },
+    });
+    const row = result?.[0];
+    return {
+      state: String(row?.state ?? ""),
+      expiresAt: row?.expires_at ? String(row.expires_at) : null,
+    };
+  }
+
+  async consumeOauthState(state: string): Promise<OauthConsumeResult> {
+    const result = await this.request<Record<string, unknown>[]>(
+      "POST",
+      RPC_PATHS.consumeOauthState,
+      { body: { p_state: state } },
+    );
+    const row = result?.[0];
+    return {
+      ok: row?.ok === true,
+      sellerAccountId: row?.seller_account_id ? String(row.seller_account_id) : null,
+      redirectTo: row?.redirect_to ? String(row.redirect_to) : null,
+      message: String(row?.message ?? ""),
+    };
+  }
+
+  async markOauthNotice(sellerAccountId: string): Promise<{ rotateReminderSent: boolean }> {
+    const result = await this.request<Record<string, unknown>[]>("POST", RPC_PATHS.markOauthNotice, {
+      body: { p_seller: sellerAccountId },
+    });
+    return { rotateReminderSent: result?.[0]?.rotate_reminder_sent === true };
+  }
+
+  async listOauthSoon(days?: number | null): Promise<OauthSoonRow[]> {
+    const result = await this.request<Record<string, unknown>[]>("POST", RPC_PATHS.oauthSoon, {
+      body: { p_days: days ?? null },
+    });
+    return (result ?? []).map((row) => ({
+      sellerAccountId: String(row?.seller_account_id ?? ""),
+      shop: row?.shop ? String(row.shop) : null,
+      sellerId: row?.seller_id ? String(row.seller_id) : null,
+      marketplace: row?.marketplace ? String(row.marketplace) : null,
+      authorizedAt: row?.authorized_at ? String(row.authorized_at) : null,
+      expiresAt: row?.expires_at ? String(row.expires_at) : null,
+      daysLeft: row?.days_left === null || row?.days_left === undefined ? null : Number(row.days_left),
+      noticeDays:
+        row?.notice_days === null || row?.notice_days === undefined ? null : Number(row.notice_days),
+      needsReauth: row?.needs_reauth === true,
+      alreadyNoticed: row?.already_noticed === true,
+      tokenActive: row?.token_active === true,
+      adsProfiles: Number(row?.ads_profiles ?? 0),
+    }));
   }
 }

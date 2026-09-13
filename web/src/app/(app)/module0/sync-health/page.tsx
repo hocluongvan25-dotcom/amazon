@@ -1,4 +1,4 @@
-import { Chip, NoAccess, PageHeader, Panel, tableCls } from "@/components/ui";
+import { Chip, MockDataNotice, NoAccess, PageHeader, Panel, tableCls } from "@/components/ui";
 import { requireSession } from "@/lib/auth/session";
 import { syncJobs } from "@/lib/data/mock";
 import { readReportRequests } from "@/lib/data/fees";
@@ -44,6 +44,11 @@ export default async function SyncHealthPage() {
 
   return (
     <>
+      {session.mode === "supabase" ? (
+        <MockDataNotice what={<>Riêng bảng **Job đồng bộ gần nhất** vẫn là dữ liệu minh hoạ (chưa có bảng `sync_jobs`
+        thật); panel "Yêu cầu report (Reports API)" bên dưới thì đọc THẬT từ
+        `connections.report_requests`.</>} />
+      ) : null}
       <PageHeader
         title="Sức khỏe đồng bộ"
         sub="sync_jobs · notifications_log · cập nhật realtime"
