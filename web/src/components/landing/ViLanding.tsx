@@ -39,28 +39,28 @@ export default function ViLanding() {
         *{ -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; }
         .landing-wrap{max-width:1120px;margin:0 auto;padding:0 24px; font-family:"Inter", var(--font-inter, "Inter"), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; letter-spacing:-0.011em}
         .landing-header{position:sticky;top:0;z-index:50;background:rgba(255,255,255,.86);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
-        .landing-nav{display:flex;align-items:center;gap:28px;height:68px}
-        .landing-logo{display:flex;align-items:center;gap:10px;font-weight:900;font-size:18px;letter-spacing:-.02em;color:var(--ink)}
+        .landing-nav{display:flex;align-items:center;gap:16px;height:68px;white-space:nowrap}
+        .landing-logo{display:flex;align-items:center;gap:10px;font-weight:900;font-size:18px;letter-spacing:-.02em;color:var(--ink);flex:none}
         .landing-logo-mark{width:32px;height:32px;border-radius:9px;background:var(--ink);display:grid;place-items:center;color:var(--accent);font-size:16px;font-weight:900}
-        .landing-logo small{font-weight:700;color:var(--soft);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;margin-left:2px}
-        .landing-nav-links{display:flex;gap:24px;margin-left:auto;font-size:14.5px;color:var(--muted);font-weight:600}
+        .landing-nav-links{display:flex;gap:20px;margin-left:auto;font-size:14px;color:var(--muted);font-weight:600;white-space:nowrap;flex-wrap:nowrap}
+        .landing-nav-links a{white-space:nowrap}
         .landing-nav-links a:hover{color:var(--ink)}
-        .landing-btn{display:inline-flex;align-items:center;gap:8px;font-weight:700;font-size:14.5px;border-radius:999px;padding:11px 22px;cursor:pointer;border:1px solid transparent;transition:.18s;text-decoration:none}
+        .landing-btn{display:inline-flex;align-items:center;gap:8px;font-weight:700;font-size:14.5px;border-radius:999px;padding:11px 22px;cursor:pointer;border:1px solid transparent;transition:.18s;text-decoration:none;white-space:nowrap;flex:none}
         .landing-btn-dark{background:var(--ink);color:#fff}
         .landing-btn-dark:hover{background:#232f3e;transform:translateY(-1px)}
         .landing-btn-ghost{border-color:var(--line);background:#fff;color:var(--ink)}
         .landing-btn-ghost:hover{border-color:#c9cfda}
-        .landing-burger{display:none;margin-left:auto;background:none;border:0;font-size:22px;cursor:pointer;color:var(--ink)}
+        .landing-burger{display:none;margin-left:auto;background:none;border:0;font-size:22px;cursor:pointer;color:var(--ink);flex:none}
         .landing-hero{padding:84px 0 72px;background:radial-gradient(1000px 400px at 85% -10%, #fff4e5 0%, transparent 60%),radial-gradient(700px 380px at -10% 10%, #eaf1ff 0%, transparent 55%), var(--bg)}
         .landing-hero-grid{max-width:1280px;margin:0 auto;padding:0 16px;display:grid;grid-template-columns:1fr;gap:32px;align-items:center}
         @media(min-width:1024px){ .landing-hero-grid{grid-template-columns:repeat(12,minmax(0,1fr))} }
         .landing-badge{display:inline-flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line);color:var(--muted);font-size:12.5px;font-weight:700;padding:7px 14px;border-radius:999px;box-shadow:var(--shadow)}
         .landing-badge .b-dot{width:7px;height:7px;border-radius:50%;background:var(--green)}
-        .landing-hero h1{font-size:clamp(34px,4.8vw,54px);line-height:1.05;letter-spacing:-.035em;font-weight:900;margin:20px 0 18px;color:var(--ink)}
-        .landing-hero h1 em{font-style:normal;color:var(--accent-ink);white-space:nowrap}
-        .landing-lead{font-size:17px;color:var(--muted);max-width:640px;margin-bottom:28px;line-height:1.7}
+        .landing-hero h1{font-size:clamp(32px,4.4vw,48px);line-height:1.08;letter-spacing:-.03em;font-weight:900;margin:20px 0 16px;color:var(--ink)}
+        .landing-hero h1 em{font-style:normal;color:var(--accent-ink)}
+        .landing-lead{font-size:17px;color:var(--muted);max-width:600px;margin-bottom:26px;line-height:1.7}
         .landing-ctas{display:flex;gap:12px;flex-wrap:wrap}
-        .landing-note{margin-top:18px;font-size:12.5px;color:var(--soft);line-height:1.6;max-width:640px}
+        .landing-note{margin-top:16px;font-size:12.5px;color:var(--soft);line-height:1.6;max-width:600px}
         .landing-bullets{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
         .landing-bullets span{font-size:11.5px;font-weight:700;color:var(--muted);background:#fff;border:1px solid var(--line);padding:5px 11px;border-radius:999px}
         .landing-mock{background:var(--card);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);overflow:hidden;width:100%;height:auto;object-fit:contain;min-width:0}
@@ -88,7 +88,7 @@ export default function ViLanding() {
         .landing-alert.amber{background:var(--amber-soft);color:#8a5602}.landing-alert.amber .a-icon{background:var(--amber)}
         .landing-alert.green{background:var(--green-soft);color:#0b7a55}.landing-alert.green .a-icon{background:var(--green)}
         .landing-section{padding:80px 0}
-        .landing-sec-head{max-width:760px;margin-bottom:44px}
+        .landing-sec-head{max-width:720px;margin-bottom:44px}
         .landing-kicker{font-size:12px;font-weight:900;letter-spacing:.14em;text-transform:uppercase;color:var(--accent-ink);margin-bottom:12px}
         .landing-sec-head h2{font-size:clamp(28px,3.6vw,40px);letter-spacing:-.025em;line-height:1.12;font-weight:900;margin-bottom:14px;color:var(--ink)}
         .landing-sec-head p{color:var(--muted);font-size:17px;line-height:1.7}
@@ -133,6 +133,9 @@ export default function ViLanding() {
         .landing-foot a:hover{color:var(--ink)}
         .reveal{opacity:0;transform:translateY(14px);transition:.6s ease}
         .reveal.in{opacity:1;transform:none}
+        @media (max-width:1100px){
+          .landing-nav-links{gap:14px;font-size:13.5px}
+        }
         @media (max-width:980px){
           .landing-nav-links{display:none}
           .landing-burger{display:block}
@@ -152,14 +155,12 @@ export default function ViLanding() {
         <div className="landing-wrap landing-nav">
           <a className="landing-logo" href="#top">
             <span className="landing-logo-mark">V</span>
-            VEXIM&nbsp;Ops <small>Amazon Ops Platform</small>
+            VEXIM Ops
           </a>
           <nav className={`landing-nav-links ${mobileOpen ? "open" : ""}`}>
-            <a href="#platform" onClick={() => setMobileOpen(false)}>Kiến trúc đồng bộ</a>
-            <a href="#departments" onClick={() => setMobileOpen(false)}>Vận hành hằng ngày</a>
-            <a href="#modules" onClick={() => setMobileOpen(false)}>Module</a>
-            <a href="#security" onClick={() => setMobileOpen(false)}>Bảo mật & Tuân thủ</a>
-            <a href="#about" onClick={() => setMobileOpen(false)}>Về VEXIM</a>
+            <a href="#platform" onClick={() => setMobileOpen(false)}>Hoạt động</a>
+            <a href="#departments" onClick={() => setMobileOpen(false)}>Tính năng</a>
+            <a href="#security" onClick={() => setMobileOpen(false)}>Bảo mật</a>
             <a href="#contact" onClick={() => setMobileOpen(false)}>Liên hệ</a>
           </nav>
           <a className="landing-btn landing-btn-dark" href="#contact">Xem demo</a>
@@ -171,19 +172,19 @@ export default function ViLanding() {
         <section className="landing-hero">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center max-w-7xl mx-auto px-4">
             <div className="lg:col-span-7 min-w-0">
-              <span className="landing-badge"><span className="b-dot"></span> Amazon SP-API • Kết nối chính thức</span>
-              <h1>Vận hành Amazon bằng dữ liệu thực:<br/><em>Buy Box, FBA, Ads, Settlement.</em></h1>
-              <p className="landing-lead">VEXIM Ops hợp nhất toàn bộ dữ liệu Seller Central về một dashboard duy nhất: <b>Buy Box Ownership & Competitive Pricing</b>, <b>FBA Inventory Health & Days of Cover</b>, <b>Listing Suppressed & Stranded Inventory</b>, <b>Sponsored Products / Brands / Display & Search Term Report</b>, <b>FBM Orders & Buyer Message SLA</b>, <b>Settlement v2 & FBA Reimbursement</b>. Thay vì đối chiếu Seller Central, Brand Registry, Ads Console và Excel, bạn ra quyết định dựa trên <b>ACOS, TACOS, ROAS và Net Margin thực sau phí</b>.</p>
+              <span className="landing-badge"><span className="b-dot"></span> Kết nối chính thức Amazon</span>
+              <h1>Quản lý vận hành Amazon<br/><em>trên 1 nền tảng duy nhất.</em></h1>
+              <p className="landing-lead">Bạn đang mở Seller Central để xem đơn, Ads Console để xem quảng cáo, rồi lại Excel để tính lời lỗ? VEXIM Ops làm thay bạn hết — tự canh <b>Buy Box</b> không để mất khách, báo trước khi <b>hết hàng FBA</b>, tối ưu <b>tiền quảng cáo</b> để giảm ACOS/TACOS, nhắc khi <b>tài khoản có nguy cơ</b> và đối soát <b>tiền Amazon trả về</b> rõ ràng. Mỗi sáng chỉ cần mở một chỗ là biết ngay hôm nay phải làm gì.</p>
               <div className="landing-ctas">
-                <a className="landing-btn landing-btn-dark" href="#contact">Xem demo trên dữ liệu thật →</a>
-                <a className="landing-btn landing-btn-ghost" href="#platform">Kiến trúc đồng bộ</a>
+                <a className="landing-btn landing-btn-dark" href="#contact">Xem demo trên số thật →</a>
+                <a className="landing-btn landing-btn-ghost" href="#platform">Nó hoạt động thế nào?</a>
               </div>
-              <p className="landing-note">Kết nối OAuth qua Seller Central, phân quyền tối thiểu theo SP-API Roles (Brand/Marketplace). Hỗ trợ multi-marketplace US/EU/JP. Thu hồi quyền ngay trong Seller Central, tuân thủ Amazon Data Protection Policy (DPP) & Acceptable Use Policy (AUP).</p>
+              <p className="landing-note">Kết nối bằng tài khoản Amazon, 30 giây là xong. Không dùng nữa thì ngắt ngay trong Seller Central — chúng tôi xóa dữ liệu theo đúng cam kết với Amazon.</p>
               <div className="landing-bullets">
-                <span>✓ Buy Box Ownership & Price Competitiveness</span>
-                <span>✓ FBA Days of Cover, Reorder Point & Inbound</span>
-                <span>✓ Sponsored: ACOS / TACOS / ROAS & Search Term</span>
-                <span>✓ Account Health: AHR, ODR, Policy Violation</span>
+                <span>✓ Không để mất Buy Box vì chậm đổi giá</span>
+                <span>✓ Biết trước 5-7 ngày khi nào hết hàng FBA</span>
+                <span>✓ Quảng cáo rõ lời lỗ ACOS / TACOS</span>
+                <span>✓ Tài khoản khỏe, tránh bị cảnh báo</span>
               </div>
             </div>
 
@@ -191,40 +192,40 @@ export default function ViLanding() {
               <div className="landing-mock w-full h-auto object-contain" aria-hidden="true">
               <div className="landing-mock-top">
                 <span className="landing-dots"><i></i><i></i><i></i></span>
-                Operations Dashboard • 14 Brands
+                Tổng quan gian hàng • 14 Brands
                 <span className="landing-live"><i></i> Live</span>
               </div>
               <div className="landing-mock-body">
-                <div className="landing-mock-title">Yesterday • GMV $12,480 • 341 Orders</div>
+                <div className="landing-mock-title">Hôm qua • $12,480 doanh thu • 341 đơn</div>
                 <div className="landing-kpis">
                   <div className="landing-kpi">
-                    <div className="k-label">GMV</div>
+                    <div className="k-label">Doanh thu</div>
                     <div className="k-value">$12,480</div>
-                    <div className="k-delta up">▲ 8.2% WoW • Conversion 4.2%</div>
+                    <div className="k-delta up">▲ 8.2% so với tuần trước</div>
                   </div>
                   <div className="landing-kpi">
-                    <div className="k-label">Orders • Units</div>
+                    <div className="k-label">Đơn hàng</div>
                     <div className="k-value">341</div>
-                    <div className="k-delta up">▲ 4.7% • Sell-through 68%</div>
+                    <div className="k-delta up">▲ 4.7% • Chuyển đổi 4.2%</div>
                   </div>
                   <div className="landing-kpi">
-                    <div className="k-label">Ad Spend • TACOS</div>
+                    <div className="k-label">Tiền quảng cáo • TACOS</div>
                     <div className="k-value">$862</div>
-                    <div className="k-delta flat">TACOS 6.9% • Within Target</div>
+                    <div className="k-delta flat">TACOS 6.9% • Trong mục tiêu</div>
                   </div>
                   <div className="landing-kpi">
-                    <div className="k-label">Buy Box Ownership</div>
+                    <div className="k-label">Giữ Buy Box</div>
                     <div className="k-value">93%</div>
-                    <div className="k-delta down">▼ 1 SKU Buy Box Lost</div>
+                    <div className="k-delta down">▼ 1 mã vừa mất Buy Box</div>
                   </div>
                 </div>
                 <div className="landing-spark">
                   <i style={{height:"38%"}}></i><i style={{height:"52%"}}></i><i style={{height:"44%"}}></i><i style={{height:"63%"}}></i><i style={{height:"57%"}}></i><i style={{height:"72%"}}></i><i style={{height:"88%"}}></i>
                 </div>
                 <div className="landing-alerts">
-                  <div className="landing-alert red"><span className="a-icon"></span>FBA Stockout Risk: 2 SKU Days of Cover &lt;5, Revenue at Risk $410/ngày.</div>
-                  <div className="landing-alert amber"><span className="a-icon"></span>Sponsored Products Out-of-Budget: 2 Campaigns Out-of-Budget từ 18h — Impression Share Lost.</div>
-                  <div className="landing-alert green"><span className="a-icon"></span>Account Health: AHR Healthy, 0 Open Policy Violation, ODR 0.3%.</div>
+                  <div className="landing-alert red"><span className="a-icon"></span>2 mã sắp hết hàng FBA, chỉ còn đủ bán 5 ngày — nếu đứt, hụt $410/ngày.</div>
+                  <div className="landing-alert amber"><span className="a-icon"></span>2 chiến dịch quảng cáo sắp hết ngân sách từ 18h — đang bỏ lỡ khách.</div>
+                  <div className="landing-alert green"><span className="a-icon"></span>Tài khoản vẫn khỏe, không có cảnh báo nào đang mở.</div>
                 </div>
               </div>
             </div>
@@ -235,25 +236,25 @@ export default function ViLanding() {
         <section id="platform" className="landing-section">
           <div className="landing-wrap">
             <div className="landing-sec-head">
-              <div className="landing-kicker">Kiến trúc đồng bộ</div>
-              <h2>SP-API + Ads API + Settlement: đồng bộ liên tục, backfill 30 ngày</h2>
-              <p>Không nhập liệu thủ công. VEXIM Ops kết nối trực tiếp Amazon SP-API, Advertising API và Settlement Reports, chuẩn hóa về SKU/ASIN, lưu vết audit log và hiển thị theo Revenue at Risk để ưu tiên xử lý.</p>
+              <div className="landing-kicker">Nó hoạt động thế nào?</div>
+              <h2>Cắm vào là chạy, 30 phút là thấy số thật</h2>
+              <p>Bạn không cần nhập liệu, không cần nối file. Chúng tôi lấy số trực tiếp từ Amazon rồi đặt vào đúng chỗ bạn cần — sáng mở lên là biết ngay hôm nay phải làm gì.</p>
             </div>
             <div className="landing-steps">
               <div className="landing-step reveal">
                 <div className="landing-step-n">1</div>
-                <h3>Kết nối gian hàng qua SP-API OAuth</h3>
-                <p>Ủy quyền qua Seller Central với Login with Amazon (LWA), phân quyền least-privilege theo vai trò Ops/Admin/Finance/Viewer. Hỗ trợ multi-marketplace US/EU/JP và multi-brand. Revoke ngay trong Seller Central, token mã hóa, cảnh báo trước khi hết hạn.</p>
+                <h3>Kết nối gian hàng</h3>
+                <p>Bấm “Kết nối Amazon” trong Seller Central, đăng nhập là xong. Kết nối chính chủ, an toàn, muốn ngắt lúc nào cũng được.</p>
               </div>
               <div className="landing-step reveal">
                 <div className="landing-step-n">2</div>
-                <h3>Đồng bộ dữ liệu vận hành theo SLA</h3>
-                <p><b>Near real-time:</b> Orders & ORDER_CHANGE, Buy Box & Competitive Pricing. <b>Hourly:</b> FBA Inventory Ledger, FBA Inbound Shipments, Pricing. <b>Daily:</b> Sponsored Products/Brands/Display, Search Term Report, Settlement v2, FBA Reimbursement, Storage Fee & Aged Inventory Surcharge. Tự động backfill 30 ngày ngay sau kết nối.</p>
+                <h3>Hệ thống tự lo phần đồng bộ</h3>
+                <p>Đơn mới hay đổi Buy Box thì báo ngay. Tồn kho FBA và giá cập nhật mỗi giờ. Doanh thu, quảng cáo, phí lưu kho, tiền Amazon trả về thì chốt theo ngày. Vừa kết nối xong là có sẵn 30 ngày lịch sử để xem luôn.</p>
               </div>
               <div className="landing-step reveal">
                 <div className="landing-step-n">3</div>
-                <h3>Vận hành theo Action Center ưu tiên Revenue at Risk</h3>
-                <p>Dashboard Action Center xếp hạng công việc theo tiền đang ảnh hưởng: Stockout Risk (Days of Cover thấp), Buy Box Lost, Suppressed/Stranded Listing, Campaign Out-of-Budget & Search Term cần phủ định, FBM Late Shipment Risk & Buyer Message quá SLA 24h. Xử lý xong tự động clear.</p>
+                <h3>Mỗi sáng chỉ làm việc quan trọng</h3>
+                <p>Dashboard chỉ hiện việc cần làm gấp: mã nào sắp hết, listing nào bị ẩn, chiến dịch nào sắp hết tiền, khách nào nhắn chưa trả lời. Làm xong việc nào, việc đó tự biến mất.</p>
               </div>
             </div>
           </div>
@@ -262,46 +263,46 @@ export default function ViLanding() {
         <section id="departments" className="landing-section landing-departments">
           <div className="landing-wrap">
             <div className="landing-sec-head">
-              <div className="landing-kicker">Vận hành hằng ngày</div>
-              <h2>Mỗi team nhìn đúng chỉ số chuyên môn, không chồng chéo</h2>
-              <p>Phân quyền theo Brand/Marketplace: Ops chỉ thấy FBA & Buy Box, Ads chỉ thấy Sponsored & Search Term, Finance chỉ thấy Settlement & Reimbursement. Rõ trách nhiệm, không bỏ sót việc ảnh hưởng doanh thu.</p>
+              <div className="landing-kicker">Nền tảng làm thay bạn những gì?</div>
+              <h2>Ai lo việc nấy, không bỏ sót việc nào làm mất tiền</h2>
+              <p>Bạn giao shop nào, việc nào cho ai thì người đó chỉ thấy đúng phần đó. Không còn cảnh ai cũng xem hết rồi không ai làm.</p>
             </div>
             <div className="landing-dept-grid">
               <div className="landing-dept reveal">
                 <div className="landing-dept-ico">🛡️</div>
-                <h3>Account Health Management</h3>
-                <p>Theo dõi Account Health Rating (AHR), Policy Violation, Listing Deactivation, ODR, Late Shipment Rate, Valid Tracking Rate, Voice of Customer (VOC). Cảnh báo Required Action & Appeal trước khi bị hạn chế bán.</p>
-                <span className="landing-dept-kpi">KPI: AHR, ODR, Policy Violation, Required Action</span>
+                <h3>Giữ tài khoản khỏe</h3>
+                <p>Amazon vừa báo vi phạm gì, điểm sức khỏe tụt, có listing bị gỡ, cần nộp giấy tờ — hệ thống báo ngay để bạn xử lý trước khi bị hạn chế bán.</p>
+                <span className="landing-dept-kpi">Nhìn mỗi ngày: điểm sức khỏe, vi phạm, việc cần làm</span>
               </div>
               <div className="landing-dept reveal">
                 <div className="landing-dept-ico">🏷️</div>
-                <h3>Catalog & Listing Health</h3>
-                <p>Phát hiện Suppressed Listing, Stranded Inventory, Incomplete Listing, Search Suppressed, Buy Box Suppressed. Xếp theo Revenue at Risk để ưu tiên fix listing đang kẹt tiền nhiều nhất.</p>
-                <span className="landing-dept-kpi">KPI: Suppressed, Stranded, Revenue at Risk</span>
+                <h3>Dọn listing lỗi</h3>
+                <p>Mã nào bị Amazon ẩn (suppressed), hàng nằm chết trong kho (stranded), thiếu ảnh hay tiêu đề chưa chuẩn — xếp theo số tiền đang bị kẹt để bạn làm cái nặng trước.</p>
+                <span className="landing-dept-kpi">Nhìn mỗi ngày: listing lỗi, hàng chết, tiền đang kẹt</span>
               </div>
               <div className="landing-dept reveal">
                 <div className="landing-dept-ico">💰</div>
-                <h3>Pricing & Buy Box Intelligence</h3>
-                <p>So sánh Competitive Price, theo dõi Buy Box Ownership, tính Net Margin sau Referral Fee + FBA Fulfillment Fee + Ads. Đề xuất đổi giá có Approval Workflow, rollback 1 chạm nếu sai.</p>
-                <span className="landing-dept-kpi">KPI: Buy Box %, Competitive Price, Net Margin</span>
+                <h3>Canh giá & Buy Box</h3>
+                <p>Đối thủ đang bán bao nhiêu, mình còn giữ Buy Box không, sau khi trừ phí FBA và phí Amazon thì còn lời bao nhiêu — muốn đổi giá thì gửi duyệt, duyệt xong mới lên sàn.</p>
+                <span className="landing-dept-kpi">Nhìn mỗi ngày: % giữ Buy Box, mã mất Buy Box, biên lợi nhuận</span>
               </div>
               <div className="landing-dept reveal">
                 <div className="landing-dept-ico">📦</div>
-                <h3>FBA Inventory & Replenishment</h3>
-                <p>Quản lý FBA Inventory Ledger theo FC, tính Days of Cover, Sell-through Rate, Reorder Point & Safety Stock. Theo dõi Inbound Shipment (Working/Shipped/Receiving), cảnh báo Aged Inventory & Long-term Storage Fee.</p>
-                <span className="landing-dept-kpi">KPI: Days of Cover, Sell-through, Inbound Status</span>
+                <h3>Không để hết hàng FBA</h3>
+                <p>Mỗi mã còn bán được bao nhiêu ngày (Days of Cover), khi nào phải nhập thêm, lô hàng nào đang trên đường tới kho Amazon, mã nào nằm lâu đang bị tính phí lưu kho.</p>
+                <span className="landing-dept-kpi">Nhìn mỗi ngày: mã sắp hết, tiền tồn, lô đang đi</span>
               </div>
               <div className="landing-dept reveal">
                 <div className="landing-dept-ico">📈</div>
-                <h3>Sponsored Advertising & Search Term</h3>
-                <p>Quản lý Sponsored Products/Brands/Display theo Campaign/Budget/Bid. Phân tích Search Term Report, Negative Keyword Harvesting, tối ưu ACOS/TACOS/ROAS, cảnh báo Out-of-Budget & Lost Impression Share.</p>
-                <span className="landing-dept-kpi">KPI: ACOS, TACOS, ROAS, Search Term</span>
+                <h3>Tối ưu quảng cáo</h3>
+                <p>Sponsored Products, Brands, Display — ngân sách, giá thầu, khách thực sự gõ từ gì (Search Term), từ nào nên loại để đỡ tốn tiền. Đốt tiền ở đâu, nhìn là thấy ngay.</p>
+                <span className="landing-dept-kpi">Nhìn mỗi ngày: ACOS, TACOS, chiến dịch sắp hết tiền</span>
               </div>
               <div className="landing-dept reveal">
                 <div className="landing-dept-ico">💬</div>
-                <h3>Order Management & CX</h3>
-                <p>Quản lý FBA/FBM Orders, đếm ngược Time to Ship, cảnh báo Late Shipment Risk, tập trung Buyer Message SLA 24h, phân tích Return Reason, theo dõi Feedback & Review ảnh hưởng ODR.</p>
-                <span className="landing-dept-kpi">KPI: Late Shipment Rate, SLA 24h, Return Rate</span>
+                <h3>Không sót đơn & tin nhắn</h3>
+                <p>Đơn FBM nào sắp trễ, tin nhắn nào của khách quá 24h chưa trả lời, trả hàng vì lý do gì — không để sót việc nào làm tụt điểm vận hành.</p>
+                <span className="landing-dept-kpi">Nhìn mỗi ngày: tin nhắn chưa trả lời, đơn trễ, tỷ lệ trả hàng</span>
               </div>
             </div>
           </div>
@@ -310,19 +311,19 @@ export default function ViLanding() {
         <section id="modules" className="landing-section">
           <div className="landing-wrap">
             <div className="landing-sec-head">
-              <div className="landing-kicker">Module</div>
-              <h2>Một nền tảng duy nhất từ tổng quan đến chi tiết SKU/ASIN</h2>
-              <p>Từ GMV xuống SKU, từ Campaign xuống Search Term, mọi chỉ số liên kết với nhau. Click từ doanh thu giảm là thấy ngay ASIN nào Buy Box Lost, Days of Cover bao nhiêu, ACOS đang đốt bao nhiêu.</p>
+              <div className="landing-kicker">Có gì bên trong?</div>
+              <h2>Không phải nhiều tool rời rạc, mà là một chỗ làm hết</h2>
+              <p>Từ lúc nhìn tổng quan đến lúc xử lý chi tiết, mọi thứ nối với nhau. Xem doanh thu rồi bấm vào là thấy ngay mã nào đang kéo xuống, vì sao mất Buy Box, quảng cáo đang đốt bao nhiêu.</p>
             </div>
             <div className="landing-modules-grid">
-              <div className="landing-module-card reveal"><div className="m-ico">📊</div><div><h3>Operations Dashboard</h3><p>GMV, Units Sold, Conversion Rate, TACOS, Buy Box Ownership, Best Seller SKU/ASIN, Action Center theo Revenue at Risk — đỏ/vàng/xanh rõ ràng.</p></div></div>
-              <div className="landing-module-card reveal"><div className="m-ico">🛡️</div><div><h3>Account Health</h3><p>AHR Score, ODR, Late Shipment Rate, Valid Tracking Rate, Policy Violation, Deactivated ASIN, Appeal Tracker — Amazon báo gì thấy ngay.</p></div></div>
-              <div className="landing-module-card reveal"><div className="m-ico">🏷️</div><div><h3>Listing Management</h3><p>Suppressed, Stranded, Incomplete, Buy Box Suppressed, Price & FBA Stock, Bulk Edit với Approval Workflow trước khi push lên Seller Central.</p></div></div>
-              <div className="landing-module-card reveal"><div className="m-ico">💲</div><div><h3>Profitability & Pricing</h3><p>Competitive Benchmark, Net Profit = Sales - Referral - FBA - Ads - Storage, SKU-level P&L, Price Change Approval & Rollback.</p></div></div>
-              <div className="landing-module-card reveal"><div className="m-ico">📦</div><div><h3>FBA Inventory & Inbound</h3><p>FC-level Stock, Days of Cover Forecast, Reorder Suggestion, Inbound Shipment Tracking (Working/Shipped/Receiving), Aged Inventory Surcharge Alert.</p></div></div>
-              <div className="landing-module-card reveal"><div className="m-ico">🎯</div><div><h3>Advertising & Search Term</h3><p>Campaign &gt; Ad Group &gt; Keyword hierarchy, Search Term to Keyword mapping, Negative Harvesting, ACOS/TACOS/ROAS optimization, Budget Pacing.</p></div></div>
-              <div className="landing-module-card reveal"><div className="m-ico">🧾</div><div><h3>Orders & Returns</h3><p>FBA/FBM Order Timeline, Time to Ship Countdown, Buyer Message Central, Return Reason Breakdown, Feedback/Review Monitoring ảnh hưởng ODR.</p></div></div>
-              <div className="landing-module-card reveal"><div className="m-ico">💰</div><div><h3>Financial Reconciliation</h3><p>Settlement Report v2, Transaction Fees, FBA Reimbursement, Storage & Removal Fees, SKU-level Net Margin, Ad Spend Reconciliation — đối soát chính xác.</p></div></div>
+              <div className="landing-module-card reveal"><div className="m-ico">📊</div><div><h3>Nhìn toàn cảnh</h3><p>Doanh thu, đơn hàng, lợi nhuận, TACOS, Buy Box, mã bán chạy, việc cần làm gấp — gom hết lên một màn hình.</p></div></div>
+              <div className="landing-module-card reveal"><div className="m-ico">🛡️</div><div><h3>Sức khỏe tài khoản</h3><p>Điểm sức khỏe, ODR, tỷ lệ giao trễ, vi phạm, listing bị gỡ — Amazon báo gì là bạn thấy ngay.</p></div></div>
+              <div className="landing-module-card reveal"><div className="m-ico">🏷️</div><div><h3>Listing</h3><p>Mã nào đang bán, mã nào bị ẩn, hàng chết trong kho, giá, tồn FBA, Buy Box — sửa nhiều mã cùng lúc, có duyệt trước khi lên sàn.</p></div></div>
+              <div className="landing-module-card reveal"><div className="m-ico">💲</div><div><h3>Lợi nhuận thực</h3><p>So giá đối thủ, tính lời thực sau phí FBA, phí Amazon và tiền quảng cáo. Biết chính xác đang lời ở đâu.</p></div></div>
+              <div className="landing-module-card reveal"><div className="m-ico">📦</div><div><h3>Kho FBA & nhập hàng</h3><p>Tồn theo từng kho, dự báo khi nào hết, gợi ý nhập bao nhiêu, lô hàng đang đi tới đâu, mã nào nằm lâu tốn phí.</p></div></div>
+              <div className="landing-module-card reveal"><div className="m-ico">🎯</div><div><h3>Quảng cáo & từ khóa khách gõ</h3><p>Từ chiến dịch xuống từ khóa — thấy rõ khách gõ gì (Search Term), từ nào nên giữ, từ nào nên loại trừ.</p></div></div>
+              <div className="landing-module-card reveal"><div className="m-ico">🧾</div><div><h3>Đơn hàng & trả hàng</h3><p>Đơn FBA, FBM, đếm ngược hạn giao, tin nhắn khách, lý do trả hàng — không để sót đơn nào.</p></div></div>
+              <div className="landing-module-card reveal"><div className="m-ico">💰</div><div><h3>Tài chính Amazon</h3><p>Tiền Amazon trả (Settlement), các loại phí, tiền bồi hoàn FBA, lợi nhuận theo mã — đối soát rõ ràng.</p></div></div>
             </div>
           </div>
         </section>
@@ -330,17 +331,17 @@ export default function ViLanding() {
         <section id="security" className="landing-section">
           <div className="landing-wrap">
             <div className="landing-sec-head">
-              <div className="landing-kicker">Bảo mật & Tuân thủ</div>
-              <h2>Dữ liệu Seller là tài sản, tuân thủ chuẩn Amazon SP-API</h2>
-              <p>Chỉ tích hợp chính thức qua SP-API & Advertising API, không scraping. Tuân thủ Amazon Data Protection Policy (DPP), Acceptable Use Policy (AUP) và PII Protection.</p>
+              <div className="landing-kicker">An tâm bán hàng</div>
+              <h2>Dữ liệu shop là tài sản, chúng tôi giữ như của mình</h2>
+              <p>Chỉ kết nối chính thức với Amazon, không dùng mẹo vặt. Mọi thứ làm theo đúng chuẩn Amazon yêu cầu.</p>
             </div>
             <div className="landing-sec-grid">
-              <div className="landing-sec-item reveal"><div className="s-ico">✓</div><div><h3>Amazon SP-API Official</h3><p>Kết nối trực tiếp SP-API & Ads API, không cào dữ liệu, không chia sẻ dữ liệu giữa các Brand/Marketplace, tuân thủ Amazon AUP.</p></div></div>
-              <div className="landing-sec-item reveal"><div className="s-ico">🔑</div><div><h3>OAuth & Revoke Control</h3><p>LWA OAuth với least-privilege scopes, revoke ngay trong Seller Central, cảnh báo trước khi token hết hạn, hỗ trợ multi-marketplace.</p></div></div>
-              <div className="landing-sec-item reveal"><div className="s-ico">🔒</div><div><h3>PII & Data Protection</h3><p>Không lưu Buyer PII, toàn bộ dữ liệu mã hóa at-rest & in-transit, tuân thủ DPP, sử dụng giới hạn cho mục đích vận hành đơn hàng.</p></div></div>
-              <div className="landing-sec-item reveal"><div className="s-ico">🧑‍💻</div><div><h3>RBAC & Audit Log</h3><p>Phân quyền theo Brand/Marketplace/Module, mọi thay đổi giá/listing/campaign đều ghi audit log với before/after, người thực hiện và thời gian.</p></div></div>
-              <div className="landing-sec-item reveal"><div className="s-ico">🗑️</div><div><h3>Data Retention & Deletion</h3><p>Tự động xóa dữ liệu khi disconnect theo Amazon DPP, không lưu dư thừa, chính sách lưu trữ minh bạch, có báo cáo xóa.</p></div></div>
-              <div className="landing-sec-item reveal"><div className="s-ico">🛠️</div><div><h3>Built by Amazon Operators</h3><p>Team từng vận hành 10+ Brand Amazon, trải qua Buy Box Lost, FBA Stockout, ACOS spike, AHR drop — nên hiểu seller cần gì để giữ ODR và tăng Net Margin.</p></div></div>
+              <div className="landing-sec-item reveal"><div className="s-ico">✓</div><div><h3>Kết nối chính thức Amazon</h3><p>Lấy số trực tiếp từ Seller Central, không cào dữ liệu, không chia sẻ số liệu giữa các shop.</p></div></div>
+              <div className="landing-sec-item reveal"><div className="s-ico">🔑</div><div><h3>Muốn ngắt lúc nào cũng được</h3><p>Bạn kết nối bằng tài khoản Amazon của mình. Không muốn dùng nữa thì vào Seller Central bấm ngắt là xong.</p></div></div>
+              <div className="landing-sec-item reveal"><div className="s-ico">🔒</div><div><h3>Giữ kín thông tin</h3><p>Toàn bộ dữ liệu được mã hóa, không lưu thông tin nhạy cảm của người mua. Chỉ dùng để vận hành đơn hàng.</p></div></div>
+              <div className="landing-sec-item reveal"><div className="s-ico">🧑‍💻</div><div><h3>Ai làm gì đều ghi lại</h3><p>Mỗi người chỉ thấy shop và việc được giao. Đổi giá, sửa listing, chỉnh quảng cáo — ai đổi, đổi gì, đều lưu lại hết.</p></div></div>
+              <div className="landing-sec-item reveal"><div className="s-ico">🗑️</div><div><h3>Ngắt là xóa</h3><p>Khi bạn ngắt kết nối, chúng tôi xóa dữ liệu shop theo đúng chính sách đã cam kết với Amazon.</p></div></div>
+              <div className="landing-sec-item reveal"><div className="s-ico">🛠️</div><div><h3>Làm bởi người từng bán Amazon</h3><p>Đội VEXIM đã tự vận hành hàng chục gian hàng, từng mất Buy Box, từng hết hàng, từng đốt tiền quảng cáo — nên hiểu bạn cần gì.</p></div></div>
             </div>
           </div>
         </section>
@@ -349,19 +350,18 @@ export default function ViLanding() {
           <div className="landing-wrap landing-split">
             <div className="landing-about">
               <div className="landing-kicker">Vì sao VEXIM?</div>
-              <h2>Chúng tôi là Amazon Agency trước, rồi mới làm SaaS</h2>
-              <p>VEXIM là đội vận hành Amazon tại Việt Nam, đang quản lý nhiều Brand trên US/EU. Hàng ngày xử lý Listing Optimization, Sponsored Ads Optimization (ACOS/TACOS/ROAS), FBA Replenishment theo Days of Cover, FBM Order Fulfillment và Settlement Reconciliation.</p>
-              <p><b>VEXIM Ops</b> là hệ thống chúng tôi tự build để dùng trước — vì không tìm được tool nào đáp ứng đúng workflow Amazon: <b>nhìn vào là biết GMV, Net Margin, SKU nào đang Revenue at Risk và ai phải xử lý.</b></p>
+              <h2>Chúng tôi làm agency Amazon trước, rồi mới làm phần mềm</h2>
+              <p>VEXIM là đội vận hành Amazon ở Việt Nam, đang quản lý gian hàng cho nhiều thương hiệu. Ngày nào cũng làm listing, tối ưu quảng cáo, canh tồn kho FBA, xử lý đơn và đối soát tiền với Amazon.</p>
+              <p><b>VEXIM Ops</b> là cái chúng tôi tự làm cho mình dùng trước — vì không tìm được tool nào gọn việc như cách mình muốn: <b>nhìn vào là biết đang lời hay lỗ, ai phải làm gì hôm nay.</b></p>
               <ul>
-                <li>✅ <b>Giảm Revenue at Risk:</b> tránh FBA Stockout, Buy Box Lost, Suppressed/Stranded Listing kéo dài, Campaign Out-of-Budget mất Impression Share.</li>
-                <li>✅ <b>Nhìn rõ Net Margin thực:</b> sau khi trừ Referral Fee, FBA Fulfillment Fee, Storage Fee, Ad Spend và cộng FBA Reimbursement — biết chính xác SKU nào đang gánh P&L.</li>
-                <li>✅ <b>Tăng tốc vận hành:</b> bỏ Excel đối chiếu thủ công, Action Center ưu tiên theo tiền, Price/Ads Approval nhanh, rollback 1 chạm nếu sai.</li>
-                <li>✅ <b>Minh bạch với Brand Owner:</b> Client Portal riêng xem GMV, FBA Health, Ads Performance, Settlement — không cần hỏi qua chat mỗi ngày.</li>
+                <li>✅ <b>Đỡ hụt doanh thu:</b> không còn hết hàng FBA bất ngờ, mất Buy Box mà không biết, listing bị ẩn cả tuần, chiến dịch hết tiền giữa chừng.</li>
+                <li>✅ <b>Thấy rõ lời thực:</b> sau khi trừ phí FBA, phí Amazon, tiền quảng cáo và cả tiền bồi hoàn — biết chính xác mã nào đang gánh team, mã nào đang lỗ.</li>
+                <li>✅ <b>Đỡ mất thời gian:</b> bỏ Excel chắp vá, việc quan trọng tự nổi lên, duyệt đổi giá hay quảng cáo nhanh gọn.</li>
               </ul>
             </div>
             <div className="landing-contact-card" id="contact">
-              <h3>Demo trên dữ liệu thật?</h3>
-              <p>Chúng tôi demo trực tiếp trên Seller Central & Ads Console của bạn, cho thấy Buy Box, FBA Days of Cover, Search Term và Settlement sẽ gọn lại thế nào với VEXIM Ops.</p>
+              <h3>Nói chuyện thử xem?</h3>
+              <p>Chúng tôi demo trực tiếp trên số liệu Amazon thật, cho bạn thấy gian hàng của mình sẽ gọn lại thế nào.</p>
               <div className="landing-contact-row"><span className="c-ico">✉️</span><div><b>Email</b><span>ops@vexim.vn</span></div></div>
               <div className="landing-contact-row"><span className="c-ico">📞</span><div><b>Hotline</b><span>+84 28 1234 5678</span></div></div>
               <div className="landing-contact-row"><span className="c-ico">📍</span><div><b>Văn phòng</b><span>TP. Hồ Chí Minh, Việt Nam</span></div></div>
@@ -380,7 +380,7 @@ export default function ViLanding() {
           <a href="/login">Đăng nhập</a>
         </div>
         <div className="landing-wrap" style={{marginTop:"10px", fontSize:"12px", lineHeight:"1.6"}}>
-          VEXIM Ops là sản phẩm độc lập, không liên kết với Amazon. “Amazon”, “Buy Box”, “FBA”, “Sponsored Products”, “ACOS”, “TACOS” là nhãn hiệu của Amazon.com, Inc. Chúng tôi tuân thủ SP-API Acceptable Use Policy và Data Protection Policy.
+          VEXIM Ops là sản phẩm độc lập, không liên kết với Amazon. “Amazon”, “Buy Box”, “FBA”, “Sponsored Products” là nhãn hiệu của Amazon.com, Inc.
         </div>
       </footer>
     </>
