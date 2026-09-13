@@ -1,35 +1,31 @@
 /**
- * Runner CLI — MODULE 5 PHẦN 1 (Amazon Ads) + luồng token Module 0.
+ * Runner CLI — MODULE 5 PHẦN 1 (Amazon Ads).
  *
  *   worker:ads-sync  [--seller=<uuid>] [--dry-run]
- *       GET /v2/profiles → campaigns → ad groups → keywords/targets (cấu trúc)
+ *       GET /v2/profiles → Campaign Management v3 list (campaign · ad group · keyword/target)
+ *       → RPC upsert (0020). Chạy TRƯỚC ads:pull để có ads_profile_id + tiền tệ.
  *
- *   worker:ads-pull  [--kind=campaigns|targeting|search-terms|advertised-products|purchased-products|all]
+ *   worker:ads-pull  [--kind=all|campaigns|targeting|search-terms|advertised-products|purchased-products]
  *                    [--days=30] [--seller=<uuid>] [--dry-run] [--poll=3]
- *                    [--campaigns=<file.json>] [--targeting=<file.json>] … (nạp file GZIP-đã-giải-nén)
- *       POST /reporting/reports → poll → tải GZIP_JSON → parse → RPC
- *       → cảnh báo acos_over_target / budget_exhausted + budget_events + lấp ads_spend (F4)
+ *                    [--campaigns=<file.json>] [--targeting=<file.json>] [--search-terms=<file>]
+ *                    [--advertised-products=<file>] [--purchased-products=<file>]
+ *       Reporting API v3: create → poll → tải GZIP_JSON → parse → RPC.
+ *       Sau khi nhập: cảnh báo ACOS/ngân sách + `ads.budget_events` + lấp ads_spend (F4).
  *
- *   worker:oauth-soon [--days=30]
- *       Danh sách shop sắp/đã hết hạn refresh token (cron nhắc re-authorize, SOP-11).
+ * HAI CHẾ ĐỘ CỦA ads:pull (giống reports:pull của 0019):
+ *   (A) API  — không có cờ file: gọi Amazon (cần AMAZON_ADS_CLIENT_ID/SECRET/REFRESH_TOKEN).
+ *   (B) FILE — có --<kind>=<đường dẫn>: nạp file JSON đã giải nén, đi ĐÚNG pipeline
+ *       parse → RPC nên luật nhập giống hệt chế độ A. Dùng khi app Ads chưa được
+ *       duyệt role hoặc khi cần nạp lại dữ liệu lịch sử.
  *
- * HAI CHẾ ĐỘ của ads-pull (giống reports:pull của 0019):
- *   (A) API  — không có cờ file: gọi Ads Reporting API v3 (cần AMAZON_ADS_*).
- *   (B) FILE — có --<kind>=<file>: bỏ qua Amazon, đi qua ĐÚNG pipeline parse → RPC.
- *
- * AN TOÀN DỮ LIỆU: chỉ ghi DB thật khi mode=production và không --dry-run.
+ * AN TOÀN DỮ LIỆU: DB thật chỉ ghi khi mode=production và không --dry-run.
+ * Thiếu credential ⇒ chạy DEMO trong bộ nhớ, KHÔNG ghi gì.
  */
 import { readFileSync } from "node:fs";
 
 import { loadConfig } from "../config.ts";
-import { runAdsPullAll, runAdsSyncAll, runOauthReminderAll } from "../run-ads.ts";
-import { adsRunContext } from "../run-ads.ts";
-import {
-  ADS_ALL_KINDS,
-  adsSpecOf,
-  isAdsReportKind,
-  type AdsReportKind,
-} from "../ads/registry.ts";
+import { runAdsPullAll, runAdsSyncAll } from "../run-ads.ts";
+import { ADS_ALL_KINDS, adsSpecOf, isAdsReportKind, type AdsReportKind } from "../ads/registry.ts";
 
 export type AdsSyncCliResult = {
   mode: string;
@@ -49,39 +45,38 @@ export async function runAdsSyncCli(opts: {
 }): Promise<AdsSyncCliResult> {
   const log = (s: string) => opts.stdout?.write(s);
   const cfg = loadConfig();
-  const dryRun = opts.dryRun === true;
 
-  if (!cfg.ads && !dryRun) {
+  if (!cfg.ads) {
     log(
-      "[ads-sync] ⚠ chưa có credential Amazon Ads. Cần 3 biến (Vercel → Environment Variables):\n" +
+      "[ads:sync] ⚠ chưa có credential Amazon Ads. Cần (Vercel → Environment Variables):\n" +
         "    AMAZON_ADS_CLIENT_ID · AMAZON_ADS_CLIENT_SECRET · AMAZON_ADS_REFRESH_TOKEN\n" +
-        "    (tuỳ chọn: AMAZON_ADS_REGION=NA|EU|FE — mặc định NA)\n" +
-        "  Ads là ĐĂNG KÝ RIÊNG, KHÔNG dùng chung app SP-API. Sau khi có token, chạy lại lệnh này.\n",
+        "    tuỳ chọn AMAZON_ADS_REGION=NA|EU|FE (mặc định NA)\n" +
+        "  Ads là ĐĂNG KÝ RIÊNG — KHÔNG dùng chung LWA của app SP-API.\n",
     );
   }
-  if (dryRun) log("[ads-sync] DRY-RUN — chỉ gọi Amazon để đọc, KHÔNG ghi DB.\n");
+  if (opts.dryRun) log("[ads:sync] DRY-RUN — gọi Amazon để đọc, KHÔNG ghi DB.\n");
 
   const res = await runAdsSyncAll({
-    dryRun,
+    dryRun: opts.dryRun === true,
     sellerAccountId: opts.sellerAccountId ?? null,
     requireSingleShop: false,
     stdout: opts.stdout,
   });
 
   log(
-    `\n[ads-sync] KẾT QUẢ · db=${res.db} · apiConfigured=${res.apiConfigured}\n` +
+    `\n[ads:sync] KẾT QUẢ · db=${res.db} · apiConfigured=${res.apiConfigured}\n` +
       `   đồng bộ xong : ${res.synced}\n` +
-      `   bỏ qua       : ${res.skipped}   (chưa có credential Ads)\n` +
-      `   lỗi          : ${res.failed}\n` +
-      (res.needsReauth.length > 0
-        ? `   ⚠ CẦN RE-AUTHORIZE (Module 0 → Kết nối shop): ${res.needsReauth.length} shop\n`
-        : ""),
+      `   bỏ qua       : ${res.skipped}\n` +
+      `   lỗi          : ${res.failed}\n`,
   );
   for (const s of res.shops) {
     log(
-      `   · ${s.shop.padEnd(20)} ${s.action.padEnd(8)} profile=${s.profiles} ` +
+      `   · ${s.shop.padEnd(18)} ${s.action.padEnd(8)} profile=${s.profiles} ` +
         `campaign=${s.campaigns} adGroup=${s.adGroups} target=${s.targets}\n`,
     );
+  }
+  if (res.needsReauth.length > 0) {
+    log(`   ⚠ CẦN RE-AUTHORIZE (Module 0 → Kết nối shop): ${res.needsReauth.join(", ")}\n`);
   }
   if (res.errors.length > 0) {
     log(`   LỖI cần xem:\n${res.errors.map((e) => `     · ${e.error}\n`).join("")}`);
@@ -91,7 +86,7 @@ export async function runAdsSyncCli(opts: {
     mode: res.mode,
     db: res.db,
     apiConfigured: res.apiConfigured,
-    dryRun,
+    dryRun: opts.dryRun === true,
     synced: res.synced,
     skipped: res.skipped,
     failed: res.failed,
@@ -152,11 +147,12 @@ export async function runAdsPullCli(opts: {
   }
   if (unknown.length > 0) {
     log(
-      `[ads-pull] ⚠ không biết loại report: ${unknown.join(", ")}. ` +
+      `[ads:pull] ⚠ không biết loại report: ${unknown.join(", ")}. ` +
         `Chọn được: ${ADS_ALL_KINDS.join(" | ")} | all.\n`,
     );
   }
 
+  // Chế độ FILE: đọc các đường dẫn được truyền vào
   const texts: Partial<Record<AdsReportKind, string>> = {};
   const files: Record<string, string> = {};
   const missing: string[] = [];
@@ -170,21 +166,21 @@ export async function runAdsPullCli(opts: {
       missing.push(`${kind}: ${path} (${(e as Error).message.split("\n")[0]})`);
     }
   }
-  if (missing.length > 0) log(`[ads-pull] ⚠ không đọc được file: ${missing.join(" · ")}\n`);
+  if (missing.length > 0) log(`[ads:pull] ⚠ không đọc được file: ${missing.join(" · ")}\n`);
   const fileMode = Object.keys(texts).length > 0;
   if (fileMode) kinds = Object.keys(texts).filter((k): k is AdsReportKind => isAdsReportKind(k));
 
-  if (!cfg.ads && !fileMode && !dryRun) {
+  if (!cfg.ads && !fileMode) {
     log(
-      "[ads-pull] ⚠ chưa có credential Amazon Ads (AMAZON_ADS_CLIENT_ID / _SECRET / _REFRESH_TOKEN).\n" +
-        "  Trong lúc chờ: nạp file đã tải bằng --campaigns=<file.json> --targeting=<file.json> …\n",
+      "[ads:pull] ⚠ chưa có credential Amazon Ads (AMAZON_ADS_CLIENT_ID / _SECRET / _REFRESH_TOKEN).\n" +
+        "  Trong lúc chờ: nạp file đã giải nén bằng --campaigns=<file.json> --targeting=<file.json> …\n",
     );
   }
   log(
-    `[ads-pull] mode=${cfg.mode} · host=${cfg.adsHost} · nguồn=${fileMode ? "FILE" : "API"} · ` +
+    `[ads:pull] mode=${cfg.mode} · host=${cfg.adsHost} · nguồn=${fileMode ? "FILE" : "API"} · ` +
       `loại: ${kinds.map((k) => adsSpecOf(k).reportTypeId).join(", ")}\n`,
   );
-  if (dryRun) log("[ads-pull] DRY-RUN — parse và tính, KHÔNG ghi DB.\n");
+  if (dryRun) log("[ads:pull] DRY-RUN — parse và tính, KHÔNG ghi DB.\n");
 
   const res = await runAdsPullAll({
     kinds,
@@ -194,28 +190,25 @@ export async function runAdsPullCli(opts: {
     sellerAccountId: opts.sellerAccountId ?? null,
     requireSingleShop: fileMode,
     pollAttempts: opts.pollAttempts,
-    fireAlerts: opts.fireAlerts,
-    applySpend: opts.applySpend,
+    fireAlerts: opts.fireAlerts !== false,
+    applySpend: opts.applySpend !== false,
     stdout: opts.stdout,
   });
 
   log(
-    `\n[ads-pull] KẾT QUẢ · db=${res.db} · apiConfigured=${res.apiConfigured} · ${res.shopsProcessed} shop\n` +
+    `\n[ads:pull] KẾT QUẢ · db=${res.db} · apiConfigured=${res.apiConfigured} · ${res.shopsProcessed} shop\n` +
       `   đã nhập        : ${res.imported}\n` +
-      `   đang chờ Amazon: ${res.pending}   (lần chạy sau poll tiếp, không xin report mới)\n` +
+      `   đang chờ Amazon: ${res.pending}\n` +
       `   report rỗng    : ${res.noData}   (không chạy quảng cáo ≠ lỗi)\n` +
       `   bị trần tốc độ : ${res.throttled}\n` +
       `   lỗi            : ${res.failed}\n` +
       `   bỏ qua         : ${res.skipped}\n` +
       `   dòng đã ghi    : ${res.rowsImported}\n` +
-      `   cảnh báo rule  : ${res.alertsFired}   (acos_over_target · budget_exhausted)\n` +
+      `   cảnh báo tạo   : ${res.alertsFired}   (acos_over_target · budget_exhausted)\n` +
       `   lấp ads_spend  : ${res.spendApplied} dòng F4 (TACOS thật)\n`,
   );
-  const reauth = res.outcomes.filter((o) => o.needsReauth).map((o) => o.shop);
-  if (reauth.length > 0) {
-    log(
-      `   ⚠ CẦN RE-AUTHORIZE (Module 0 → Kết nối shop, SOP-11): ${reauth.join(", ")}\n`,
-    );
+  if (res.db === "mock") {
+    log("   ⚠ chạy trong bộ nhớ (dry-run / chưa đủ credentials) — KHÔNG ghi DB thật.\n");
   }
   if (res.errors.length > 0) {
     log(`   LỖI cần xem:\n${res.errors.map((e) => `     · [${e.kind}] ${e.error}\n`).join("")}`);
@@ -240,64 +233,7 @@ export async function runAdsPullCli(opts: {
     rowsImported: res.rowsImported,
     alertsFired: res.alertsFired,
     spendApplied: res.spendApplied,
-    needsReauth: reauth,
+    needsReauth: res.outcomes.filter((o) => o.needsReauth).map((o) => o.shop),
     errors: res.errors,
-  };
-}
-
-export type OauthSoonCliResult = {
-  mode: string;
-  db: "supabase" | "mock";
-  count: number;
-  marked: number;
-  alertsCreated: number;
-  dryRun: boolean;
-  message: string;
-  shops: {
-    sellerAccountId: string;
-    shop: string | null;
-    expiresAt: string | null;
-    daysLeft: number | null;
-    needsReauth: boolean;
-    alreadyNoticed: boolean;
-    adsProfiles: number;
-  }[];
-};
-
-/**
- * `worker:oauth-soon` — cron nhắc re-authorize đọc danh sách shop sắp hết hạn.
- * Vì sao cần lệnh riêng: view `vexim_oauth_connections` lọc theo auth.uid() nên
- * service_role đọc ra 0 dòng; RPC `vexim_worker_oauth_soon` mới trả được dữ liệu.
- */
-export async function runOauthSoonCli(opts: {
-  days?: number | null;
-  /** true = tạo cảnh báo + đánh dấu đã nhắc (việc cron làm); false = chỉ đọc */
-  mark?: boolean;
-  stdout?: { write: (s: string) => void };
-}): Promise<OauthSoonCliResult> {
-  const log = (s: string) => opts.stdout?.write(s);
-  const ctx = await adsRunContext({ log });
-  const res = await runOauthReminderAll({
-    days: opts.days ?? null,
-    dryRun: opts.mark !== true,
-    stdout: opts.stdout,
-  });
-  return {
-    mode: res.mode,
-    db: res.db,
-    count: res.checked,
-    marked: res.marked,
-    alertsCreated: res.alertsCreated,
-    dryRun: res.dryRun,
-    message: res.message,
-    shops: res.shops.map((r) => ({
-      sellerAccountId: r.sellerAccountId,
-      shop: r.shop,
-      expiresAt: r.expiresAt,
-      daysLeft: r.daysLeft,
-      needsReauth: r.needsReauth,
-      alreadyNoticed: r.alreadyNoticed,
-      adsProfiles: r.adsProfiles,
-    })),
   };
 }

@@ -1,41 +1,38 @@
 /**
- * Cron API — Vercel Cron gọi mỗi ngày để TỰ KÉO report FBA (0019) + report
- * AMAZON ADS (Module 5 phần 1, 0020).
+ * Cron API — Vercel Cron gọi mỗi ngày để TỰ KÉO report.
  *
- *   /api/cron/report-pull                       → 4 report FBA + 5 report Ads
- *   /api/cron/report-pull?kinds=storage-fees    → chỉ phí lưu kho (FBA)
- *   /api/cron/report-pull?oauth=0               → bỏ phần nhắc re-authorize token
- *   /api/cron/report-pull?ads=0                 → bỏ phần Amazon Ads
- *   /api/cron/report-pull?adsKinds=campaigns    → chỉ report campaign của Ads
- *   /api/cron/report-pull?days=7                → ghi đè khoảng ngày mặc định
- *   /api/cron/report-pull?dryRun=1              → tải + parse, KHÔNG ghi DB
+ *   /api/cron/report-pull                            → 4 report FBA (0019) + Ads (0020)
+ *   /api/cron/report-pull?kinds=storage-fees         → chỉ phí lưu kho (FBA)
+ *   /api/cron/report-pull?ads=0                      → bỏ phần Amazon Ads
+ *   /api/cron/report-pull?adsKinds=campaigns,targeting → chỉ vài loại report Ads
+ *   /api/cron/report-pull?days=7                     → ghi đè khoảng ngày mặc định
+ *   /api/cron/report-pull?dryRun=1                   → tải + parse, KHÔNG ghi DB
  *
- * VÌ SAO ADS CHẠY CHUNG ROUTE NÀY (không thêm cron riêng):
- *   Vercel Hobby giới hạn 2 cron/ngày và repo đã dùng hết (02:00 inventory-sync,
- *   03:00 report-pull). Thêm cron thứ ba là vượt hạn mức của gói → giữ một route,
- *   chạy lần lượt: FBA → cấu trúc Ads → report Ads.
+ * VÌ SAO ADS DÙNG CHUNG MỘT CRON (không thêm cron thứ ba):
+ *   Vercel Hobby chỉ cho 2 cron/ngày (02:00 inventory-sync · 03:00 report-pull).
+ *   Thêm cron thứ ba là vượt hạn mức ⇒ ghép vào đây theo thứ tự: FBA → cấu trúc
+ *   Ads (profile/campaign/ad group/target) → report Ads.
+ *
+ * VÌ SAO maxDuration = 60 VÀ CHỈ POLL 2 LẦN:
+ *   Cả SP-API Reports và Ads Reporting v3 đều BẤT ĐỒNG BỘ. Cron KHÔNG được ngồi
+ *   chờ: poll 2 lần cách nhau vài giây, chưa xong thì ghi trạng thái vào
+ *   connections.report_requests và lần chạy sau poll tiếp ĐÚNG reportId đó (job
+ *   đã xử lý). Muốn chờ lâu hơn thì chạy CLI:
+ *   `npm run worker:reports-pull` / `npm run worker:ads-pull` (không bị trần 60s).
  *
  * Protect bằng CRON_SECRET (Authorization: Bearer <CRON_SECRET>) — Vercel Cron tự
  * gửi header này. Thiếu CRON_SECRET trên production → trả 500 kèm hướng dẫn
  * (bài học từ /api/cron/inventory-sync: trả 401 mơ hồ khiến Vercel chỉ hiện
  * "failed" và không ai biết nguyên nhân là thiếu biến môi trường).
- *
- * VÌ SAO maxDuration = 60 VÀ POLL RẤT ÍT:
- *   Cả SP-API Reports và Ads Reporting v3 đều BẤT ĐỒNG BỘ. Cron KHÔNG được ngồi
- *   chờ: poll 2 lần cách nhau vài giây, chưa xong thì ghi trạng thái vào
- *   connections.report_requests và lần chạy sau poll tiếp đúng reportId đó (job
- *   đã xử lý). Muốn chờ lâu hơn thì chạy CLI: `npm run worker:reports-pull` /
- *   `npm run worker:ads-pull` (không bị trần 60s của serverless).
  */
 import { NextResponse } from "next/server";
 import {
-  ADS_ALL_KINDS,
   ALL_REPORT_KINDS,
+  ADS_ALL_KINDS,
   isAdsReportKind,
   isReportKind,
   runAdsPullAll,
   runAdsSyncAll,
-  runOauthReminderAll,
   runReportPullAll,
   type AdsReportKind,
   type ReportKind,
@@ -46,7 +43,6 @@ export const maxDuration = 60;
 
 const CRON_POLL_ATTEMPTS = 2;
 const CRON_POLL_DELAY_MS = 5_000;
-/** Ads: report v3 thường xong sau vài phút → poll nhanh 1 nhịp, lần sau lấy tiếp. */
 const CRON_ADS_POLL_ATTEMPTS = 2;
 const CRON_ADS_POLL_DELAY_MS = 2_000;
 
@@ -123,10 +119,9 @@ export async function GET(req: Request) {
   const days = daysRaw && Number.isFinite(Number(daysRaw)) ? Number(daysRaw) : null;
   const dryRun = url.searchParams.get("dryRun") === "1" || url.searchParams.get("dryRun") === "true";
   const withAds = url.searchParams.get("ads") !== "0";
-  const withOauth = url.searchParams.get("oauth") !== "0";
 
   const buf: string[] = [];
-  const stdout = {
+  const out = {
     write: (s: string) => {
       buf.push(s);
       return undefined;
@@ -134,11 +129,6 @@ export async function GET(req: Request) {
   };
 
   try {
-    // 0. Token platform (Module 0): nhắc re-authorize shop sắp hết hạn refresh
-    //    token (365 ngày). Chạy TRƯỚC các bước khác vì token chết là mọi bước
-    //    sau hỏng — và vì nhắc sớm thì còn thời gian authorize lại (SOP-11).
-    const oauth = withOauth ? await runOauthReminderAll({ dryRun, stdout }) : null;
-
     // 1. Report FBA (0019) — giữ nguyên hành vi cũ.
     const res = await runReportPullAll({
       kinds,
@@ -146,41 +136,30 @@ export async function GET(req: Request) {
       dryRun,
       pollAttempts: CRON_POLL_ATTEMPTS,
       pollDelayMs: CRON_POLL_DELAY_MS,
-      stdout,
+      stdout: out,
     });
 
-    // 2. Amazon Ads (0020): cấu trúc trước (profile → campaign → target), rồi report.
+    // 2. Amazon Ads (0020): cấu trúc trước (profile → campaign → target) rồi report.
+    //    Không cấu hình token Ads thì cả hai trả `skipped` kèm hướng dẫn, KHÔNG throw.
     let adsSync: Awaited<ReturnType<typeof runAdsSyncAll>> | null = null;
     let adsPull: Awaited<ReturnType<typeof runAdsPullAll>> | null = null;
-    if (withAds && !dryRun) {
-      adsSync = await runAdsSyncAll({ stdout });
+    if (withAds) {
+      adsSync = await runAdsSyncAll({ stdout: out, dryRun });
       adsPull = await runAdsPullAll({
         kinds: adsKinds,
         days,
-        dryRun: false,
+        dryRun,
         pollAttempts: CRON_ADS_POLL_ATTEMPTS,
         pollDelayMs: CRON_ADS_POLL_DELAY_MS,
-        stdout,
-      });
-    } else if (withAds && dryRun) {
-      // Dry-run vẫn cho phép KIỂM TRA kết nối Ads (đọc, không ghi).
-      adsPull = await runAdsPullAll({
-        kinds: adsKinds,
-        days,
-        dryRun: true,
-        pollAttempts: CRON_ADS_POLL_ATTEMPTS,
-        pollDelayMs: CRON_ADS_POLL_DELAY_MS,
-        stdout,
+        stdout: out,
       });
     }
 
-    const adsFailed = (adsPull?.failed ?? 0) + (adsSync?.failed ?? 0);
     return NextResponse.json({
-      ok: res.failed === 0 && adsFailed === 0,
+      ok: res.failed === 0,
       mode: res.mode,
       db: res.db,
       apiConfigured: res.apiConfigured,
-      adsApiConfigured: adsPull?.apiConfigured ?? adsSync?.apiConfigured ?? false,
       shopsProcessed: res.shopsProcessed,
       kindsRequested: res.kindsRequested,
       counts: {
@@ -195,50 +174,43 @@ export async function GET(req: Request) {
       outcomes: res.outcomes,
       errors: res.errors,
       unknownKinds: bad,
-      oauth: oauth
-        ? {
-            skipped: false,
-            checked: oauth.checked,
-            alertsCreated: oauth.alertsCreated,
-            marked: oauth.marked,
-            message: oauth.message,
-            shops: oauth.shops,
-          }
-        : { skipped: true, reason: "oauth=0" },
-      ads: withAds
-        ? {
-            skipped: false,
-            sync: adsSync
-              ? {
-                  synced: adsSync.synced,
-                  skipped: adsSync.skipped,
-                  failed: adsSync.failed,
-                  needsReauth: adsSync.needsReauth,
-                  shops: adsSync.shops,
-                  errors: adsSync.errors,
-                }
-              : null,
-            pull: adsPull
-              ? {
-                  kindsRequested: adsPull.kindsRequested,
-                  imported: adsPull.imported,
-                  pending: adsPull.pending,
-                  noData: adsPull.noData,
-                  throttled: adsPull.throttled,
-                  failed: adsPull.failed,
-                  skipped: adsPull.skipped,
-                  rowsImported: adsPull.rowsImported,
-                  alertsFired: adsPull.alertsFired,
-                  spendApplied: adsPull.spendApplied,
-                  needsReauth: adsPull.outcomes.filter((o) => o.needsReauth).map((o) => o.shop),
-                  outcomes: adsPull.outcomes,
-                  errors: adsPull.errors,
-                }
-              : null,
-            unknownKinds: badAdsKinds,
-          }
-        : { skipped: true, reason: "ads=0" },
       dryRun,
+      ads: {
+        enabled: withAds,
+        unknownKinds: badAdsKinds,
+        sync: adsSync
+          ? {
+              db: adsSync.db,
+              apiConfigured: adsSync.apiConfigured,
+              synced: adsSync.synced,
+              skipped: adsSync.skipped,
+              failed: adsSync.failed,
+              needsReauth: adsSync.needsReauth,
+              shops: adsSync.shops,
+              errors: adsSync.errors,
+            }
+          : null,
+        pull: adsPull
+          ? {
+              db: adsPull.db,
+              apiConfigured: adsPull.apiConfigured,
+              kindsRequested: adsPull.kindsRequested,
+              counts: {
+                imported: adsPull.imported,
+                pending: adsPull.pending,
+                noData: adsPull.noData,
+                throttled: adsPull.throttled,
+                failed: adsPull.failed,
+                skipped: adsPull.skipped,
+              },
+              rowsImported: adsPull.rowsImported,
+              alertsFired: adsPull.alertsFired,
+              spendApplied: adsPull.spendApplied,
+              outcomes: adsPull.outcomes,
+              errors: adsPull.errors,
+            }
+          : null,
+      },
       cronSecretConfigured: !!process.env.CRON_SECRET,
       log: buf.join(""),
     });

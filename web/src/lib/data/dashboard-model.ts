@@ -45,8 +45,35 @@ export function buildCeoKpis(stats: {
   totalSku: number;
   openAlerts: number;
   latestSettlement: number | null;
+  adsSpend7d?: number | null;
+  adsAcos7d?: number | null;
+  adsCurrency?: string | null;
+  tacos?: number | null;
 }): DashboardKpi[] {
+  const ads: DashboardKpi[] =
+    stats.adsSpend7d === null || stats.adsSpend7d === undefined
+      ? []
+      : [
+          {
+            label: "Chi ads 7 ngày",
+            value: `${stats.adsCurrency ?? ""} ${Number(stats.adsSpend7d).toLocaleString("en-US", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}`.trim(),
+            sub:
+              stats.tacos === null || stats.tacos === undefined
+                ? `ACOS ${stats.adsAcos7d === null || stats.adsAcos7d === undefined ? "—" : `${stats.adsAcos7d}%`} · TACOS cần F4 cùng kỳ`
+                : `ACOS ${stats.adsAcos7d ?? "—"}% · TACOS ${stats.tacos.toFixed(1)}% (mục tiêu ≤ 8%)`,
+            tone:
+              stats.tacos === null || stats.tacos === undefined
+                ? "warn"
+                : stats.tacos <= 8
+                  ? "up"
+                  : "warn",
+          },
+        ];
   return [
+    ...ads,
     {
       label: "Đơn hàng (tổng DB)",
       value: stats.orderCount.toLocaleString("en-US"),

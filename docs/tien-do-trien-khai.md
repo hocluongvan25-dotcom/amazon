@@ -1,6 +1,131 @@
 # TIẾN ĐỘ TRIỂN KHAI — VEXIM OPS
 
-> Cập nhật: 12/09/2026 · Thứ tự build đã chốt: **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** (21 màn Đợt 1)
+> Cập nhật: 13/09/2026 · Thứ tự build đã chốt: **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** (21 màn Đợt 1)
+
+## Cập nhật 13/09 — MODULE 5 PHẦN 1 (AMAZON ADS: campaign số thật + cảnh báo ACOS/ngân sách + ads_spend → F4/TACOS) + MODULE 0: KẾT NỐI SHOP THẬT (migration 0020)
+
+Module 5 chia 3 phần như cách đã làm với Module 3. **Phần 1 (đợt này) = đọc + A1 chạy số thật**:
+cấu trúc campaign/ad group/từ khoá + 5 report metrics theo ngày + cảnh báo tự nổ + tiền quảng cáo
+chảy vào F4 để có TACOS thật. Phần 2 (A2 chi tiết campaign · A3 search term & gợi ý negative) và
+phần 3 (ghi ngược lên Amazon: đổi ngân sách/bid, thêm negative — cần ngưỡng duyệt + audit log) làm sau.
+
+### Vì sao Ads phải làm KHÁC SP-API (ba sự thật chi phối toàn bộ thiết kế)
+
+1. **Ads là đăng ký riêng** — LWA client/secret/refresh token riêng, KHÔNG dùng chung app SP-API.
+   Vì vậy `config.ts` đọc `AMAZON_ADS_*` (có fallback `ADS_LWA_*`), và `AMAZON_ADS_REGION` quyết định
+   host: `advertising-api.amazon.com` (NA) / `-eu` / `-fe`. Thiếu credential ⇒ job trả `skipped` kèm
+   hướng dẫn, KHÔNG throw (một biến môi trường thiếu không được làm đỏ dashboard).
+2. **Reporting v3 CHỈ có `DAILY` và `SUMMARY`** — không có `HOURLY`. Nên `budget_exhausted` biết *ngày*
+   cạn ngân sách nhưng **không biết giờ**: `ads.budget_events.hour_source='unavailable'`,
+   `exhausted_hour=NULL`, và giao diện nói thẳng "chưa biết giờ" thay vì bịa. Muốn có giờ phải dùng
+   Amazon Marketing Stream (chưa làm).
+3. **v3 không trả ACOS/ROAS/CPC/CTR** — đây là *số suy ra*. Hệ thống KHÔNG lưu chúng vào bảng
+   (lưu là chúng lệch ngay sau lần nhập lại) mà tính trong view từ `cost ÷ sales`.
+   Ngoài ra API chỉ giữ dữ liệu ~60 ngày ⇒ `lookbackDays` mặc định 30.
+
+### Migration `0020_ads_ppc.sql` (~3.200 dòng, idempotent + DO-block tự soát 21 mục)
+
+- **7 bảng mới + 1 bảng trạng thái**: `ads.profiles` · `ads.campaigns` (mở rộng) · **`ads.ad_groups`** ·
+  **`ads.targets`** (keyword + product target chung một bảng) · **`ads.campaign_metrics_daily`** ·
+  **`ads.target_metrics_daily`** · **`ads.search_terms`** (theo campaign × ad group × từ khoá) ·
+  **`ads.advertised_product_metrics_daily`** · **`ads.purchased_product_metrics_daily`** ·
+  **`ads.budget_events`** · **`ads.negative_suggestions`** + **`connections.oauth_states`** (state OAuth
+  dùng một lần).
+- **Cửa sổ quy đổi lưu riêng**: `sales_7d/14d/30d`, `purchases_7d/14d/30d`, `units_sold_clicks_*`
+  (≡`units_7d`) — **tuyệt đối không cộng chéo các cửa sổ** (cộng là ra "doanh thu ảo" gấp 3).
+- **16 RPC `vexim_worker_*` service_role**: upsert profile/campaign/ad group/target/metrics theo campaign/
+  metrics theo target/search term/sản phẩm được quảng cáo/sản phẩm đã mua/campaign gợi ý negative/sự kiện
+  ngân sách, **`apply_ads_spend`** (lấp `finance.sku_profit_daily.ads_spend`), và 5 RPC Module 0
+  (`set_oauth_token`, `create_oauth_state`, `consume_oauth_state`, `mark_oauth_notice`, `oauth_soon`).
+  Mọi RPC trả bộ đếm `inserted/updated/skipped/merged` (+`days`,`currencies`) — nhập lại cùng dữ liệu là
+  `updated`, **không phình bảng**.
+- **10 view**: `vexim_ads_profiles` · **`vexim_ads_campaigns`** (A1: spend hôm qua/7/14/30 ngày, ACOS
+  7/14/30 + ROAS 7 suy ra, `budget_state` capped/ok/no_data/unknown, số ngày cạn 30 ngày) ·
+  `vexim_ads_targets` (A2) · `vexim_ads_search_terms` (A3 + gợi ý negative đang chờ) ·
+  `vexim_ads_negative_suggestions` · `vexim_ads_budget_events` (`hour_known`) · `vexim_ads_sku_spend`
+  (`sku_source`) · `vexim_ads_account_daily` · `vexim_ads_kpi` (TACOS) · `vexim_oauth_connections`.
+  9 view `security_invoker` (RLS bảng gốc vẫn áp); riêng view token KHÔNG invoker vì
+  `connections.oauth_tokens` không có policy cho client — nó tự lọc bằng
+  `iam.can_read_seller_account()` và **không phơi cột token**.
+- **3 rule cảnh báo**: `acos_over_target` (ACOS 7 ngày > 25%) · `budget_exhausted` (dùng ≥ 95% ngân sách
+  ngày) · `oauth_reauth_due` (token còn ≤ 30 ngày). Lưu ý `iam.module_code` **không có `ppc`** ⇒ rule
+  quảng cáo nằm ở module `'ads'`, rule token nằm ở `'account_health'`.
+
+### Engine worker (web/src/lib/worker — Vercel Cron chạy trong `web/`)
+
+- **`amazon/ads.ts`** — `AdsClient` (LWA riêng, cache access token, retry ≤30s khi 429/5xx) với
+  `/v2/profiles` và Campaign Management v3 `list` (campaign · ad group · keyword + target, đi hết phân
+  trang `nextToken`), Reporting v3 `createReport`/`getReport`/`downloadReport` (tự giải nén GZIP_JSON).
+  `AdsApiRequestError.isThrottled` (429 — thử lại sau) tách hẳn khỏi `isAuthError` (401/403 — **phải
+  re-authorize ở Module 0**); lẫn hai cái này là hỏng cả SOP-11.
+- **`ads/registry.ts`** — 5 report (`spCampaigns` · `spTargeting` · `spSearchTerm` · `spAdvertisedProduct` ·
+  `spPurchasedProduct`) khai một chỗ: `reportTypeId`, `groupBy`, cột (chỉ cột v3 thật có), `lookbackDays`
+  30, `cooldownHours` 4; parser đọc được **mảng JSON · JSON-lines · object bọc mảng**, dòng thiếu khoá bị
+  **bỏ + đếm**, không tự tính ACOS.
+- **`jobs/ads-sync.job.ts`** — profile → campaign → ad group → target. Ghi **hết** profile token nhìn
+  thấy (shop US+CA có 2 profile), ưu tiên profile khớp marketplace.
+- **`jobs/ads-report-pull.job.ts`** — clone đúng luật 0019: `cooldownHours` + **poll-không-tạo-mới** qua
+  `connections.report_requests` + report rỗng ⇒ `no_data` (không phải lỗi) + `--dry-run` không ghi gì.
+  Khác 0019 ở **bước nghiệp vụ sau khi nhập**: tự tạo cảnh báo `acos_over_target` /
+  `budget_exhausted` (**tiêu đề cố định** để dedupe 24h không sinh cảnh báo mới mỗi ngày; có ngưỡng tối
+  thiểu click/chi để không nhiễu vì campaign nhỏ), ghi `ads.budget_events` (`capped`,
+  `hour_source='unavailable'`), và **`apply_ads_spend`** cho report `spAdvertisedProduct` (chỉ UPDATE dòng
+  F4 đã có — không tạo dòng lợi nhuận mới, không trộn tiền tệ; SKU thiếu dòng F4 thì **cảnh báo rõ** để
+  người vận hành chạy F4 cho ngày đó trước).
+- **`run-ads.ts`** (runner dùng chung) + CLI: `npm run worker:ads-sync` · `npm run worker:ads-pull`
+  (`--kind=…` `--days=30` `--poll=3` `--dry-run`; nạp file tay bằng `--campaigns=<file.json>` …) ·
+  `npm run worker:oauth-soon` (`--mark` mới tạo cảnh báo).
+- **Cron** `/api/cron/report-pull` giờ chạy 3 bước: report FBA → cấu trúc Ads → report Ads
+  (`?ads=0` để tắt, `?adsKinds=campaigns,targeting` để giới hạn). **Vercel Hobby chỉ cho 2 cron/ngày** nên
+  không thêm cron thứ ba; cron vẫn poll tối đa 2 lần rồi ghi trạng thái để lần chạy sau nối tiếp.
+
+### A1 chạy số thật + TACOS thật
+
+- `web/src/lib/data/ppc.ts` + `ppc-model.ts` đọc `vexim_ads_kpi`, `vexim_ads_campaigns`,
+  `vexim_ads_budget_events`, `vexim_ads_negative_suggestions`, `vexim_sku_profit`.
+- Màn **`/ppc`**: KPI (chi 7 ngày · ACOS 7 ngày · ROAS · **TACOS** · đơn từ quảng cáo), bảng campaign
+  (trạng thái ngân sách + ACOS 7/14 + ROAS + CTR/CPC + đơn), panel "Vì sao hết đơn giữa ngày"
+  (ngày cạn ngân sách, nói rõ *chưa biết giờ*), và danh sách việc phần 2/3 còn thiếu. Demo mode vẫn là
+  dữ liệu minh hoạ; **chưa có dữ liệu Ads ⇒ màn hình hiện đúng 2 lệnh cần chạy**, không hiện số 0 giả.
+- **Dashboard CEO** thêm thẻ "Chi ads 7 ngày · ACOS · TACOS" (NULL khi chưa nối Ads). TACOS dùng chung
+  một công thức với màn PPC (`computeTacos`): cùng tiền tệ + cùng cửa sổ 7 ngày có số, thiếu một trong
+  hai thì trả NULL chứ không đoán.
+
+### Module 0 — từ trang mô tả thành luồng authorize THẬT (SOP-11)
+
+- `GET /api/oauth/amazon/start?seller=<uuid>`: kiểm tra quyền đọc shop (RLS `vexim_shops`) → gọi RPC
+  `create_oauth_state` (state dùng một lần, TTL 30 phút) → chuyển sang Seller Central
+  (`/apps/authorize/consent?application_id=…&state=…&redirect_uri=…`, host theo vùng).
+- `GET /api/oauth/amazon/callback`: **5 chốt an toàn** — (1) state dùng một lần/đã hết hạn ⇒ dừng;
+  (2) `selling_partner_id` Amazon trả về phải khớp shop đang nối, **lệch ⇒ KHÔNG lưu token** (chống nối
+  nhầm shop); (3) token rỗng bị chặn (cả ở route lẫn RPC); (4) đổi code xong mới ghi DB; (5) luôn quay về
+  màn hình kèm lý do cụ thể (kể cả `access_denied`, `invalid_grant` — dịch sang tiếng Việt dễ hiểu).
+- `/module0/connect` giờ là **công cụ thật**: danh sách shop + trạng thái token (còn mấy ngày, cần
+  re-auth chưa, có profile Ads chưa) + nút Kết nối/Kết nối lại; DEMO mode vẫn hiện wizard mô tả như cũ.
+- **Nhắc re-authorize**: job `oauth-reminder.job.ts` đọc RPC `vexim_worker_oauth_soon` (view token lọc
+  theo `auth.uid()` nên service_role đọc ra 0 dòng — luật "còn ≤ notice_days là phải nhắc" nằm ở DB),
+  tạo cảnh báo `oauth_reauth_due` **một lần cho mỗi đợt** rồi `mark_oauth_notice`; authorize lại sẽ tự
+  reset cờ. Cron chạy bước này đầu tiên (token chết là mọi bước sau hỏng).
+
+### Kiểm chứng đợt này
+
+- `supabase/` (PGlite): **BƯỚC 21 mới — 490 kiểm tra, TẤT CẢ PASS** (bảng · RLS SELECT-only · 16 RPC chỉ
+  service_role · 10 view + hợp đồng cột · luật nhập (merge/skip/currency) · `apply_ads_spend` chỉ UPDATE ·
+  rule cảnh báo · `oauth_soon`).
+- `worker/` **427 test** (+38 test mới: AdsClient/registry/parser + 2 job Ads + job nhắc re-auth),
+  `web/` **161 test** (+9 test model A1), `npx tsc --noEmit` sạch, `next build` qua (thêm 2 route OAuth).
+- Đã commit: `71ed3b0` (0020) · `e0adcf5` (engine Ads) · `ab8d264` (job + Module 0 OAuth).
+
+### CÒN LẠI (đúng thứ tự)
+
+1. **Điền biến môi trường** (`.env.example` đã cập nhật): `AMAZON_ADS_*`, `AMAZON_SP_API_APP_ID`,
+   `AMAZON_SP_API_REDIRECT_URI`, `CRON_SECRET`. Sau đó chạy `worker:ads-sync` → `worker:ads-pull` là A1
+   có số thật.
+2. **Phần 2 Module 5**: A2 (chi tiết campaign, ad group → từ khoá/nhóm sản phẩm — dữ liệu đã có sẵn
+   trong `ads.targets` + `vexim_ads_targets`) và A3 (search term + duyệt negative, `ads.negative_suggestions`
+   đã có cột bằng chứng + độ tin cậy).
+3. **Phần 3 Module 5 (ghi)**: đổi ngân sách/bid/state + thêm negative lên Amazon — kèm **ngưỡng duyệt**
+   (tăng ngân sách > 30%/ngày cần trưởng phòng, SOP-05 bước 4) và ghi `iam.audit_logs` như `listing:publish`.
 
 ## Cập nhật 12/09 — MODULE 3 NÂNG CAO (phần 2): PHÍ theo FC + phí inbound noncompliance + cron tự kéo Reports API (migration 0019)
 

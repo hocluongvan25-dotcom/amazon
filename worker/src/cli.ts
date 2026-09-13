@@ -19,6 +19,7 @@ import { runFinanceClaimsCli } from "./runtime/run-finance-claims.ts";
 import { runListingsSyncCli } from "./runtime/run-listings-sync.ts";
 import { runInventoryFcSyncCli } from "./runtime/run-inventory-fc-sync.ts";
 import { runReportPullCli } from "./runtime/run-report-pull.ts";
+import { runAdsPullCli, runAdsSyncCli } from "./runtime/run-ads.ts";
 import { runAdsPullCli, runAdsSyncCli, runOauthSoonCli } from "./runtime/run-ads.ts";
 
 /** Đọc tham số dạng --key=value / --flag (không có giá trị) */
@@ -311,6 +312,45 @@ async function main() {
       if (result.count > 0) process.exitCode = 1;
       break;
     }
+    case "ads:sync": {
+      // Module 5 P1: đồng bộ CẤU TRÚC quảng cáo (profile → campaign → ad group →
+      // keyword/target) qua Ads Campaign Management v3. Chạy trước ads:pull.
+      if (loaded) process.stderr.write(`[worker] loaded env from ${loaded}\n`);
+      const { values, flags } = parseArgs(process.argv.slice(3));
+      const result = await runAdsSyncCli({
+        sellerAccountId: values.seller ?? null,
+        dryRun: flags.has("dry-run"),
+        stdout: process.stdout,
+      });
+      if (result.failed > 0 || result.needsReauth.length > 0) process.exitCode = 1;
+      break;
+    }
+    case "ads:pull": {
+      // Module 5 P1: TỰ KÉO 5 report metrics (Reporting API v3) hoặc nạp file JSON.
+      // Sau khi nhập: cảnh báo acos_over_target/budget_exhausted + sự kiện ngân sách
+      // + lấp finance.sku_profit_daily.ads_spend (F4/TACOS).
+      if (loaded) process.stderr.write(`[worker] loaded env from ${loaded}\n`);
+      const { values, flags } = parseArgs(process.argv.slice(3));
+      const result = await runAdsPullCli({
+        kind: values.kind ?? null,
+        days: values.days ? Number(values.days) : null,
+        sellerAccountId: values.seller ?? null,
+        files: {
+          campaigns: values.campaigns ?? null,
+          targeting: values.targeting ?? null,
+          "search-terms": values["search-terms"] ?? null,
+          "advertised-products": values["advertised-products"] ?? null,
+          "purchased-products": values["purchased-products"] ?? null,
+        },
+        dryRun: flags.has("dry-run"),
+        pollAttempts: values.poll ? Number(values.poll) : undefined,
+        fireAlerts: !flags.has("no-alerts"),
+        applySpend: !flags.has("no-spend"),
+        stdout: process.stdout,
+      });
+      if (result.counts.failed > 0 || result.needsReauth.length > 0) process.exitCode = 1;
+      break;
+    }
     case "finance:claims": {
       // Module 6 Đợt 2: F3 bồi hoàn FBA (SOP-09) + F4 lợi nhuận SKU
       const { values, flags } = parseArgs(process.argv.slice(3));
@@ -348,6 +388,9 @@ async function main() {
           "  ads:pull             M5 P1: TỰ KÉO 5 report Amazon Ads (--kind=all|campaigns|targeting|search-terms|advertised-products|purchased-products",
           "                       [--days=30] [--poll=3]) + cảnh báo ACOS/ngân sách + lấp ads_spend (F4)",
           "  oauth:soon           M0: shop sắp hết hạn token (--days=30 [--mark]) — --mark mới tạo cảnh báo",
+          "  ads:sync             M5 P1: đồng bộ cấu trúc Amazon Ads (profile → campaign → ad group → target)",
+          "  ads:pull             M5 P1: TỰ KÉO 5 report Amazon Ads (--kind=all|campaigns|targeting|search-terms|advertised-products|purchased-products",
+          "                       [--days=30] [--poll=3]) + cảnh báo ACOS/ngân sách + lấp ads_spend (F4/TACOS)",
           "  reports:pull         M3 nâng cao: TỰ KÉO 4 report FBA qua Reports API (--type=all|fc|receipts|storage-fees|noncompliance",
           "                       [--days=7] [--poll=3]) hoặc nạp file: --storage-fees=<tsv> --noncompliance=<tsv>",
           "",
@@ -357,7 +400,7 @@ async function main() {
           "  AMAZON_LWA_CLIENT_ID / SECRET / REFRESH_TOKEN  (SP-API)",
           "  AMAZON_ADS_CLIENT_ID / SECRET / REFRESH_TOKEN  (Amazon Ads — đăng ký RIÊNG)",
           "  SUPABASE_SERVICE_ROLE_KEY + NEXT_PUBLIC_SUPABASE_URL",
-          "  AMAZON_SP_API_REGION=NA (mặc định)",
+          "  AMAZON_SP_API_REGION=NA (mặc định) · AMAZON_ADS_REGION=NA (mặc định cho Ads)",
           "",
           "Không có credentials → tự động DEMO MODE với dữ liệu giả.",
           "",
