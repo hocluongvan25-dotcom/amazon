@@ -34,7 +34,7 @@ export default async function SearchTermsPage({
         <PageHeader
           title="A3 — Search term &amp; Negative keyword"
           sub="3 gợi ý đang chờ · 1 term đã chặn"
-          desc="SOP-04: search term có click nhưng không ra đơn ⇒ gợi ý Negative (Exact/Phrase) kèm bằng chứng; duyệt là vào hàng đợi ghi Amazon."
+          desc="Phân tích từ khóa tìm kiếm thực tế của khách: từ nào có click nhưng không ra đơn sẽ được gợi ý chặn (negative) kèm bằng chứng — duyệt là hệ thống tự áp dụng."
         />
         <SearchTermsBoard rows={rows} canDecide={DEMO_DECIDERS.includes(session.persona)} campaignId={campaignId} />
         <Panel title="Vì sao màn này quan trọng" hint={`${demoChanges.length} dòng thay đổi trong demo`}>
@@ -75,7 +75,7 @@ export default async function SearchTermsPage({
       <PageHeader
         title="A3 — Search term &amp; Negative keyword"
         sub={`${rows.length} dòng dữ liệu · ${waiting} gợi ý chờ duyệt · ${blocked} đã chặn · ${ready} dòng đáng xem không có gợi ý`}
-        desc="SOP-04: search term có click nhưng không ra đơn ⇒ gợi ý Negative (Exact/Phrase) kèm bằng chứng; duyệt là vào hàng đợi ghi Amazon (worker:ads-apply)."
+        desc="Phân tích từ khóa tìm kiếm thực tế của khách: từ nào có click nhưng không ra đơn sẽ được gợi ý chặn (negative) kèm bằng chứng — duyệt là hệ thống tự áp dụng lên Amazon."
       />
 
       {failed ? (

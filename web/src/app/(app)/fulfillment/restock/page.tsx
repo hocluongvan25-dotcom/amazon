@@ -39,7 +39,7 @@ async function LiveRestockPlan() {
       <PageHeader
         title="Kế hoạch nhập hàng"
         sub="SOP-01 · vòng đời 8 bước: nháp → chốt giá vốn → duyệt → tạo inbound → theo dõi → đối soát"
-        desc="Đề xuất tự động = velocity × (lead time + safety 14 ngày) − (khả dụng + reserved + đang về). Ghi ra Amazon (createInboundPlan) kích hoạt ở Đợt 2."
+        desc="Gợi ý nhập hàng tự động dựa trên tốc độ bán và thời gian vận chuyển — biết trước cần nhập bao nhiêu, khi nào, để không đứt hàng cũng không tồn dư."
       />
       {failed ? (
         <Panel title="Không tải được dữ liệu">
@@ -162,7 +162,7 @@ export default async function RestockPage() {
       <PageHeader
         title="Kế hoạch nhập hàng"
         sub="SOP-01 · vòng đời 8 bước: nháp → chốt giá vốn → duyệt → tạo inbound → theo dõi → đối soát"
-        desc="Đề xuất tự động = velocity × (lead time + safety 14 ngày) − (khả dụng + reserved + đang về). Ghi ra Amazon (createInboundPlan) kích hoạt ở Đợt 2."
+        desc="Gợi ý nhập hàng tự động dựa trên tốc độ bán và thời gian vận chuyển — biết trước cần nhập bao nhiêu, khi nào, để không đứt hàng cũng không tồn dư."
       />
       <KpiGrid>
         <KpiCard label="SKU cần nhập" value="5" sub="cover dưới ngưỡng hoặc hết hàng" tone="down" />

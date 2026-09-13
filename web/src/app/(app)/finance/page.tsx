@@ -26,7 +26,7 @@ export default async function FinancePage() {
       <PageHeader
         title="Tài chính & Đối soát"
         sub="Kỳ settlement gần nhất · đối soát 2h sáng"
-        desc="Nguồn: Finances API + report Settlement / Ledger · lợi nhuận tính với giá vốn nội bộ VEXIM nhập."
+        desc="Trung tâm tài chính: dòng tiền Amazon chuyển về, lợi nhuận theo SKU sau mọi loại phí, và các khoản bồi hoàn FBA cần đòi."
       />
       <div className="mb-4 flex flex-wrap gap-2">
         {[

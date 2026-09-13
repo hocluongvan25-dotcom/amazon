@@ -31,7 +31,7 @@ export default async function FulfillmentPage() {
             ? "Hôm nay · 9 shop có FBA · tồn kho cập nhật 45 phút trước"
             : "Hôm nay · cập nhật tồn kho 45 phút trước"
         }
-        desc="Nguồn: FBA Inventory API (getInventorySummaries) + report Inventory Aged · role: Inventory and Order Tracking."
+        desc="Tổng quan kho FBA: lượng hàng bán được, hàng đang về, hàng tồn lâu ngày — và cảnh báo SKU sắp hết hàng cần nhập thêm."
       />
       <div className="mb-4 flex flex-wrap gap-2">
         {[

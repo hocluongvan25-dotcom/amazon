@@ -85,7 +85,7 @@ export default async function ClientPage() {
       <PageHeader
         title={d.orgName ? `Shop của ${d.orgName}` : "Shop của bạn"}
         sub={`${d.shops.length} shop · kỳ ${d.month} · ${d.hasAnyData ? "số liệu từ dữ liệu đồng bộ" : "chưa có dữ liệu đồng bộ"}`}
-        desc="Mọi số liệu bên dưới đọc trực tiếp từ cơ sở dữ liệu (RLS theo shop của bạn). Chỗ nào chưa đồng bộ thì ghi rõ “chưa có dữ liệu” — không có số suy diễn."
+        desc="Báo cáo dành cho chủ gian hàng: doanh thu, đơn hàng, tồn kho và tài chính của shop bạn. Chỗ nào chưa đồng bộ sẽ ghi rõ “chưa có dữ liệu” — không có số suy diễn."
       />
 
       {empty ? (

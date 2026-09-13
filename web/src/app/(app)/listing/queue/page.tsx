@@ -26,7 +26,7 @@ export default async function ListingQueuePage() {
       <PageHeader
         title="Hàng đợi inactive / stranded — SOP-03"
         sub={`${open} SKU đang mở · ${unassigned} chưa gán · SLA: SKU doanh thu cao ≤ 24h`}
-        desc="Nguồn: report GET_MERCHANT_LISTINGS_INACTIVE_DATA + GET_STRANDED_INVENTORY_UI_DATA (hằng ngày) + notification LISTINGS_ITEM_ISSUES_CHANGE (realtime)."
+        desc="Hàng đợi listing cần sửa: listing bị ẩn, bị khóa hoặc có tồn kho mắc kẹt không bán được — xử lý sớm để không mất doanh thu."
       />
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
         {[

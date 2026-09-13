@@ -7,7 +7,7 @@ export async function LiveHealth({ violations = false }: { violations?: boolean 
   return <>
     <PageHeader title={violations ? "Chi tiết vấn đề tài khoản" : "Vận hành & Account Health"}
       sub="SUPABASE · dữ liệu trong phạm vi RLS của bạn"
-      desc="Nguồn đồng bộ: GET_V2_SELLER_PERFORMANCE_REPORT + ACCOUNT_STATUS_CHANGED. Dữ liệu DB không đồng nghĩa đã đồng bộ Amazon mới nhất." />
+      desc="Sức khỏe tài khoản bán hàng: điểm vi phạm và chỉ số hiệu suất so với ngưỡng Amazon yêu cầu — phát hiện rủi ro trước khi tài khoản bị ảnh hưởng." />
     <div className="mb-4 flex gap-4 text-sm text-accent-ink"><a href="/health">Sức khỏe theo shop</a><a href="/health/violations">Vấn đề đang mở</a></div>
     {!result.ok ? <Panel title="Không tải được dữ liệu"><p role="alert">Không thể đọc Account Health từ Supabase. Hãy kiểm tra migration 0010/0011, quyền SELECT và RLS hoặc tải lại trang. Không sử dụng dữ liệu demo thay thế.</p></Panel> : <>
       <KpiGrid>

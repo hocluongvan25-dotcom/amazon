@@ -238,7 +238,7 @@ async function LivePpc() {
             ? `Ngày mới nhất ${mainKpi?.last_day ?? "—"} · cửa sổ 7/14/30 ngày · ${campaigns.length} campaign`
             : "Chưa có dữ liệu Amazon Ads"
         }
-        desc="Nguồn: Amazon Ads API — Campaign Management v3 (cấu trúc) + Reporting API v3 (metrics theo ngày). ACOS/ROAS/CPC do hệ thống suy ra từ cost ÷ sales vì v3 không trả sẵn."
+        desc="Tổng quan quảng cáo Amazon: chi tiêu, doanh thu từ ads, ACOS/ROAS của từng campaign — nhìn ngay campaign nào hiệu quả, campaign nào đốt tiền."
       />
 
       {loadError ? (
@@ -320,7 +320,7 @@ export default async function PpcPage() {
       <PageHeader
         title="Quảng cáo (PPC)"
         sub={session.persona === "op_ppc" ? "Hôm qua · 5 shop được gán · ACOS tính theo 7 ngày" : "Hôm qua · ACOS tính theo 7 ngày"}
-        desc="Nguồn: Amazon Ads API — campaign metrics theo ngày, search term report hằng ngày."
+        desc="Tổng quan quảng cáo Amazon: chi tiêu, doanh thu từ ads và hiệu quả của từng campaign theo ngày."
       />
       <KpiGrid>
         {ppcKpis.map((k) => (

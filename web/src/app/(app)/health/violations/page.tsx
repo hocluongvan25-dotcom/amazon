@@ -23,7 +23,7 @@ export default async function HealthViolationsPage() {
       <PageHeader
         title="Chi tiết vấn đề tài khoản"
         sub="DEMO · 4 vấn đề minh họa"
-        desc="Nguồn: GET_V2_SELLER_PERFORMANCE_REPORT (Selling Partner Insights) + ACCOUNT_STATUS_CHANGED. Mỗi vấn đề xử lý theo SOP-08."
+        desc="Danh sách vi phạm và cảnh báo từ Amazon: mức độ ảnh hưởng, thời hạn phản hồi và trạng thái xử lý của từng vấn đề."
       />
       <Panel title="Vấn đề đang mở" hint="xếp theo mức nghiêm trọng">
         <table className={tableCls.table}>

@@ -54,7 +54,7 @@ export async function LiveDashboard() {
       <PageHeader
         title="Tổng quan"
         sub={`${stats.orderCount} đơn · ${stats.totalSku} SKU · ${stats.openAlerts} cảnh báo`}
-        desc="KPI tổng hợp từ: vexim_orders, vexim_inventory_latest, vexim_listings, vexim_pricing, vexim_settlements, vexim_shop_health, ops.my_alerts."
+        desc="Bức tranh toàn cảnh việc kinh doanh trên Amazon: doanh thu, đơn hàng, tồn kho, sức khỏe tài khoản và cảnh báo cần xử lý — tất cả trên một màn hình."
       />
       <KpiGrid>
         {kpis.map((k) => (

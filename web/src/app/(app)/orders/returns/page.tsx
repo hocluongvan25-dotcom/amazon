@@ -17,7 +17,7 @@ export default async function ReturnsPage() {
       <PageHeader
         title="Returns & Refunds"
         sub="28 return trong 30 ngày · tỷ lệ 2.1%"
-        desc="Nguồn: report GET_FLAT_FILE_RETURNS_DATA_BY_RETURN_DATE (hằng ngày) + dòng refund từ Finances API. Mã lý do theo chuẩn Amazon."
+        desc="Theo dõi hàng trả về và hoàn tiền: lý do khách trả, tình trạng hàng nhận lại và số tiền hoàn — nắm được tỷ lệ trả hàng của từng sản phẩm."
       />
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Panel title="Lý do return — 30 ngày" hint="mã lý do Amazon">

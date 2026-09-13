@@ -26,7 +26,7 @@ export default async function DashboardPage() {
       <PageHeader
         title="Tổng quan"
         sub="Hôm qua · 14 shop · cập nhật 06:00"
-        desc="Số liệu chốt từ bảng kpi_daily (đồng bộ từ SP-API). Mỗi con số trả lời câu hỏi: hôm nay phải làm gì?"
+        desc="Bức tranh toàn cảnh việc kinh doanh trên Amazon: doanh thu, đơn hàng, tồn kho và cảnh báo cần xử lý — giúp bạn biết ngay hôm nay cần làm gì."
       />
       <KpiGrid>
         {ceoKpis.map((k) => (

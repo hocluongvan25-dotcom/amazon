@@ -17,7 +17,7 @@ export default async function FbmQueuePage() {
       <PageHeader
         title="Queue FBM — chờ xác nhận"
         sub="4 đơn · 1 đơn quá hạn"
-        desc="Đơn FBM realtime qua ORDER_CHANGE. Đếm ngược thời hạn ship theo chính sách từng shop. Xử lý theo SOP-06."
+        desc="Hàng đợi đơn tự giao hàng (FBM) với đồng hồ đếm ngược thời hạn ship từng đơn — ưu tiên xử lý đơn gấp để không trễ hạn với Amazon."
       />
       <Panel title="Đơn chờ xử lý" hint="xếp theo hạn ship gần nhất">
         <table className={tableCls.table}>

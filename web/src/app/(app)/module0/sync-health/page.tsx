@@ -107,7 +107,7 @@ export default async function SyncHealthPage() {
       <PageHeader
         title="Sức khỏe đồng bộ"
         sub="sync_jobs · report_requests · cập nhật realtime"
-        desc="Trường hợp dữ liệu không mới phải thấy ngay tại đây: từng job, độ trễ, số lần retry, lỗi gần nhất."
+        desc="Tình trạng đồng bộ dữ liệu từ Amazon: từng tiến trình chạy lúc nào, có lỗi gì — nếu số liệu trên hệ thống có vẻ cũ, kiểm tra tại đây trước tiên."
       />
 
       <Panel

@@ -143,7 +143,7 @@ async function LiveInventoryDetail({ sku }: { sku: string }) {
       <PageHeader
         title={`Tồn kho — ${sku}`}
         sub={`${raw.asin ?? "—"} · ${raw.shop} · cập nhật ${minutesAgo !== null ? `${minutesAgo} phút` : "—"} trước`}
-        desc="Nguồn: snapshots (getInventorySummaries) · phân bổ FC: GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA · nhận hàng: GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA."
+        desc="Hồ sơ tồn kho chi tiết của một SKU: diễn biến tồn theo ngày, phân bổ tại từng kho Amazon và lịch sử nhận hàng."
       />
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {[
@@ -468,7 +468,7 @@ export default async function InventoryDetailPage({
       <PageHeader
         title={`Tồn kho — ${sku ?? ""}`}
         sub={detail ? `${detail.asin} · FNSKU ${detail.fnsku} · ${detail.shop}` : "Không tìm thấy SKU"}
-        desc="Nguồn: snapshots 90 ngày (getInventorySummaries) · phân bổ FC: GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA · nhận hàng: GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA."
+        desc="Hồ sơ tồn kho chi tiết của một SKU trong 90 ngày: diễn biến tồn theo ngày, phân bổ tại từng kho Amazon và lịch sử nhận hàng."
       />
       {detail && row ? (
         <>

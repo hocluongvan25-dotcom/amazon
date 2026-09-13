@@ -147,7 +147,7 @@ export default async function PricingPage({
       <PageHeader
         title="Giá & Featured Offer (Buy Box)"
         sub={`${pricingRows.length} SKU · 14 shop · cập nhật 12 phút trước`}
-        desc="Nguồn: Product Pricing API v0 (getPricing, getCompetitiveSummary), getFeaturedOfferExpectedPriceBatch 2022-05-01 (FOEP), Product Fees API (giá sàn), ANY_OFFER_CHANGED + PRICE_HEALTH realtime. Hành động ghi giá dùng patchListingsItem / JSON_LISTINGS_FEED."
+        desc="Theo dõi giá và cạnh tranh Buy Box theo thời gian thực: giá của bạn so với đối thủ, giá đề xuất để thắng Buy Box và giá sàn an toàn — đổi giá ngay từ đây."
       />
 
       <div className="mb-4 flex flex-wrap gap-2">

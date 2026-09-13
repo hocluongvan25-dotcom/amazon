@@ -27,7 +27,7 @@ export default async function ListingEditorPage({
       <PageHeader
         title="Soạn listing (L3)"
         sub="Draft → Trưởng phòng duyệt → Publish · form động theo product type"
-        desc="Hạn mức kiểm tra theo tài liệu Amazon: tiêu đề 75 ký tự (nhóm media 200, từ 27/07/2026), Item Highlight 125, bullet 10–255 (tối đa 5), mô tả 2.000, từ khóa backend 249 BYTE; khi worker đã tải JSON Schema product type thì schema là nguồn ưu tiên. Mọi thay đổi được lưu thành revision trong catalog.listing_draft_revisions."
+        desc="Soạn và chỉnh sửa nội dung listing với kiểm tra giới hạn ký tự theo chuẩn Amazon. Mọi thay đổi được lưu lịch sử và cần duyệt trước khi đăng lên Amazon."
       />
 
       {session.mode === "supabase" ? (

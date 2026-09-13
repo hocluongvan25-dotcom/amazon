@@ -25,7 +25,7 @@ export default async function OrderDetailPage({
       <PageHeader
         title={`Đơn ${id ?? ""}`}
         sub={detail ? `${detail.date} · ${detail.channel} · ${detail.shop}` : (fallback ? `${fallback.date} · ${fallback.channel === "AFN" ? "AFN (FBA)" : "MFN (FBM)"} · Shop ${fallback.shop}` : "Không tìm thấy đơn")}
-        desc="Nguồn: getOrder + getOrderItems (Orders API v0). Các trường PII bị khóa theo quyết định v1.1."
+        desc="Chi tiết từng đơn hàng: sản phẩm, số lượng, trạng thái giao và dòng tiền liên quan. Thông tin cá nhân người mua được ẩn để bảo mật."
       />
       {detail ? (
         <>

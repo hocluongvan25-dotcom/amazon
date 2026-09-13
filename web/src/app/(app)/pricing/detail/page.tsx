@@ -61,7 +61,7 @@ async function LivePricingDetail({ sku }: { sku: string }) {
       <PageHeader
         title={`Chi tiết giá · ${sku}`}
         sub={`${raw.asin ?? "—"} · ${raw.shop}`}
-        desc="Lịch sử giá · offer đối thủ · breakdown giá sàn."
+        desc="Hồ sơ giá của một SKU: lịch sử thay đổi giá, giá đối thủ đang bán và cấu thành giá sàn tối thiểu."
       />
       <div className="mb-4 flex flex-wrap gap-2">
         <a href="/pricing" className="rounded-full border border-line bg-card px-4 py-1.5 text-[12.5px] font-bold text-muted transition hover:border-accent hover:text-accent-ink">
@@ -221,7 +221,7 @@ export default async function PricingDetailPage({
       <PageHeader
         title={`Chi tiết giá · ${d.sku}`}
         sub={`ASIN ${d.asin} · ${d.shop}`}
-        desc="Lịch sử giá 30 ngày · danh sách offer đối thủ (getItemOffers + getListingOffersBatch) · breakdown giá sàn (getMyFeesEstimate)."
+        desc="Hồ sơ giá của một SKU: lịch sử giá 30 ngày, các offer đối thủ đang cạnh tranh và cấu thành giá sàn — căn cứ để quyết định giá bán."
       />
 
       <div className="mb-4 flex flex-wrap items-center gap-2">

@@ -100,7 +100,7 @@ export default async function ProfitPage({
       <PageHeader
         title="Lợi nhuận SKU (F4)"
         sub="Tháng 09/2026 · 14 shop · đối soát hằng ngày"
-        desc="Doanh thu + phí Amazon từ Finances API/settlement, giá vốn do VEXIM nhập vào catalog.cost_inputs."
+        desc="Lợi nhuận thực của từng SKU sau khi trừ phí Amazon và giá vốn — biết chính xác sản phẩm nào đang lãi, sản phẩm nào đang lỗ."
       />
       <ProfitTable rows={demoProfit} period="2026-09" />
     </>

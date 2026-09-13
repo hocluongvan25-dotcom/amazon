@@ -25,7 +25,7 @@ export default async function ListingPage() {
       <PageHeader
         title="Listing & Nội dung"
         sub="Hôm qua · 14 shop"
-        desc="Nguồn: Listings Items API + notification LISTINGS_ITEM_ISSUES_CHANGE + report Merchant Listings."
+        desc="Tổng quan danh mục sản phẩm: listing đang hoạt động, listing bị lỗi hoặc bị khóa, và các vấn đề cần sửa để hàng luôn bán được."
       />
       <div className="mb-4 flex flex-wrap gap-2">
         {[

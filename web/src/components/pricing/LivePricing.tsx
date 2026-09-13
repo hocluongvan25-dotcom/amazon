@@ -180,7 +180,7 @@ export async function LivePricingPage({
       <PageHeader
         title="Giá & Featured Offer (Buy Box)"
         sub={`${allRows.length} SKU · cập nhật từ Supabase`}
-        desc="Nguồn: Product Pricing API v0 (getPricing, getCompetitiveSummary), getFeaturedOfferExpectedPriceBatch, Product Fees API (giá sàn), ANY_OFFER_CHANGED + PRICE_HEALTH realtime."
+        desc="Theo dõi giá và cạnh tranh Buy Box theo thời gian thực: giá của bạn so với đối thủ, giá đề xuất để thắng Buy Box và giá sàn an toàn."
       />
       <div className="mb-4 flex flex-wrap gap-2">
         {[

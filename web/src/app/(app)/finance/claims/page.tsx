@@ -107,7 +107,7 @@ export default async function ClaimsPage() {
       <PageHeader
         title="Bồi hoàn FBA (F3)"
         sub={`${demoClaims.length} khoản · SLA ${CLAIM_SLA_HOURS}h · nhịp đối chiếu hằng tuần`}
-        desc="Nguồn: report Reimbursements + Ledger (Adjustments/CustomerReturns/Receipts) + tồn kho Aged · quy trình SOP-09."
+        desc="Săn các khoản Amazon phải bồi hoàn: hàng thất lạc, hư hỏng trong kho FBA, hoàn tiền khách nhưng hàng không trả về — tổng hợp bằng chứng để mở case đòi tiền."
       />
       <KpiGrid>
         <KpiCard

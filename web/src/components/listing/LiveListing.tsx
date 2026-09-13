@@ -86,7 +86,7 @@ export async function LiveListingOverview() {
       <PageHeader
         title="Listing & Nội dung"
         sub={`${allRows.length} SKU · cập nhật từ Supabase`}
-        desc="Nguồn: Listings Items API + notification LISTINGS_ITEM_ISSUES_CHANGE + report Merchant Listings."
+        desc="Tổng quan danh mục sản phẩm: listing đang hoạt động, listing bị lỗi hoặc bị khóa và các vấn đề cần sửa để hàng luôn bán được."
       />
       <div className="mb-4 flex flex-wrap gap-2">
         {[
@@ -238,7 +238,7 @@ export async function LiveListingList({
       <PageHeader
         title="Danh sách listing"
         sub={`${allRows.length} SKU · cập nhật từ Supabase`}
-        desc="Nguồn: report GET_MERCHANT_LISTINGS_ALL_DATA + notification LISTINGS_ITEM_STATUS_CHANGE / ISSUES_CHANGE."
+        desc="Danh sách toàn bộ listing của các gian hàng — tìm kiếm, lọc theo trạng thái và xem nhanh listing nào đang gặp vấn đề."
       />
 
       {/* Tìm kiếm */}
@@ -500,7 +500,7 @@ export async function LiveListingDetail({ sku }: { sku: string }) {
       <PageHeader
         title={`Listing — ${sku}`}
         sub={`${raw.asin ?? "—"} · ${raw.shop} · ${raw.status} · cập nhật ${updatedAgo}`}
-        desc="Nguồn: getListingsItem (Listings Items API 2021-08-01) + getCatalogItem (Catalog API 2022-04-01)."
+        desc="Chi tiết một listing: nội dung hiển thị trên Amazon, thuộc tính sản phẩm, giá hiện tại và các lỗi Amazon đang báo."
       />
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {[
@@ -675,7 +675,7 @@ export async function LiveListingQueue() {
       <PageHeader
         title="Hàng đợi inactive / stranded — SOP-03"
         sub={`${open} SKU đang mở · ${unassigned} chưa gán`}
-        desc="Nguồn: report GET_MERCHANT_LISTINGS_INACTIVE_DATA + GET_STRANDED_INVENTORY_UI_DATA + notification LISTINGS_ITEM_ISSUES_CHANGE."
+        desc="Hàng đợi listing cần sửa: listing bị ẩn, bị khóa hoặc có tồn kho mắc kẹt không bán được — xử lý sớm để không mất doanh thu."
       />
       {failed ? (
         <Panel title="Không tải được dữ liệu">

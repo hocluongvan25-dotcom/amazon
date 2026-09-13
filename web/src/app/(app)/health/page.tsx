@@ -26,7 +26,7 @@ export default async function HealthPage() {
       <PageHeader
         title="Vận hành & Account Health"
         sub="DEMO · dữ liệu minh họa"
-        desc="Nguồn: GET_V2_SELLER_PERFORMANCE_REPORT + notification ACCOUNT_STATUS_CHANGED (Selling Partner Insights)."
+        desc="Sức khỏe tài khoản bán hàng: điểm vi phạm, chỉ số hiệu suất so với ngưỡng Amazon yêu cầu — phát hiện rủi ro trước khi tài khoản bị ảnh hưởng."
       />
       <div className="mb-4 flex flex-wrap gap-2">
         <a

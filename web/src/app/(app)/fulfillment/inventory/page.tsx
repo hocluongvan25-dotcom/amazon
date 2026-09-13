@@ -72,7 +72,7 @@ export default async function InventoryPage({
       <PageHeader
         title="Tồn kho theo SKU"
         sub={`${inventoryRows.length} SKU · cập nhật 45 phút trước (getInventorySummaries)`}
-        desc="Nguồn: FBA Inventory API + notification FBA_INVENTORY_AVAILABILITY_CHANGES (realtime) + đối soát report 2h sáng. Cover = fulfillable ÷ velocity 14 ngày."
+        desc="Tồn kho FBA theo thời gian thực của từng SKU: số bán được, số đang giữ, số ngày bán còn lại (cover) — phát hiện sớm SKU sắp hết hàng."
       />
       <div className="mb-4 flex flex-wrap gap-2">
         {filters.map(([key, label, count]) => (

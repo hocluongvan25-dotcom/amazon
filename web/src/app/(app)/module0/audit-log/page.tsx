@@ -99,7 +99,7 @@ export default async function AuditLogPage({
         <PageHeader
           title="Nhật ký thao tác (audit log)"
           sub={`${snapshot.audit.length} bản ghi gần nhất · toàn hệ thống · ${pModule ? `module=${pModule}` : "mọi module"}${pSearch ? ` · tìm \"${pSearch}\"` : ""}`}
-          desc="Toàn bộ thao tác ghi ra Amazon (đổi giá, sửa listing, chỉnh campaign) và quản trị người dùng (mời, đổi vai trò, khóa) đều ghi: ai · lúc nào · module · shop · giá trị trước/sau · kết quả. Bảng không cho update/delete — nguồn sự thật cuối cùng."
+          desc="Nhật ký mọi thao tác quan trọng trong hệ thống: ai đổi giá, sửa listing, chỉnh quảng cáo hay quản trị người dùng — lúc nào, giá trị trước/sau ra sao. Nhật ký không thể sửa hay xóa."
         />
         <div className="mb-4 flex flex-wrap items-center gap-2">
           <a
@@ -159,7 +159,7 @@ export default async function AuditLogPage({
       <PageHeader
         title="Nhật ký thao tác (audit log)"
         sub="chế độ demo — không có nhật ký thật"
-        desc="Toàn bộ thao tác ghi ra Amazon và quản trị người dùng đều ghi vào iam.audit_logs (append-only). Chế độ demo không có kết nối Supabase nên bảng để trống; đăng nhập bằng tài khoản thật để xem nhật ký."
+        desc="Nhật ký mọi thao tác quan trọng trong hệ thống — không thể sửa hay xóa. Chế độ demo chưa kết nối cơ sở dữ liệu nên bảng để trống; đăng nhập tài khoản thật để xem."
       />
       <div className="mb-4 rounded-[13px] border-2 border-dashed border-amber/60 bg-amber-soft px-4 py-3 text-[12.5px] text-[#8a5602]">
         <b>CHẾ ĐỘ DEMO — bảng để TRỐNG theo chủ đích.</b> Không bày dữ liệu giả trong màn kiểm toán. Đăng nhập bằng tài khoản thật (super_admin/org_admin) để đọc <code>iam.audit_logs</code> thật.

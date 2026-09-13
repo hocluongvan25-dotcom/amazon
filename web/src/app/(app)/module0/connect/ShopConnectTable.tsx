@@ -216,8 +216,7 @@ export function ShopConnectTable({ shops }: Props) {
             onClick={() => setShowMock(!showMock)}
             className="mb-2 text-[12.5px] font-bold text-soft hover:text-ink"
           >
-            {showMock ? "▼" : "▶"} {mockShops.length} gian hàng demo / chưa cấu hình ({mockGroups.length} seller) — bấm để{" "}
-            {showMock ? "ẩn" : "hiện"} (tránh bấm nhầm ghi đè token production)
+            {showMock ? "▼" : "▶"} {mockShops.length} gian hàng demo — bấm để {showMock ? "ẩn" : "hiện"}
           </button>
 
           {showMock ? (
@@ -249,10 +248,8 @@ export function ShopConnectTable({ shops }: Props) {
       <ConfirmModal shop={confirmShop} onClose={() => setConfirmShop(null)} onConfirm={handleConfirm} />
 
       <div className="mt-4 rounded-[10px] border border-line bg-[#f8f9fb] px-3 py-2.5 text-[12px] text-soft">
-        <b>Chống ghi đè:</b> Mỗi nút [Kết nối] giờ có xác nhận hiển thị rõ Seller ID, Marketplace ID, cờ quốc gia và
-        cảnh báo ghi đè. Nhóm theo seller giúp P1·US + P2·CA (cùng seller AQMVYI4HJTI4C) nằm chung 1 card, không còn 8
-        dòng rời rạc dễ bấm nhầm. Tên kỹ thuật A1/B1/P1 nên đổi trong DB thành tên thân thiện như &quot;VEXIM US
-        Main&quot; / &quot;VEXIM CA&quot; qua màn quản trị hoặc SQL.
+        💡 Trước khi kết nối, hệ thống luôn hiển thị bước xác nhận với đầy đủ Seller ID và Marketplace — kiểm tra kỹ
+        thông tin để tránh kết nối nhầm gian hàng.
       </div>
     </>
   );

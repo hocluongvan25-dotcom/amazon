@@ -31,7 +31,7 @@ export default async function ListingDetailPage({
       <PageHeader
         title={`Listing — ${sku ?? ""}`}
         sub={detail ? `${detail.asin} · Shop ${detail.shop} · ${detail.productType} · ${detail.conditionType}` : "Không tìm thấy SKU"}
-        desc="Nguồn: getListingsItem (Listings Items API 2021-08-01, includedData: summaries, attributes, issues, offers) + getCatalogItem (Catalog API 2022-04-01)."
+        desc="Chi tiết một listing: nội dung hiển thị trên Amazon, thuộc tính sản phẩm, giá/offer hiện tại và các lỗi Amazon đang báo."
       />
       {detail && row ? (
         <>

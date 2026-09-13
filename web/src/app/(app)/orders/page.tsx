@@ -27,7 +27,7 @@ export default async function OrdersPage() {
       <PageHeader
         title="Đơn hàng & CSKH"
         sub="Hôm nay"
-        desc="Nguồn: Orders API + ORDER_CHANGE (realtime) · tin nhắn từ log nội bộ (SP-API không đọc hộp thư — quyết định v1.1)."
+        desc="Theo dõi toàn bộ đơn hàng theo thời gian thực: đơn mới, đơn cần giao gấp, chỉ số giao hàng so với ngưỡng Amazon và các việc CSKH cần xử lý ngay."
       />
       <div className="mb-4 flex flex-wrap gap-2">
         {[

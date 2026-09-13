@@ -50,7 +50,7 @@ export default async function UsersPage() {
         <PageHeader
           title="Người dùng & phân quyền"
           sub={`${snapshot.users.length} hồ sơ thật · iam.user_profiles · iam.role_assignments`}
-          desc="Vai trò (RBAC) + gán người ↔ shop ↔ module. Sửa · Quyền · Khóa đều là thao tác thật, ghi iam.audit_logs; khóa tài khoản cắt quyền ngay ở tầng RLS."
+          desc="Quản lý tài khoản nhân viên: phân vai trò, gán người phụ trách từng gian hàng và từng mảng việc. Khóa tài khoản có hiệu lực ngay lập tức."
         />
         <UsersBoard
           demo={false}
@@ -71,7 +71,7 @@ export default async function UsersPage() {
       <PageHeader
         title="Người dùng & phân quyền"
         sub="chế độ demo — không hiển thị dữ liệu người dùng giả"
-        desc="Bảng người dùng đọc thẳng iam.user_profiles (RLS + iam.is_user_admin()). Chế độ demo không có kết nối Supabase nên bảng để trắng; Sửa · Quyền · Khóa sẽ hoạt động khi đăng nhập bằng tài khoản thật."
+        desc="Quản lý tài khoản nhân viên: phân vai trò, gán người phụ trách từng gian hàng. Chế độ demo chưa kết nối cơ sở dữ liệu nên bảng để trống — đăng nhập tài khoản thật để thao tác."
       />
       <UsersBoard
         demo

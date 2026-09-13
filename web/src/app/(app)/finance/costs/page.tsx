@@ -162,7 +162,7 @@ export default async function CostsPage() {
     <PageHeader
       title="Giá vốn (đầu vào F3/F4/P1)"
       sub={sub}
-      desc="Nhập tay hoặc import CSV theo template. Mỗi bậc giá vốn có khoảng hiệu lực nên lợi nhuận quá khứ vẫn tính đúng giá tại ngày bán (SOP-09 bước 3)."
+      desc="Quản lý giá vốn từng SKU — nhập tay hoặc import CSV. Giá vốn có hiệu lực theo thời gian nên lợi nhuận quá khứ luôn tính đúng giá tại ngày bán."
     />
   );
 

@@ -108,7 +108,7 @@ export default async function ApiUsagePage() {
                 ? `không đọc được api_usage_daily: ${message.slice(0, 100)}`
                 : `Hôm nay · ${totalToday} calls · ${summary.length} nhóm API · ${daily.length} dòng chi tiết`
         }
-        desc="Nguồn: connections.api_usage_daily — worker ghi qua vexim_worker_record_api_usage mỗi lần gọi SP-API (fba_inventory, reports, orders, listings…). View vexim_api_usage_daily / vexim_api_usage_summary áp RLS theo shop."
+        desc="Thống kê lượng gọi API Amazon của hệ thống theo ngày và theo nhóm chức năng — theo dõi để tránh chạm giới hạn tốc độ của Amazon."
       />
 
       {session.mode !== "supabase" ? (

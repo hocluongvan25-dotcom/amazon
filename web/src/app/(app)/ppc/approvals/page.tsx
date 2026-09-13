@@ -36,7 +36,7 @@ export default async function ApprovalsPage({
         <PageHeader
           title="Duyệt thay đổi quảng cáo (SOP-05 bước 4)"
           sub={`${queue.pending.length} chờ duyệt · ${queue.inflight.length} đang bay · ${queue.done.length} đã xong`}
-          desc="Tăng ngân sách/bid > 30%/ngày hoặc bật lại campaign đang dừng ⇒ phải có trưởng phòng PPC duyệt TRƯỚC khi worker gọi Amazon Ads API. Mọi bước ghi iam.audit_logs."
+          desc="Hàng đợi duyệt thay đổi quảng cáo: các thay đổi lớn (tăng ngân sách/bid mạnh, bật lại campaign) cần trưởng phòng duyệt trước khi áp dụng lên Amazon."
         />
         <ApprovalBoard changes={demoChanges} canDecide={DEMO_DECIDERS.includes(session.persona)} audit={demoAudit} />
       </>
@@ -67,7 +67,7 @@ export default async function ApprovalsPage({
       <PageHeader
         title="Duyệt thay đổi quảng cáo (SOP-05 bước 4)"
         sub={`${queue.pending.length} chờ duyệt · ${queue.inflight.length} đã duyệt/chờ gửi · ${queue.done.length} đã xử lý`}
-        desc="Tăng ngân sách/bid > 30%/ngày hoặc bật lại campaign đang dừng ⇒ phải có trưởng phòng PPC duyệt TRƯỚC khi worker gọi Amazon Ads API. Mọi bước ghi iam.audit_logs; Ops có nút Revert 1 chạm."
+        desc="Hàng đợi duyệt thay đổi quảng cáo: các thay đổi lớn cần trưởng phòng duyệt trước khi áp dụng lên Amazon. Mọi thay đổi đều có lịch sử và hoàn tác được 1 chạm."
       />
 
       {failed ? (

@@ -30,7 +30,7 @@ export default async function InboundPage() {
       <PageHeader
         title="Inbound shipments"
         sub="6 lô · 2 đang di chuyển · 1 chờ placement"
-        desc="Nguồn: Fulfillment Inbound API v2024-03-20 (getInboundPlan/getShipment) · đối soát nhận hàng: GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA. Trạng thái chuẩn Amazon."
+        desc="Theo dõi các lô hàng đang gửi vào kho Amazon: trạng thái vận chuyển, số lượng đã nhận so với số gửi đi, và chênh lệch cần đối soát."
       />
       <Panel title="Tất cả lô hàng" hint="WORKING → SHIPPED → IN_TRANSIT → DELIVERED → CHECKED_IN → RECEIVING → CLOSED">
         <table className={tableCls.table}>

@@ -69,7 +69,7 @@ export default async function EventsPage({
       <PageHeader
         title="Dòng tài chính"
         sub={`${financialEvents.length} sự kiện trên ${shops.length} shop · append-only`}
-        desc="Nguồn: Finances API v0 (listFinancialEvents, 0.5 rps/15 burst) + report GET_LEDGER_DETAIL_VIEW_DATA hằng ngày. Mọi biến động số dư đều có mặt ở đây — dùng cho đối soát, SOP-10, và làm nguồn cho F3 claims / F4 profit."
+        desc="Sổ cái mọi biến động tiền trên Amazon: bán hàng, hoàn tiền, phí, điều chỉnh… Mỗi đồng ra vào đều truy vết được — nền tảng cho đối soát và tính lợi nhuận."
       />
 
       <div className="mb-4 flex flex-wrap gap-2">

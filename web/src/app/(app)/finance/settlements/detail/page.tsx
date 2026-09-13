@@ -36,7 +36,7 @@ export default async function SettlementDetailPage({
       <PageHeader
         title={`Kỳ settlement · ${d.id}`}
         sub={`${d.shop} · ${d.startDate} → ${d.endDate} · chuyển ${d.depositDate}`}
-        desc="Chi tiết dòng tiền trong kỳ: nhóm phí theo loại + breakdown top SKU đóng góp doanh thu/phí trong kỳ. Nguồn: listFinancialEventsByGroupId + GET_V2_SETTLEMENT_REPORT_DATA_FLAT_FILE."
+        desc="Chi tiết dòng tiền trong kỳ thanh toán: từng nhóm phí Amazon thu, và những SKU đóng góp nhiều doanh thu / chịu nhiều phí nhất."
       />
 
       <div className="mb-4 flex flex-wrap gap-2">

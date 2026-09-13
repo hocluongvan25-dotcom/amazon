@@ -92,7 +92,7 @@ export default async function ListingListPage({
       <PageHeader
         title="Danh sách listing"
         sub={`${listingList.length} SKU · 14 shop · cập nhật 2 giờ trước`}
-        desc="Nguồn: report GET_MERCHANT_LISTINGS_ALL_DATA (hằng ngày 2h sáng) + realtime LISTINGS_ITEM_STATUS_CHANGE / ISSUES_CHANGE + getListingsItem (chi tiết)."
+        desc="Danh sách toàn bộ listing của các gian hàng — tìm kiếm, lọc theo trạng thái và xem nhanh listing nào đang gặp vấn đề."
       />
 
       {/* Tìm kiếm + hành động hàng loạt */}

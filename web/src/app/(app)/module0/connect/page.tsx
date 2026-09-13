@@ -29,13 +29,13 @@ const STEPS = [
   {
     n: 1,
     title: "Bấm Kết nối shop",
-    detail: "Hệ thống sinh link authorize (OAuth LWA) với version=beta + modal xác nhận chống bấm nhầm.",
+    detail: "Hệ thống mở trang authorize của Amazon, kèm bước xác nhận để tránh bấm nhầm gian hàng.",
     live: (s: ConnectShopRow) => s.hasToken,
   },
   {
     n: 2,
     title: "Authorize trên Seller Central",
-    detail: "Seller đăng nhập Amazon → bấm Authorize → Amazon trả refresh token (lưu DB). Nếu MD9100, check redirect_uri 100% và Test Accounts.",
+    detail: "Đăng nhập tài khoản Amazon Seller và bấm Authorize — hệ thống nhận quyền truy cập và lưu lại an toàn.",
     live: (s: ConnectShopRow) => s.hasToken,
   },
   {
@@ -58,7 +58,12 @@ const STEPS = [
   },
 ];
 
-function EnvPanel() {
+/**
+ * Panel điều kiện env + chẩn đoán MD1000/MD9100.
+ * CHỈ hiện khi thiếu env hoặc đang có lỗi OAuth (forceShow) — kết nối đã chạy
+ * ổn thì đây là thông tin debug, không nên chiếm chỗ trên UI vận hành.
+ */
+function EnvPanel({ forceShow = false }: { forceShow?: boolean }) {
   const redirectUri = (process.env.AMAZON_SP_API_REDIRECT_URI ?? "").trim();
   const allowedEnv = (process.env.AMAZON_LWA_ALLOWED_RETURN_URLS ?? "")
     .split(",")
@@ -107,10 +112,13 @@ function EnvPanel() {
   ];
   const ready = rows.every((r) => r.ok);
 
+  // Mọi thứ đã sẵn sàng và không có lỗi đang xảy ra → không chiếm chỗ UI.
+  if (ready && !forceShow) return null;
+
   return (
     <Panel
-      title="Điều kiện chạy được thật + Chẩn đoán MD1000/MD9100"
-      hint={ready ? "đủ biến môi trường + redirect_uri khớp" : "còn thiếu hoặc lệch — sẽ MD1000/MD9100"}
+      title="Chẩn đoán cấu hình kết nối"
+      hint={ready ? "đủ biến môi trường + redirect_uri khớp" : "còn thiếu hoặc lệch — kết nối sẽ thất bại (MD1000/MD9100)"}
     >
       <div className="flex flex-col gap-2 text-[13px]">
         {rows.map((r) => (
@@ -134,21 +142,20 @@ function EnvPanel() {
       </div>
 
       <div className="mt-3 rounded-[10px] border border-line bg-[#f8f9fb] p-3 text-[12px]">
-        <div className="font-bold">Checklist MD1000/MD9100:</div>
+        <div className="font-bold">Nếu Amazon báo lỗi khi authorize (MD1000/MD9100):</div>
         <ol className="mt-1 list-decimal pl-4 text-soft">
           <li>
-            Vào <b>Amazon Developer Console → Apps & Services → App ee3dce31... → LWA Credentials → Allowed Return URLs</b>
+            Vào <b>Amazon Developer Console → Apps &amp; Services → LWA Credentials → Allowed Return URLs</b>, đối soát
+            với env <code>AMAZON_SP_API_REDIRECT_URI</code>: <code className="font-mono">{redirectUri || "(thiếu)"}</code> —
+            phải khớp <b>100% từng ký tự</b> (https, dấu / cuối)
           </li>
           <li>
-            So sánh với env <code>AMAZON_SP_API_REDIRECT_URI</code> trên Vercel: <code className="font-mono">{redirectUri || "(thiếu)"}</code> — phải khớp <b>100% từng chữ cái</b>, bao gồm https và dấu / cuối
+            Nếu App ở <b>Draft</b>, email Seller phải nằm trong <b>Test Accounts</b>; Region phải <b>NA</b> cho US/CA
           </li>
           <li>
-            Nếu App ở <b>Draft</b>, Seller email phải trong <b>Test Accounts</b> (Roles → Test Accounts), và Region phải <b>NA</b> cho US/CA
+            Mở <a href="/api/oauth/amazon/diag" className="text-accent underline" target="_blank">/api/oauth/amazon/diag</a>{" "}
+            để xem chẩn đoán chi tiết, hoặc check Vercel Logs với từ khóa <code>[OAuth Start]</code>
           </li>
-          <li>
-            Mở <a href="/api/oauth/amazon/diag" className="text-accent underline" target="_blank">/api/oauth/amazon/diag</a> (chỉ CEO) để xem validation chi tiết + close matches
-          </li>
-          <li>Check Vercel Logs tìm <code>[OAuth Start]</code> để xem URI thực tế gửi sang Amazon</li>
         </ol>
       </div>
     </Panel>
@@ -176,9 +183,9 @@ export default async function ConnectPage({
       ? {
           tone: "green" as const,
           text:
-            `Đã lưu refresh token cho shop ${sp.seller ?? ""}` +
-            (sp.days ? ` (còn ${sp.days} ngày).` : ".") +
-            (sp.replaced === "1" ? " Token cũ đã được thay." : ""),
+            "✓ Kết nối gian hàng thành công!" +
+            (sp.days ? ` Kết nối có hiệu lực ${sp.days} ngày.` : "") +
+            (sp.replaced === "1" ? " (Kết nối cũ đã được thay mới.)" : ""),
         }
       : sp.oauth === "error"
         ? { tone: "red" as const, text: sp.msg ?? "Kết nối thất bại." }
@@ -191,9 +198,9 @@ export default async function ConnectPage({
         <PageHeader
           title="Kết nối shop Amazon"
           sub="Trình kết nối (wizard) · SOP-11"
-          desc="Shop mới vào vận hành trong < 48h từ lúc authorize. Khi có Supabase + app SP-API, trang này thành công cụ kết nối thật."
+          desc="Liên kết gian hàng Amazon với hệ thống để tự động đồng bộ đơn hàng, tồn kho, listing và tài chính. Khi có Supabase + app SP-API, trang này thành công cụ kết nối thật."
         />
-        <Panel title="Trình tự kết nối" hint="đúng luồng OAuth 2.0 / Login with Amazon">
+        <Panel title="Trình tự kết nối" hint="luồng OAuth chính thức của Amazon">
           <ol className="flex flex-col">
             {STEPS.map((s) => (
               <li key={s.n} className="flex gap-3 border-b border-dashed border-[#eef0f4] py-2.5 last:border-0">
@@ -229,8 +236,8 @@ export default async function ConnectPage({
     <>
       <PageHeader
         title="Kết nối shop Amazon"
-        sub={`SOP-11 · ${prodCount} gian hàng chính · ${shops.length} tổng (có ${shops.filter((s) => (s.dataSource ?? "mock") === "mock").length} demo)`}
-        desc="Refresh token lưu trong DB. Đã nhóm theo Seller ID + thêm version=beta (fix MD1000) + validate redirect_uri 100% (fix MD9100). Tên kỹ thuật A1/B1/P1 nên đổi thành tên thân thiện."
+        sub={`SOP-11 · ${prodCount} gian hàng production`}
+        desc="Liên kết gian hàng Amazon với hệ thống để tự động đồng bộ đơn hàng, tồn kho, listing và tài chính. Kết nối một lần, hiệu lực 365 ngày — hệ thống sẽ nhắc khi cần gia hạn."
       />
 
       {banner ? (
@@ -258,7 +265,7 @@ export default async function ConnectPage({
       ) : null}
 
       <Panel
-        title="Gian hàng Amazon — đã nhóm theo Seller để chống ghi đè + fix MD1000/MD9100"
+        title="Gian hàng Amazon"
         hint={
           needing > 0
             ? `${needing} shop cần authorize lại`
@@ -270,7 +277,7 @@ export default async function ConnectPage({
         <ShopConnectTable shops={shops} />
       </Panel>
 
-      <Panel title="Trình tự kết nối" hint="đúng luồng OAuth 2.0 / Login with Amazon + version=beta">
+      <Panel title="Trình tự kết nối" hint="luồng OAuth chính thức của Amazon">
         <ol className="flex flex-col">
           {STEPS.map((s) => {
             const done = shops.length > 0 && shops.every((shop) => s.live(shop));
@@ -298,49 +305,8 @@ export default async function ConnectPage({
         </ol>
       </Panel>
 
-      <EnvPanel />
-
-      <Panel title="Đề xuất đổi tên thân thiện (thay A1/B1/P1)" hint="chạy 1 lần trong Supabase SQL">
-        <div className="text-[12.5px] leading-relaxed">
-          <div className="mb-2 text-soft">
-            Mã kỹ thuật A1/B1/P1 không giúp người vận hành nhận biết gian hàng. Đề xuất đổi{" "}
-            <code>display_name</code> thành tên thân thiện trong DB:
-          </div>
-          <pre className="overflow-x-auto rounded-[8px] bg-[#f6f7f9] p-3 text-[11.5px]">
-{`-- Đổi tên P1·US / P2·CA thành tên dễ hiểu
-update connections.seller_accounts
-set display_name = case
-  when marketplace = 'ATVPDKIKX0DER' then 'VEXIM US - Chính'
-  when marketplace = 'A2EUQ1WTGCTBG2' then 'VEXIM CA - Canada'
-  else display_name
-end
-where seller_id = 'AQMVYI4HJTI4C';
-
--- Ẩn shop mock khỏi production view (hoặc xóa)
-update connections.seller_accounts set status='revoked' where data_source='mock';`}
-          </pre>
-          <div className="mt-2 text-[11.5px] text-soft">
-            Sau khi đổi, UI sẽ hiện &quot;VEXIM US - Chính 🇺🇸 US&quot; thay vì &quot;P1 · US&quot;, giảm nhầm lẫn.
-          </div>
-        </div>
-      </Panel>
-
-      <Panel title="Fix MD9100 - This app can't connect right now" hint="checklist chi tiết">
-        <div className="text-[12.5px] leading-relaxed">
-          <div className="font-bold">MD9100 thường do 2 nguyên nhân:</div>
-          <ol className="mt-2 list-decimal pl-5">
-            <li className="mb-2">
-              <b>Redirect URI lệch 100% (khả năng cao nhất):</b> Vào <code>Amazon Developer Console → Apps & Services → LWA Credentials → Allowed Return URLs</code> so sánh với env <code>AMAZON_SP_API_REDIRECT_URI</code> trên Vercel. Phải khớp từng chữ cái, bao gồm https và dấu / cuối. Mở <a href="/api/oauth/amazon/diag" className="text-accent underline" target="_blank">/api/oauth/amazon/diag</a> để xem validation + close matches (gần giống nhưng lệch /).
-            </li>
-            <li className="mb-2">
-              <b>App Status & Regions:</b> App ID <code>amzn1.sp.solution.ee3dce31...</code> đang Draft hay Published? Nếu Draft/Private, Seller email đăng nhập phải trong <code>Roles → Test Accounts</code>. Region phải <b>NA</b> cho US/CA (check env <code>AMAZON_SP_API_REGION=NA</code> và Console chọn North America).
-            </li>
-          </ol>
-          <div className="mt-2 text-soft">
-            Log <code>[OAuth Start]</code> trong Vercel Logs sẽ hiện URI thực tế gửi sang Amazon để đối soát. Nếu đã sửa Console, đợi vài phút để Amazon cache refresh.
-          </div>
-        </div>
-      </Panel>
+      {/* Chỉ hiện khi thiếu env hoặc lần kết nối vừa rồi lỗi — bình thường ẩn cho gọn */}
+      <EnvPanel forceShow={sp.oauth === "error"} />
     </>
   );
 }

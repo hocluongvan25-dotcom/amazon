@@ -117,7 +117,7 @@ export async function LiveInventoryList({ filter }: { filter: string }) {
       <PageHeader
         title="Tồn kho theo SKU"
         sub={`${allRows.length} SKU · cập nhật ${minutesAgo !== null ? `${minutesAgo} phút` : "—"} trước (vexim_inventory_latest)`}
-        desc="Nguồn: FBA Inventory API + notification FBA_INVENTORY_AVAILABILITY_CHANGES (realtime) + đối soát report 2h sáng. Cover = fulfillable ÷ velocity 14 ngày."
+        desc="Tồn kho FBA theo thời gian thực của từng SKU: số bán được, số đang giữ, số ngày bán còn lại — phát hiện sớm SKU sắp hết hàng."
       />
       <div className="mb-4 flex flex-wrap gap-2">
         {filters.map(([key, label, count]) => (
@@ -332,7 +332,7 @@ export async function LiveFulfillmentOverview() {
       <PageHeader
         title="Kho vận & FBA"
         sub={`Hôm nay · ${allRows.length} SKU · tồn kho cập nhật từ Supabase`}
-        desc="Nguồn: FBA Inventory API (getInventorySummaries) + report Inventory Aged · role: Inventory and Order Tracking."
+        desc="Tổng quan kho FBA: lượng hàng bán được, hàng đang về, hàng tồn lâu ngày — và cảnh báo SKU cần nhập thêm."
       />
       <div className="mb-4 flex flex-wrap gap-2">
         {[
@@ -575,7 +575,7 @@ export async function LiveInboundShipments() {
           (issueFailed || issues.length === 0
             ? ""
             : ` · ${issues.length} vấn đề inbound, phí ${issueTotalLabel}`)}
-        desc="Nguồn: Fulfillment Inbound API v2024-03-20 (getInboundPlan/getShipment) · đối soát nhận hàng: GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA · phí/vấn đề khi nhận: GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA. Trạng thái chuẩn Amazon."
+        desc="Theo dõi các lô hàng đang gửi vào kho Amazon: trạng thái vận chuyển, số đã nhận so với số gửi và chênh lệch cần đối soát."
       />
       {failed ? (
         <Panel title="Không tải được dữ liệu">

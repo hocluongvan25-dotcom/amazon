@@ -40,7 +40,7 @@ export default async function PriceApprovalPage({
       <PageHeader
         title="Duyệt & áp giá"
         sub={`${priceApprovalQueue.length} đề xuất chờ duyệt`}
-        desc="Mọi thay đổi giá đi qua P3: kiểm tra giá sàn → phân quyền duyệt (% ≤2 operator tự duyệt, >2% hoặc dưới sàn trưởng phòng) → patchListingsItem / JSON_LISTINGS_FEED → ghi audit + rollback được."
+        desc="Duyệt thay đổi giá bán: mọi đề xuất đổi giá được kiểm tra với giá sàn trước, thay đổi lớn cần trưởng phòng duyệt — có lịch sử đầy đủ và hoàn tác được."
       />
 
       <div className="mb-4 flex flex-wrap items-center gap-2">

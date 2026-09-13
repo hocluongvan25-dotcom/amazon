@@ -164,7 +164,7 @@ export default async function CampaignDetailPage({
         <PageHeader
           title={`A2 — ${campaign?.name ?? campaignId}`}
           sub={`${groups.length} ad group · ${targets.length} từ khoá/nhóm sản phẩm`}
-          desc="Ba việc của A2 (SOP-05): siết bid từ khoá ACOS cao, tạm dừng từ khoá đốt tiền, nới ngân sách campaign cạn tiền — tất cả đi vào hàng đợi duyệt."
+          desc="Chi tiết campaign: hiệu quả từng từ khóa và các đề xuất tối ưu — giảm bid từ khóa kém, tạm dừng từ khóa đốt tiền, nới ngân sách khi campaign hết tiền sớm."
         />
         <CampaignBody
           campaign={campaign}
@@ -207,7 +207,7 @@ export default async function CampaignDetailPage({
       <PageHeader
         title={`A2 — ${campaign?.name ?? campaignId}`}
         sub={`${groups.length} ad group · ${targets.length} từ khoá/nhóm sản phẩm · ${negatives.length} negative đã chặn`}
-        desc="Ba việc của A2 (SOP-05): siết bid từ khoá ACOS cao, tạm dừng từ khoá đốt tiền, nới ngân sách campaign cạn tiền — tất cả đi vào hàng đợi duyệt."
+        desc="Chi tiết campaign: hiệu quả từng từ khóa và các đề xuất tối ưu — giảm bid từ khóa kém, tạm dừng từ khóa đốt tiền, nới ngân sách khi campaign hết tiền sớm."
       />
       {failed ? (
         <div className="mb-3 rounded-[10px] bg-red-soft px-3.5 py-2.5 text-[13px] font-semibold text-[#a01717]">

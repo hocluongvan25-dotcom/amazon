@@ -24,7 +24,7 @@ export default async function OrdersListPage() {
       <PageHeader
         title="Danh sách đơn hàng"
         sub="341 đơn hôm nay · FBA 320 · FBM 21"
-        desc="Nguồn: Orders API (getOrders delta 15–30 phút) + ORDER_CHANGE realtime + đối soát All Orders report 2h sáng."
+        desc="Danh sách đầy đủ các đơn hàng của mọi gian hàng — lọc theo trạng thái, marketplace và thời gian để tra cứu, đối soát nhanh."
       />
       <Panel title="Đơn gần đây" hint="không hiển thị thông tin cá nhân người mua (PII) — theo hồ sơ v1.1">
         <table className={tableCls.table}>

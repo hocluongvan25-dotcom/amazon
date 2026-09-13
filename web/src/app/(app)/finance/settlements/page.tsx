@@ -70,7 +70,7 @@ export default async function SettlementsPage({
       <PageHeader
         title="Kỳ thanh toán (Settlements)"
         sub={`${settlementList.length} kỳ · ${shops.length} shop · đối soát khi có kỳ mới từ report GET_V2_SETTLEMENT_REPORT_DATA_FLAT_FILE`}
-        desc="Nguồn: Finances API v0 (listFinancialEventGroups / listFinancialEventsByGroupId) + report Settlement V2 flat file. Mỗi kỳ 14 ngày (mặc định); tiền chuyển về tài khoản sau khi Amazon trừ reserve."
+        desc="Các kỳ thanh toán của Amazon: mỗi kỳ Amazon gom doanh thu, trừ phí và chuyển tiền về tài khoản — theo dõi ở đây để biết chính xác nhận được bao nhiêu và khi nào."
       />
 
       <div className="mb-4 flex flex-wrap gap-2">
