@@ -4296,6 +4296,46 @@ await cmp(
 );
 await ex(`delete from connections.seller_accounts where id='ab260000-0000-4000-8000-000000000001'`, "dọn fixture 0026");
 
+// ===========================================================================
+console.log("\n=== BƯỚC 26: 0027 — tên mặc định generic + đổi tên shop từ UI ===");
+// ===========================================================================
+// Bối cảnh: 0024/0026 hardcode tên theo seller VEXIM — shop KHÁCH sau này sẽ
+// lại mang tên thô. 0027: default_shop_name generic cho MỌI seller, claim tự
+// đặt tên khi OAuth xong, và RPC vexim_rename_shop cho người vận hành đổi tên.
+ok(
+  await ex(rd("migrations/0027_shop_rename_and_default_names.sql"), "0027_shop_rename_and_default_names.sql"),
+  "0027 chạy sạch (DO-block tự soát: default name, is_raw check, rename RPC + quyền)",
+);
+ok(await ex(rd("migrations/0027_shop_rename_and_default_names.sql"), "0027 lần 2"), "0027 idempotent");
+
+// Shop KHÁCH mới (không phải VEXIM): tên thô, chưa seller_id → callback claim
+// xong phải TỰ có tên mặc định generic, không dính gì tới 'VEXIM'
+await ex("select set_config('request.jwt.claim.sub','',false)");
+await ex(`insert into connections.seller_accounts (id, org_id, seller_id, marketplace, display_name, status, data_source)
+  select 'ab270000-0000-4000-8000-000000000001', org_id, '', 'A1F83G8C2ARO7P', '', 'active', 'production'
+  from connections.seller_accounts limit 1`, "fixture shop khách 0027 (UK, tên rỗng)");
+const cl27 = await at(`select * from public.vexim_worker_claim_seller_id('ab270000-0000-4000-8000-000000000001', 'A9KHACHHANG1')`);
+const nm27 = await one(`select display_name from connections.seller_accounts where id='ab270000-0000-4000-8000-000000000001'`);
+ok(cl27.claimed === true && nm27.display_name === "Shop UK · A9KH",
+  `0027 claim shop khách: tự đặt tên generic 'Shop UK · A9KH' (không hardcode VEXIM) — got: ${nm27.display_name}`);
+
+// Đổi tên từ UI: admin đổi được, ghi audit; tên mã thô bị chặn; anon bị chặn
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+const rn27 = await at(`select * from public.vexim_rename_shop('ab270000-0000-4000-8000-000000000001', 'Cửa hàng Khách A - UK')`);
+ok(rn27.display_name === "Cửa hàng Khách A - UK",
+  `0027 rename: admin đổi tên shop khách thành công — ${J(rn27)}`);
+await cmp(
+  "0027 rename: ghi audit_logs action=shop.rename",
+  `select count(*) n from iam.audit_logs where action='shop.rename' and seller_account_id='ab270000-0000-4000-8000-000000000001'`,
+  1,
+);
+ok(await mustBlock(`select * from public.vexim_rename_shop('ab270000-0000-4000-8000-000000000001', 'ATVPDKIKX0DER')`),
+  "0027 CHẶN: không cho đặt lại tên thành mã kỹ thuật thô");
+await ex("select set_config('request.jwt.claim.sub','',false)");
+ok(await mustBlock(`select * from public.vexim_rename_shop('ab270000-0000-4000-8000-000000000001', 'Tên hợp lệ')`),
+  "0027 CHẶN: chưa đăng nhập không đổi tên được");
+await ex(`delete from connections.seller_accounts where id='ab270000-0000-4000-8000-000000000001'`, "dọn fixture 0027");
+
 console.log(`\n${"=".repeat(70)}`);
 console.log(fails === 0 ? "TẤT CẢ PASS" : `${fails} MỤC FAIL`);
 console.log("=".repeat(70));

@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Chip, tableCls } from "@/components/ui";
+import { createClient } from "@/lib/supabase/client";
 import {
   connectStatusOf,
   friendlyShopName,
@@ -94,7 +96,102 @@ function ConfirmModal({
   );
 }
 
-function ShopRow({ s, onConnect }: { s: ConnectShopRow; onConnect: (s: ConnectShopRow) => void }) {
+/** Modal đổi tên shop — gọi RPC vexim_rename_shop (phân quyền + audit ở DB, migration 0027). */
+function RenameModal({
+  shop,
+  onClose,
+  onRenamed,
+}: {
+  shop: ConnectShopRow | null;
+  onClose: () => void;
+  onRenamed: () => void;
+}) {
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!shop) return null;
+  const mp = marketplaceLabel(shop.marketplaceId);
+
+  const submit = async () => {
+    const supabase = createClient();
+    if (!supabase) {
+      setError("Chưa cấu hình Supabase (chế độ demo) — không đổi tên được.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    const { data, error: rpcError } = await supabase.rpc("vexim_rename_shop", {
+      p_seller: shop.sellerAccountId,
+      p_name: name.trim(),
+    });
+    setBusy(false);
+    if (rpcError) {
+      // Lỗi từ RPC đã là tiếng Việt ([M0] …); PGRST202 = chưa chạy migration 0027
+      setError(
+        rpcError.code === "PGRST202"
+          ? "Chức năng đổi tên chưa được bật trên database (cần chạy migration 0027)."
+          : rpcError.message.replace(/^\[M0\]\s*/, ""),
+      );
+      return;
+    }
+    const row = (Array.isArray(data) ? data[0] : data) as { message?: string } | undefined;
+    void row;
+    onRenamed();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-[440px] rounded-[14px] border border-line bg-card p-5 shadow-xl">
+        <div className="text-[16px] font-extrabold">Đổi tên gian hàng</div>
+        <div className="mt-2 text-[13px] text-soft">
+          {mp.flag} Tên hiện tại: <b>{friendlyShopName(shop)}</b> · {mp.code} ({mp.name})
+        </div>
+        <input
+          autoFocus
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && name.trim().length >= 2 && !busy) void submit();
+          }}
+          placeholder='Ví dụ: "Cửa hàng ABC - US"'
+          className="mt-3 w-full rounded-[9px] border border-line px-3 py-2 text-[13.5px]"
+          maxLength={80}
+        />
+        <div className="mt-1 text-[11.5px] text-soft">
+          2–80 ký tự, nên kèm thị trường (US/CA…) để phân biệt. Mọi lần đổi tên đều được ghi nhật ký.
+        </div>
+        {error ? <div className="mt-2 text-[12.5px] font-bold text-[#8c1d1d]">{error}</div> : null}
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            onClick={onClose}
+            disabled={busy}
+            className="rounded-[8px] border border-line px-4 py-2 text-[13px] font-bold hover:bg-[#f6f7f9]"
+          >
+            Hủy
+          </button>
+          <button
+            onClick={() => void submit()}
+            disabled={busy || name.trim().length < 2}
+            className="rounded-[8px] bg-accent px-4 py-2 text-[13px] font-extrabold text-white hover:opacity-90 disabled:opacity-50"
+          >
+            {busy ? "Đang lưu…" : "Lưu tên mới"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ShopRow({
+  s,
+  onConnect,
+  onRename,
+}: {
+  s: ConnectShopRow;
+  onConnect: (s: ConnectShopRow) => void;
+  onRename: (s: ConnectShopRow) => void;
+}) {
   const st = connectStatusOf(s);
   const mp = marketplaceLabel(s.marketplaceId);
   const label = s.hasToken ? "Kết nối lại" : "Kết nối";
@@ -105,7 +202,16 @@ function ShopRow({ s, onConnect }: { s: ConnectShopRow; onConnect: (s: ConnectSh
         <div className="flex items-center gap-2">
           <span className="text-[16px]">{mp.flag}</span>
           <div>
-            <div className="font-bold">{friendlyShopName(s)}</div>
+            <div className="flex items-center gap-1.5 font-bold">
+              {friendlyShopName(s)}
+              <button
+                onClick={() => onRename(s)}
+                title="Đổi tên gian hàng"
+                className="rounded px-1 text-[12px] text-soft opacity-60 hover:bg-[#eef1f5] hover:opacity-100"
+              >
+                ✏️
+              </button>
+            </div>
             <div className="text-[11px] text-soft">
               {mp.code} · {mp.name}
             </div>
@@ -139,7 +245,9 @@ function ShopRow({ s, onConnect }: { s: ConnectShopRow; onConnect: (s: ConnectSh
 }
 
 export function ShopConnectTable({ shops }: Props) {
+  const router = useRouter();
   const [confirmShop, setConfirmShop] = useState<ConnectShopRow | null>(null);
+  const [renameShop, setRenameShop] = useState<ConnectShopRow | null>(null);
   const [showMock, setShowMock] = useState(false);
 
   // Tách production vs mock để tránh rối mắt
@@ -222,7 +330,7 @@ export function ShopConnectTable({ shops }: Props) {
             </thead>
             <tbody>
               {g.shops.map((s) => (
-                <ShopRow key={s.sellerAccountId} s={s} onConnect={setConfirmShop} />
+                <ShopRow key={s.sellerAccountId} s={s} onConnect={setConfirmShop} onRename={setRenameShop} />
               ))}
             </tbody>
           </table>
@@ -254,7 +362,7 @@ export function ShopConnectTable({ shops }: Props) {
                   <table className={tableCls.table}>
                     <tbody>
                       {g.shops.map((s) => (
-                        <ShopRow key={s.sellerAccountId} s={s} onConnect={setConfirmShop} />
+                        <ShopRow key={s.sellerAccountId} s={s} onConnect={setConfirmShop} onRename={setRenameShop} />
                       ))}
                     </tbody>
                   </table>
@@ -266,6 +374,15 @@ export function ShopConnectTable({ shops }: Props) {
       ) : null}
 
       <ConfirmModal shop={confirmShop} onClose={() => setConfirmShop(null)} onConfirm={handleConfirm} />
+
+      <RenameModal
+        shop={renameShop}
+        onClose={() => setRenameShop(null)}
+        onRenamed={() => {
+          setRenameShop(null);
+          router.refresh();
+        }}
+      />
 
       <div className="mt-4 rounded-[10px] border border-line bg-[#f8f9fb] px-3 py-2.5 text-[12px] text-soft">
         💡 Trước khi kết nối, hệ thống luôn hiển thị bước xác nhận với đầy đủ Seller ID và Marketplace — kiểm tra kỹ
