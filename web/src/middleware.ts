@@ -1,6 +1,8 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+import { isBypassPath, isPublicPath } from "@/lib/config/auth-paths";
+
 /**
  * Middleware bảo vệ toàn bộ app:
  * - DEMO MODE (chưa cấu hình Supabase): yêu cầu cookie demo_role
@@ -25,35 +27,11 @@ import { NextResponse, type NextRequest } from "next/server";
  *   từ email. Nếu không mở công khai, request không cookie bị đá về /login và mất token.
  * - /auth/confirm: xử lý nhánh email template dùng {{ .TokenHash }} (verifyOtp + chặn open-redirect).
  *   Cũng phải mở công khai, nếu không token_hash bị mất khi redirect.
+ *
+ * Danh sách PUBLIC_PATHS / BYPASS_AUTH_PATHS được tách sang
+ * @/lib/config/auth-paths (single source of truth, /api/version cùng dùng).
  */
-const PUBLIC_PATHS = ["/", "/landing", "/login", "/invite", "/auth/confirm"];
-const BYPASS_AUTH_PATHS = [
-  "/api/cron",
-  "/api/webhooks",
-  "/api/whoami",
-  "/api/amazon/whoami",
-  "/api/oauth",
-  "/api/version",
-];
-
 const MW_HEADER = "x-vexim-middleware";
-
-function normalizePath(pathname: string): string {
-  if (pathname.length > 1 && pathname.endsWith("/")) {
-    return pathname.slice(0, -1);
-  }
-  return pathname;
-}
-
-function isBypassPath(pathname: string): boolean {
-  const p = normalizePath(pathname);
-  return BYPASS_AUTH_PATHS.some((b) => p === b || p.startsWith(`${b}/`));
-}
-
-function isPublicPath(pathname: string): boolean {
-  const p = normalizePath(pathname);
-  return PUBLIC_PATHS.some((b) => p === b || p.startsWith(`${b}/`));
-}
 
 function loginRedirect(req: NextRequest, cookieSource?: NextResponse) {
   const url = req.nextUrl.clone();
