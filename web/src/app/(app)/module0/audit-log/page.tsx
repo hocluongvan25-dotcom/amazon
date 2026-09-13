@@ -1,24 +1,34 @@
-import { Chip, NoAccess, PageHeader, Panel, tableCls } from "@/components/ui";
+import { NoAccess, PageHeader, Panel } from "@/components/ui";
 import { requireSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { isForbidden, type AdminAuditRow } from "@/lib/data/users-admin";
-import { auditActionLabel, auditDiff, relativeTime } from "@/lib/users-model";
 import type { PersonaKey } from "@/lib/roles";
 import AuditLogBoard from "./AuditLogBoard";
 
 const DEMO_ALLOWED: PersonaKey[] = ["ceo"];
 
-async function readAuditSnapshot(limit = 200): Promise<
+type SearchParams = { module?: string; q?: string; limit?: string };
+
+async function readAuditAll(params: {
+  limit: number;
+  module: string | null;
+  search: string | null;
+}): Promise<
   | { ok: true; audit: AdminAuditRow[] }
   | { ok: false; message: string }
 > {
   const client = await createClient();
   if (!client) return { ok: false, message: "Chưa cấu hình Supabase (chế độ demo)." };
 
-  const { data, error } = await client.rpc("vexim_admin_audit", { p_limit: limit });
+  const { data, error } = await client.rpc("vexim_audit_all", {
+    p_limit: params.limit,
+    p_module: params.module,
+    p_search: params.search,
+  });
+
   if (error) {
     const msg = error.message || "Không đọc được nhật ký.";
-    return { ok: false, message: isForbidden(msg) ? "Bạn không phải admin người dùng." : msg };
+    return { ok: false, message: isForbidden(msg) ? "Bạn không có quyền xem nhật ký." : msg };
   }
 
   const audit: AdminAuditRow[] = ((data ?? []) as unknown as {
@@ -31,6 +41,8 @@ async function readAuditSnapshot(limit = 200): Promise<
     before_value: Record<string, unknown> | null;
     after_value: Record<string, unknown> | null;
     result: string | null;
+    module: string | null;
+    shop: string | null;
   }[]).map((r) => ({
     id: r.id,
     createdAt: r.created_at,
@@ -41,30 +53,41 @@ async function readAuditSnapshot(limit = 200): Promise<
     beforeValue: r.before_value,
     afterValue: r.after_value,
     result: r.result,
+    module: r.module,
+    shop: r.shop,
   }));
 
   return { ok: true, audit };
 }
 
-export default async function AuditLogPage() {
+export default async function AuditLogPage({
+  searchParams,
+}: {
+  searchParams?: Promise<SearchParams>;
+}) {
   const session = await requireSession();
+  const sp = searchParams ? await searchParams : {};
+  const pModule = (sp.module ?? "").trim() || null;
+  const pSearch = (sp.q ?? "").trim() || null;
+  const pLimitRaw = Number(sp.limit ?? 200);
+  const pLimit = Number.isFinite(pLimitRaw) ? Math.min(Math.max(pLimitRaw, 1), 200) : 200;
 
-  // SUPABASE MODE
+  // SUPABASE MODE — toàn hệ thống
   if (session.mode === "supabase") {
-    const snapshot = await readAuditSnapshot(200);
+    const snapshot = await readAuditAll({ limit: pLimit, module: pModule, search: pSearch });
     if (!snapshot.ok) {
       return (
         <>
           <PageHeader
             title="Nhật ký thao tác (audit log)"
-            sub="iam.audit_logs · append-only · module iam"
-            desc="Toàn bộ thao tác quản trị người dùng và vận hành được ghi append-only, không cho update/delete. Chỉ Super Admin / Org Admin được xem."
+            sub="iam.audit_logs · toàn hệ thống · append-only"
+            desc="Toàn bộ thao tác quản trị và ghi ra Amazon được ghi append-only, không cho update/delete. Chỉ admin hoặc người có quyền shop được xem."
           />
           <NoAccess />
           <Panel title="Vì sao bị chặn" hint="thông điệp từ database">
             <p className="text-[12.5px] text-muted">{snapshot.message}</p>
             <p className="mt-2 text-[12px] text-soft">
-              Quyền xem nhật ký do <code>iam.is_user_admin()</code> quyết định (migration 0022). Nếu bạn là admin mà vẫn bị chặn, kiểm tra lại vai trò trong <code>iam.role_assignments</code>.
+              Quyền xem do <code>iam.is_user_admin()</code> và <code>iam.can_read_seller_account</code> quyết định (migration 0022/0023).
             </p>
           </Panel>
         </>
@@ -75,8 +98,8 @@ export default async function AuditLogPage() {
       <>
         <PageHeader
           title="Nhật ký thao tác (audit log)"
-          sub={`${snapshot.audit.length} bản ghi gần nhất · iam.audit_logs · append-only`}
-          desc="Toàn bộ thao tác ghi ra Amazon (đổi giá, sửa listing, chỉnh campaign) và thao tác quản trị người dùng (mời, đổi vai trò, khóa) đều ghi: ai · lúc nào · giá trị trước/sau · kết quả. Bảng không cho update/delete — đây là nguồn sự thật cuối cùng."
+          sub={`${snapshot.audit.length} bản ghi gần nhất · toàn hệ thống · ${pModule ? `module=${pModule}` : "mọi module"}${pSearch ? ` · tìm \"${pSearch}\"` : ""}`}
+          desc="Toàn bộ thao tác ghi ra Amazon (đổi giá, sửa listing, chỉnh campaign) và quản trị người dùng (mời, đổi vai trò, khóa) đều ghi: ai · lúc nào · module · shop · giá trị trước/sau · kết quả. Bảng không cho update/delete — nguồn sự thật cuối cùng."
         />
         <div className="mb-4 flex flex-wrap items-center gap-2">
           <a
@@ -85,9 +108,43 @@ export default async function AuditLogPage() {
           >
             ← Người dùng & phân quyền
           </a>
-          <span className="text-[12px] text-soft">
-            Nhật ký đã được tách khỏi trang Người dùng để tránh trang dài hàng trăm dòng khi có nhiều thao tác.
-          </span>
+          <form className="flex flex-wrap items-center gap-2" method="GET">
+            <select
+              name="module"
+              defaultValue={pModule ?? ""}
+              className="h-8 rounded-full border border-line bg-card px-3 text-[12.5px] font-semibold"
+            >
+              <option value="">Tất cả module</option>
+              <option value="iam">iam</option>
+              <option value="catalog">catalog</option>
+              <option value="price">price</option>
+              <option value="ads">ads</option>
+              <option value="inventory">inventory</option>
+              <option value="sales">sales</option>
+              <option value="finance">finance</option>
+              <option value="ops">ops</option>
+              <option value="connections">connections</option>
+            </select>
+            <input
+              name="q"
+              defaultValue={pSearch ?? ""}
+              placeholder="Tìm entity, email, action…"
+              className="h-8 w-56 rounded-full border border-line bg-card px-3 text-[12.5px] outline-none focus:border-accent"
+            />
+            <input type="hidden" name="limit" value={String(pLimit)} />
+            <button
+              type="submit"
+              className="h-8 rounded-full bg-accent px-4 text-[12.5px] font-bold text-white"
+            >
+              Lọc
+            </button>
+            <a
+              href="/module0/audit-log"
+              className="h-8 rounded-full border border-line bg-card px-4 py-1.5 text-[12.5px] font-bold text-muted"
+            >
+              Xóa lọc
+            </a>
+          </form>
         </div>
         <AuditLogBoard audit={snapshot.audit} demo={false} />
       </>

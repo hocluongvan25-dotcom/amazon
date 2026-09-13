@@ -23,6 +23,8 @@ export type AdminAuditRow = {
   beforeValue: Record<string, unknown> | null;
   afterValue: Record<string, unknown> | null;
   result: string | null;
+  module?: string | null;
+  shop?: string | null;
 };
 
 export type DepartmentOption = { id: string; code: string; name: string };

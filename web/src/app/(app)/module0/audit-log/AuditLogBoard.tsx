@@ -22,6 +22,11 @@ export default function AuditLogBoard({ audit, demo }: Props) {
     return Array.from(set).sort();
   }, [audit]);
 
+  const modules = useMemo(() => {
+    const set = new Set(audit.map((a) => (a.module ?? "—")).filter(Boolean));
+    return Array.from(set).sort();
+  }, [audit]);
+
   const filtered = useMemo(() => {
     let list = audit;
     if (filter !== "all") {
@@ -34,6 +39,8 @@ export default function AuditLogBoard({ audit, demo }: Props) {
           (a.entity ?? "").toLowerCase().includes(lower) ||
           (a.actorEmail ?? "").toLowerCase().includes(lower) ||
           (a.actorName ?? "").toLowerCase().includes(lower) ||
+          (a.module ?? "").toLowerCase().includes(lower) ||
+          (a.shop ?? "").toLowerCase().includes(lower) ||
           auditActionLabel(a.action).toLowerCase().includes(lower) ||
           auditDiff(a.beforeValue, a.afterValue).toLowerCase().includes(lower)
         );
@@ -49,8 +56,12 @@ export default function AuditLogBoard({ audit, demo }: Props) {
   return (
     <>
       <Panel
-        title={`Nhật ký ${demo ? "(demo)" : ""}`}
-        hint={demo ? "trống ở chế độ demo" : `iam.audit_logs · ${filtered.length}/${audit.length} bản ghi khớp bộ lọc · append-only`}
+        title={`Nhật ký ${demo ? "(demo)" : "toàn hệ thống"}`}
+        hint={
+          demo
+            ? "trống ở chế độ demo"
+            : `iam.audit_logs · ${filtered.length}/${audit.length} bản ghi khớp · ${modules.length} module · append-only`
+        }
       >
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <select
@@ -75,7 +86,7 @@ export default function AuditLogBoard({ audit, demo }: Props) {
               setQ(e.target.value);
               setPage(0);
             }}
-            placeholder="Tìm theo email, tên, entity, thay đổi…"
+            placeholder="Lọc nhanh: email, tên, module, shop, entity…"
             className="h-8 w-64 rounded-full border border-line bg-card px-3 text-[12.5px] outline-none focus:border-accent"
           />
 
@@ -115,8 +126,10 @@ export default function AuditLogBoard({ audit, demo }: Props) {
               <thead>
                 <tr>
                   <th className={tableCls.th}>Thời gian</th>
+                  <th className={tableCls.th}>Module</th>
                   <th className={tableCls.th}>Hành động</th>
                   <th className={tableCls.th}>Đối tượng</th>
+                  <th className={tableCls.th}>Shop</th>
                   <th className={tableCls.th}>Người thao tác</th>
                   <th className={tableCls.th}>Thay đổi</th>
                   <th className={tableCls.th}>Kết quả</th>
@@ -129,12 +142,16 @@ export default function AuditLogBoard({ audit, demo }: Props) {
                       {relativeTime(a.createdAt)}
                     </td>
                     <td className={tableCls.td}>
+                      <Chip tone="blue">{a.module ?? "—"}</Chip>
+                    </td>
+                    <td className={tableCls.td}>
                       <Chip tone={a.result === "ok" ? "green" : a.result === "error" ? "red" : "blue"}>
                         {auditActionLabel(a.action)}
                       </Chip>
                       <div className="mt-0.5 text-[10.5px] text-soft">{a.action}</div>
                     </td>
                     <td className={`${tableCls.td} font-bold`}>{a.entity ?? "—"}</td>
+                    <td className={tableCls.td}>{a.shop ?? "—"}</td>
                     <td className={tableCls.td}>
                       <div className="font-semibold">{a.actorName ?? "—"}</div>
                       <div className="text-[11.5px] text-soft">{a.actorEmail ?? ""}</div>
@@ -193,10 +210,10 @@ export default function AuditLogBoard({ audit, demo }: Props) {
 
       <Panel title="Quy tắc & Lưu ý" hint="append-only · không xoá được">
         <ul className="list-disc space-y-1.5 pl-5 text-[13px] text-muted">
-          <li>Nhật ký được tách khỏi trang Người dùng để tránh trang dài hàng trăm dòng khi tạo nhiều người.</li>
-          <li>Bảng <code>iam.audit_logs</code> là append-only: không có UPDATE/DELETE, chỉ INSERT — đây là nguồn sự thật cuối cùng.</li>
+          <li>Nhật ký đã mở rộng toàn hệ thống: không chỉ <code>iam</code> mà còn <code>price</code>, <code>catalog</code>, <code>ads</code>, <code>inventory</code>, <code>sales</code>, <code>finance</code>…</li>
+          <li>Bảng <code>iam.audit_logs</code> là append-only: không có UPDATE/DELETE, chỉ INSERT — nguồn sự thật cuối cùng.</li>
           <li>Mọi thao tác mời/sửa/khóa/cấp quyền và thao tác ghi ra Amazon (đổi giá, sửa listing, duyệt campaign) đều ghi lại.</li>
-          <li>Phân trang {PAGE_SIZE} dòng/trang + bộ lọc theo hành động + tìm kiếm theo email/entity giúp tra cứu nhanh khi có hàng trăm bản ghi.</li>
+          <li>Phân trang {PAGE_SIZE} dòng/trang + bộ lọc theo module/hành động + tìm kiếm theo email/entity giúp tra cứu nhanh.</li>
           <li>Đổi giá ≤ 2%: operator tự duyệt · &gt;2%: trưởng phòng duyệt. Tăng budget campaign &gt;30%/ngày: trưởng phòng duyệt. Lô nhập hàng &gt;ngưỡng $: trưởng phòng Kho vận duyệt.</li>
         </ul>
       </Panel>

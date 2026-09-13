@@ -438,6 +438,14 @@ export async function runReportPull(opts: ReportPullOptions): Promise<ReportPull
             dataEndTime: period.endIso,
           });
           reportId = created.reportId;
+          try {
+            await opts.db.recordApiUsage({
+              sellerAccountId: shop.id,
+              day: now.toISOString().slice(0, 10),
+              apiGroup: "reports",
+              calls: 1,
+            });
+          } catch {}
           await recordState(shop, kind, period, "requested", {
             reportId,
             marketplaceId: shop.marketplace,
@@ -487,6 +495,14 @@ export async function runReportPull(opts: ReportPullOptions): Promise<ReportPull
     let info: ReportInfo | null = null;
     for (let attempt = 1; attempt <= pollAttempts; attempt++) {
       info = await client.getReport(reportId);
+      try {
+        await opts.db.recordApiUsage({
+          sellerAccountId: shop.id,
+          day: now.toISOString().slice(0, 10),
+          apiGroup: "reports",
+          calls: 1,
+        });
+      } catch {}
       const st = info.processingStatus;
 
       if (st === "IN_QUEUE" || st === "IN_PROGRESS") {

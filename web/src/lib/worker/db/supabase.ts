@@ -163,6 +163,7 @@ const RPC_PATHS = {
   consumeOauthState: "/rest/v1/rpc/vexim_worker_consume_oauth_state",
   markOauthNotice: "/rest/v1/rpc/vexim_worker_mark_oauth_notice",
   oauthSoon: "/rest/v1/rpc/vexim_worker_oauth_soon",
+  recordApiUsage: "/rest/v1/rpc/vexim_worker_record_api_usage",
 } as const;
 
 /**
@@ -1388,5 +1389,16 @@ export class SupabaseDbAdapter implements DbAdapter {
       tokenActive: row?.token_active === true,
       adsProfiles: Number(row?.ads_profiles ?? 0),
     }));
+  }
+
+  async recordApiUsage(input: { sellerAccountId: string; day: string; apiGroup: string; calls?: number }): Promise<void> {
+    await this.request("POST", RPC_PATHS.recordApiUsage, {
+      body: {
+        p_seller: input.sellerAccountId,
+        p_day: input.day,
+        p_api_group: input.apiGroup,
+        p_calls: input.calls ?? 1,
+      },
+    });
   }
 }
