@@ -3,19 +3,17 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>VEXIM Ops — Bán Amazon bớt cực, nhìn rõ lời lỗ</title>
-<meta name="description" content="VEXIM Ops gom hết việc bán Amazon về một chỗ: Buy Box, tồn kho FBA, listing, quảng cáo Sponsored Products, đơn FBM và lợi nhuận thực sau phí. Bớt Excel, bớt bỏ sót.">
-<meta property="og:title" content="VEXIM Ops — Bán Amazon bớt cực, rõ lời hơn">
-<meta property="og:description" content="Giữ Buy Box, biết trước khi nào hết hàng FBA, quảng cáo rõ ACOS/TACOS, tài khoản khỏe — tất cả trên một dashboard.">
+<title>VEXIM Ops — Vận hành Amazon: Buy Box, FBA, Sponsored Ads, Settlement</title>
+<meta name="description" content="VEXIM Ops hợp nhất dữ liệu Amazon Seller Central: Buy Box & Pricing, FBA Inventory & Days of Cover, Suppressed/Stranded Listing, Sponsored Products/Brands/Display & Search Term, FBM Orders & SLA, Settlement & Reimbursement. Tối ưu ACOS/TACOS/ROAS và Net Margin thực.">
+<meta property="og:title" content="VEXIM Ops — Vận hành Amazon bằng dữ liệu thực">
+<meta property="og:description" content="Giữ Buy Box, kiểm soát FBA Days of Cover, tối ưu Sponsored Ads ACOS/TACOS/ROAS, theo dõi Account Health AHR/ODR và đối soát Settlement/Reimbursement trên một dashboard.">
 <meta property="og:type" content="website">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f1720'/%3E%3Cpath d='M9 10l7 13 7-13h-4.2L16 16.2 13.2 10z' fill='%23ff9900'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap&subset=vietnamese" rel="stylesheet">
 <script src="https://cdn.tailwindcss.com"></script>
-<script>
-  tailwind.config = { corePlugins: { preflight: false } }
-</script>
+<script>tailwind.config = { corePlugins: { preflight: false } }</script>
 <style>
   html{ -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; text-rendering:optimizeLegibility; font-feature-settings:"rlig" 1,"calt" 1,"ss01" 1; }
   :root{
@@ -47,19 +45,15 @@
   .btn-ghost:hover{border-color:#c9cfda}
   .burger{display:none;margin-left:auto;background:none;border:0;font-size:22px;cursor:pointer;color:var(--ink)}
   .hero{padding:84px 0 72px;background:radial-gradient(1000px 400px at 85% -10%, #fff4e5 0%, transparent 60%),radial-gradient(700px 380px at -10% 10%, #eaf1ff 0%, transparent 55%), var(--bg)}
-  /* FIX: dùng grid 12 cột chuẩn Tailwind để không ép chữ - left 7 / right 5 */
   .hero-grid{display:grid;grid-template-columns:1fr;gap:32px;align-items:center;max-width:1280px;margin:0 auto;padding:0 16px}
   @media(min-width:1024px){ .hero-grid{grid-template-columns:repeat(12,minmax(0,1fr))} }
-  .hero-left{grid-column:span 1 / span 1;min-width:0}
-  .hero-right{grid-column:span 1 / span 1;min-width:0}
-  @media(min-width:1024px){ .hero-left{grid-column:span 7 / span 7} .hero-right{grid-column:span 5 / span 5} }
   .badge{display:inline-flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line);color:var(--muted);font-size:12.5px;font-weight:700;padding:7px 14px;border-radius:999px;box-shadow:var(--shadow)}
   .badge .b-dot{width:7px;height:7px;border-radius:50%;background:var(--green)}
   h1{font-size:clamp(34px,4.8vw,54px);line-height:1.05;letter-spacing:-.035em;font-weight:900;margin:20px 0 18px}
   h1 em{font-style:normal;color:var(--accent-ink);white-space:nowrap}
-  .hero p.lead{font-size:17.5px;color:var(--muted);max-width:560px;margin-bottom:30px}
+  .hero p.lead{font-size:17px;color:var(--muted);max-width:640px;margin-bottom:28px;line-height:1.7}
   .hero-ctas{display:flex;gap:12px;flex-wrap:wrap}
-  .hero-note{margin-top:18px;font-size:12.5px;color:var(--soft);line-height:1.6}
+  .hero-note{margin-top:18px;font-size:12.5px;color:var(--soft);line-height:1.6;max-width:640px}
   .hero-bullets{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
   .hero-bullets span{font-size:11.5px;font-weight:700;color:var(--muted);background:#fff;border:1px solid var(--line);padding:5px 11px;border-radius:999px}
   .mock{background:var(--card);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);overflow:hidden;width:100%;height:auto;object-fit:contain;min-width:0}
@@ -87,7 +81,7 @@
   .alert.amber{background:var(--amber-soft);color:#8a5602}.alert.amber .a-icon{background:var(--amber)}
   .alert.green{background:var(--green-soft);color:#0b7a55}.alert.green .a-icon{background:var(--green)}
   section{padding:80px 0}
-  .sec-head{max-width:720px;margin-bottom:44px}
+  .sec-head{max-width:760px;margin-bottom:44px}
   .kicker{font-size:12px;font-weight:900;letter-spacing:.14em;text-transform:uppercase;color:var(--accent-ink);margin-bottom:12px}
   h2{font-size:clamp(28px,3.6vw,40px);letter-spacing:-.025em;line-height:1.12;font-weight:900;margin-bottom:14px}
   .sec-head p{color:var(--muted);font-size:17px;line-height:1.7}
@@ -153,13 +147,13 @@
   <div class="wrap nav">
     <a class="logo" href="#top">
       <span class="logo-mark">V</span>
-      VEXIM&nbsp;Ops <small>Vận hành Amazon</small>
+      VEXIM&nbsp;Ops <small>Amazon Ops Platform</small>
     </a>
     <nav class="nav-links" id="navLinks">
-      <a href="#platform">Hoạt động thế nào</a>
-      <a href="#departments">Việc hằng ngày</a>
-      <a href="#modules">Có gì bên trong</a>
-      <a href="#security">An tâm bán hàng</a>
+      <a href="#platform">Kiến trúc đồng bộ</a>
+      <a href="#departments">Vận hành hằng ngày</a>
+      <a href="#modules">Module</a>
+      <a href="#security">Bảo mật & Tuân thủ</a>
       <a href="#about">Về VEXIM</a>
       <a href="#contact">Liên hệ</a>
     </nav>
@@ -171,22 +165,21 @@
 <main id="top">
 
   <section class="hero">
-    <!-- FIXED: Tailwind grid chuẩn - max-w-7xl mx-auto px-4, left col-span-7, right col-span-5, mock w-full h-auto object-contain -->
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center max-w-7xl mx-auto px-4">
       <div class="lg:col-span-7 min-w-0">
-        <span class="badge"><span class="b-dot"></span> Kết nối chính thức với Amazon</span>
-        <h1>Bán Amazon<br><em>bớt cực, rõ lời hơn.</em></h1>
-        <p class="lead">Làm Amazon ai cũng từng trải qua cảnh này: sáng mở Seller Central, trưa ngó Ads Console, tối lại ngồi cộng trừ trên Excel. Mỗi nơi một ít số, lúc cần quyết định thì lại thiếu. VEXIM Ops gom hết về một chỗ — đơn hàng, tồn kho FBA, giá và Buy Box, listing, quảng cáo, phí và tiền Amazon trả về — để mỗi sáng bạn chỉ cần nhìn vào là biết hôm nay phải làm gì.</p>
+        <span class="badge"><span class="b-dot"></span> Amazon SP-API • Kết nối chính thức</span>
+        <h1>Vận hành Amazon bằng dữ liệu thực:<br><em>Buy Box, FBA, Ads, Settlement.</em></h1>
+        <p class="lead">VEXIM Ops hợp nhất toàn bộ dữ liệu Seller Central về một dashboard duy nhất: <b>Buy Box Ownership & Competitive Pricing</b>, <b>FBA Inventory Health & Days of Cover</b>, <b>Listing Suppressed & Stranded Inventory</b>, <b>Sponsored Products / Brands / Display & Search Term Report</b>, <b>FBM Orders & Buyer Message SLA</b>, <b>Settlement v2 & FBA Reimbursement</b>. Thay vì đối chiếu Seller Central, Brand Registry, Ads Console và Excel, bạn ra quyết định dựa trên <b>ACOS, TACOS, ROAS và Net Margin thực sau phí</b>.</p>
         <div class="hero-ctas">
-          <a class="btn btn-dark" href="#contact">Xem demo trên số thật →</a>
-          <a class="btn btn-ghost" href="#platform">Hoạt động ra sao?</a>
+          <a class="btn btn-dark" href="#contact">Xem demo trên dữ liệu thật →</a>
+          <a class="btn btn-ghost" href="#platform">Kiến trúc đồng bộ</a>
         </div>
-        <p class="hero-note">Kết nối shop bằng tài khoản Amazon, chưa tới một phút là xong. Không dùng nữa thì ngắt ngay trong Seller Central, chúng tôi xóa dữ liệu theo đúng cam kết với Amazon.</p>
+        <p class="hero-note">Kết nối OAuth qua Seller Central, phân quyền tối thiểu theo SP-API Roles (Brand/Marketplace). Hỗ trợ multi-marketplace US/EU/JP. Thu hồi quyền ngay trong Seller Central, tuân thủ Amazon Data Protection Policy (DPP) & Acceptable Use Policy (AUP).</p>
         <div class="hero-bullets">
-          <span>✓ Giữ Buy Box, không để mất khách</span>
-          <span>✓ Biết trước khi nào hết hàng FBA</span>
-          <span>✓ Quảng cáo rõ ACOS / TACOS / ROAS</span>
-          <span>✓ Tài khoản khỏe, đỡ thấp thỏm</span>
+          <span>✓ Buy Box Ownership & Price Competitiveness</span>
+          <span>✓ FBA Days of Cover, Reorder Point & Inbound</span>
+          <span>✓ Sponsored: ACOS / TACOS / ROAS & Search Term</span>
+          <span>✓ Account Health: AHR, ODR, Policy Violation</span>
         </div>
       </div>
 
@@ -194,40 +187,40 @@
         <div class="mock w-full h-auto object-contain" aria-hidden="true">
         <div class="mock-top">
           <span class="dots"><i></i><i></i><i></i></span>
-          Tổng quan gian hàng Amazon
+          Operations Dashboard • 14 Brands
           <span class="live"><i></i> Live</span>
         </div>
         <div class="mock-body">
-          <div class="mock-title">Hôm qua · 14 shop · $12,480 doanh thu</div>
+          <div class="mock-title">Yesterday • GMV $12,480 • 341 Orders</div>
           <div class="kpis">
             <div class="kpi">
-              <div class="k-label">Doanh thu</div>
+              <div class="k-label">GMV</div>
               <div class="k-value">$12,480</div>
-              <div class="k-delta up">▲ 8.2% so với tuần trước</div>
+              <div class="k-delta up">▲ 8.2% WoW • Conversion 4.2%</div>
             </div>
             <div class="kpi">
-              <div class="k-label">Đơn hàng</div>
+              <div class="k-label">Orders • Units</div>
               <div class="k-value">341</div>
-              <div class="k-delta up">▲ 4.7% · Chuyển đổi 4.2%</div>
+              <div class="k-delta up">▲ 4.7% • Sell-through 68%</div>
             </div>
             <div class="kpi">
-              <div class="k-label">Tiền quảng cáo · TACOS</div>
+              <div class="k-label">Ad Spend • TACOS</div>
               <div class="k-value">$862</div>
-              <div class="k-delta flat">TACOS 6.9% · Đang trong mục tiêu</div>
+              <div class="k-delta flat">TACOS 6.9% • Within Target</div>
             </div>
             <div class="kpi">
-              <div class="k-label">Giữ Buy Box</div>
+              <div class="k-label">Buy Box Ownership</div>
               <div class="k-value">93%</div>
-              <div class="k-delta down">▼ 1 mã vừa mất Buy Box</div>
+              <div class="k-delta down">▼ 1 SKU Buy Box Lost</div>
             </div>
           </div>
           <div class="spark">
             <i style="height:38%"></i><i style="height:52%"></i><i style="height:44%"></i><i style="height:63%"></i><i style="height:57%"></i><i style="height:72%"></i><i style="height:88%"></i>
           </div>
           <div class="alerts">
-            <div class="alert red"><span class="a-icon"></span>2 mã sắp hết hàng FBA, chỉ còn đủ bán 5 ngày nữa. Nếu để đứt, ước tính hụt $410/ngày.</div>
-            <div class="alert amber"><span class="a-icon"></span>2 chiến dịch Sponsored Products gần cạn ngân sách từ 18h — đang bỏ lỡ hiển thị.</div>
-            <div class="alert green"><span class="a-icon"></span>Tài khoản vẫn khỏe, không có vi phạm nào đang mở.</div>
+            <div class="alert red"><span class="a-icon"></span>FBA Stockout Risk: 2 SKU Days of Cover &lt;5, Revenue at Risk $410/ngày.</div>
+            <div class="alert amber"><span class="a-icon"></span>Sponsored Products Out-of-Budget: 2 Campaigns Out-of-Budget từ 18h — Impression Share Lost.</div>
+            <div class="alert green"><span class="a-icon"></span>Account Health: AHR Healthy, 0 Open Policy Violation, ODR 0.3%.</div>
           </div>
         </div>
       </div>
@@ -238,25 +231,25 @@
   <section id="platform">
     <div class="wrap">
       <div class="sec-head">
-        <div class="kicker">Vận hành thế nào?</div>
-        <h2>Cắm vào là chạy, 30 phút là thấy số thật</h2>
-        <p>Bạn không cần nhập liệu, không cần nối file. VEXIM Ops lấy số trực tiếp từ Amazon rồi đặt vào đúng chỗ bạn cần — sáng mở lên là biết ngay hôm nay phải làm gì, thay vì đi tìm số khắp nơi.</p>
+        <div class="kicker">Kiến trúc đồng bộ</div>
+        <h2>SP-API + Ads API + Settlement: đồng bộ liên tục, backfill 30 ngày</h2>
+        <p>Không nhập liệu thủ công. VEXIM Ops kết nối trực tiếp Amazon SP-API, Advertising API và Settlement Reports, chuẩn hóa về SKU/ASIN, lưu vết audit log và hiển thị theo Revenue at Risk để ưu tiên xử lý.</p>
       </div>
       <div class="steps">
         <div class="step reveal">
           <div class="step-n">1</div>
-          <h3>Kết nối gian hàng</h3>
-          <p>Bạn bấm “Kết nối Amazon” trong Seller Central, đăng nhập tài khoản Amazon là xong. Kết nối chính chủ, an toàn, muốn ngắt lúc nào cũng được, không vướng víu.</p>
+          <h3>Kết nối gian hàng qua SP-API OAuth</h3>
+          <p>Ủy quyền qua Seller Central với Login with Amazon (LWA), phân quyền least-privilege theo vai trò Ops/Admin/Finance/Viewer. Hỗ trợ multi-marketplace US/EU/JP và multi-brand. Revoke ngay trong Seller Central, token mã hóa, cảnh báo trước khi hết hạn.</p>
         </div>
         <div class="step reveal">
           <div class="step-n">2</div>
-          <h3>Để hệ thống tự lo phần đồng bộ</h3>
-          <p>Đơn hàng mới hay Buy Box đổi thì báo ngay. Tồn kho FBA và giá bán cập nhật mỗi giờ. Doanh thu, quảng cáo, phí lưu kho, tiền Amazon chuyển về thì chốt theo ngày. Vừa kết nối xong là đã có sẵn 30 ngày lịch sử để xem luôn.</p>
+          <h3>Đồng bộ dữ liệu vận hành theo SLA</h3>
+          <p><b>Near real-time:</b> Orders & ORDER_CHANGE, Buy Box & Competitive Pricing. <b>Hourly:</b> FBA Inventory Ledger, FBA Inbound Shipments, Pricing. <b>Daily:</b> Sponsored Products/Brands/Display, Search Term Report, Settlement v2, FBA Reimbursement, Storage Fee & Aged Inventory Surcharge. Tự động backfill 30 ngày ngay sau kết nối.</p>
         </div>
         <div class="step reveal">
           <div class="step-n">3</div>
-          <h3>Mỗi sáng chỉ làm việc quan trọng</h3>
-          <p>Dashboard chỉ hiện việc cần làm gấp: mã nào sắp hết, listing nào bị Amazon ẩn, chiến dịch nào sắp hết tiền, khách nào nhắn chưa trả lời. Làm xong việc nào, việc đó tự biến mất — gọn đầu, nhẹ việc.</p>
+          <h3>Vận hành theo Action Center ưu tiên Revenue at Risk</h3>
+          <p>Dashboard Action Center xếp hạng công việc theo tiền đang ảnh hưởng: Stockout Risk (Days of Cover thấp), Buy Box Lost, Suppressed/Stranded Listing, Campaign Out-of-Budget & Search Term cần phủ định, FBM Late Shipment Risk & Buyer Message quá SLA 24h. Xử lý xong tự động clear.</p>
         </div>
       </div>
     </div>
@@ -265,46 +258,46 @@
   <section id="departments" class="departments">
     <div class="wrap">
       <div class="sec-head">
-        <div class="kicker">Việc hằng ngày</div>
-        <h2>Ai lo việc nấy, không chồng chéo, không bỏ sót</h2>
-        <p>Bạn giao shop nào, việc nào cho ai thì người đó chỉ thấy đúng phần đó. Không còn cảnh ai cũng xem hết rồi không ai làm, đến lúc có chuyện lại không biết ai chịu.</p>
+        <div class="kicker">Vận hành hằng ngày</div>
+        <h2>Mỗi team nhìn đúng chỉ số chuyên môn, không chồng chéo</h2>
+        <p>Phân quyền theo Brand/Marketplace: Ops chỉ thấy FBA & Buy Box, Ads chỉ thấy Sponsored & Search Term, Finance chỉ thấy Settlement & Reimbursement. Rõ trách nhiệm, không bỏ sót việc ảnh hưởng doanh thu.</p>
       </div>
       <div class="dept-grid">
         <div class="dept reveal">
           <div class="dept-ico">🛡️</div>
-          <h3>Sức khỏe tài khoản</h3>
-          <p>Amazon vừa báo vi phạm gì, điểm sức khỏe tụt, có listing bị gỡ, cần nộp giấy tờ — hệ thống báo ngay để bạn xử lý trước khi bị hạn chế bán hàng.</p>
-          <span class="dept-kpi">Nhìn mỗi ngày: điểm sức khỏe, vi phạm, việc cần làm</span>
+          <h3>Account Health Management</h3>
+          <p>Theo dõi Account Health Rating (AHR), Policy Violation, Listing Deactivation, ODR, Late Shipment Rate, Valid Tracking Rate, Voice of Customer (VOC). Cảnh báo Required Action & Appeal trước khi bị hạn chế bán.</p>
+          <span class="dept-kpi">KPI: AHR, ODR, Policy Violation, Required Action</span>
         </div>
         <div class="dept reveal">
           <div class="dept-ico">🏷️</div>
-          <h3>Listing & hàng lỗi</h3>
-          <p>Mã nào đang bán tốt, mã nào bị Amazon ẩn (suppressed), hàng nằm chết trong kho (stranded), thiếu ảnh hay tiêu đề chưa chuẩn — xếp theo số tiền đang bị ảnh hưởng để bạn làm cái nặng trước.</p>
-          <span class="dept-kpi">Nhìn mỗi ngày: listing lỗi, hàng chết, tiền đang kẹt</span>
+          <h3>Catalog & Listing Health</h3>
+          <p>Phát hiện Suppressed Listing, Stranded Inventory, Incomplete Listing, Search Suppressed, Buy Box Suppressed. Xếp theo Revenue at Risk để ưu tiên fix listing đang kẹt tiền nhiều nhất.</p>
+          <span class="dept-kpi">KPI: Suppressed, Stranded, Revenue at Risk</span>
         </div>
         <div class="dept reveal">
           <div class="dept-ico">💰</div>
-          <h3>Giá & Buy Box</h3>
-          <p>Đối thủ đang bán bao nhiêu, mình còn giữ Buy Box không, sau khi trừ phí FBA và phí Amazon thì thực sự còn lời bao nhiêu — muốn đổi giá thì gửi duyệt, duyệt xong mới lên sàn.</p>
-          <span class="dept-kpi">Nhìn mỗi ngày: % giữ Buy Box, mã mất Buy Box, biên lợi nhuận</span>
+          <h3>Pricing & Buy Box Intelligence</h3>
+          <p>So sánh Competitive Price, theo dõi Buy Box Ownership, tính Net Margin sau Referral Fee + FBA Fulfillment Fee + Ads. Đề xuất đổi giá có Approval Workflow, rollback 1 chạm nếu sai.</p>
+          <span class="dept-kpi">KPI: Buy Box %, Competitive Price, Net Margin</span>
         </div>
         <div class="dept reveal">
           <div class="dept-ico">📦</div>
-          <h3>Tồn kho FBA</h3>
-          <p>Mỗi mã còn bán được bao nhiêu ngày, khi nào phải nhập thêm, lô hàng nào đang trên đường tới kho Amazon, mã nào nằm lâu quá đang bị tính phí lưu kho.</p>
-          <span class="dept-kpi">Nhìn mỗi ngày: mã sắp hết, tiền tồn, lô đang đi</span>
+          <h3>FBA Inventory & Replenishment</h3>
+          <p>Quản lý FBA Inventory Ledger theo FC, tính Days of Cover, Sell-through Rate, Reorder Point & Safety Stock. Theo dõi Inbound Shipment (Working/Shipped/Receiving), cảnh báo Aged Inventory & Long-term Storage Fee.</p>
+          <span class="dept-kpi">KPI: Days of Cover, Sell-through, Inbound Status</span>
         </div>
         <div class="dept reveal">
           <div class="dept-ico">📈</div>
-          <h3>Quảng cáo</h3>
-          <p>Sponsored Products, Brands, Display — ngân sách, giá thầu, khách thực sự gõ từ gì (Search Term), từ nào nên loại để đỡ tốn tiền. Đốt tiền ở đâu, nhìn là thấy ngay.</p>
-          <span class="dept-kpi">Nhìn mỗi ngày: ACOS, TACOS, chiến dịch sắp hết tiền</span>
+          <h3>Sponsored Advertising & Search Term</h3>
+          <p>Quản lý Sponsored Products/Brands/Display theo Campaign/Budget/Bid. Phân tích Search Term Report, Negative Keyword Harvesting, tối ưu ACOS/TACOS/ROAS, cảnh báo Out-of-Budget & Lost Impression Share.</p>
+          <span class="dept-kpi">KPI: ACOS, TACOS, ROAS, Search Term</span>
         </div>
         <div class="dept reveal">
           <div class="dept-ico">💬</div>
-          <h3>Đơn hàng & khách hàng</h3>
-          <p>Đơn FBM nào sắp trễ, tin nhắn nào của khách quá 24 tiếng chưa trả lời, trả hàng vì lý do gì, feedback xấu ở đâu — không để sót việc nào làm mất uy tín shop.</p>
-          <span class="dept-kpi">Nhìn mỗi ngày: tin nhắn chưa trả lời, đơn trễ, tỷ lệ trả hàng</span>
+          <h3>Order Management & CX</h3>
+          <p>Quản lý FBA/FBM Orders, đếm ngược Time to Ship, cảnh báo Late Shipment Risk, tập trung Buyer Message SLA 24h, phân tích Return Reason, theo dõi Feedback & Review ảnh hưởng ODR.</p>
+          <span class="dept-kpi">KPI: Late Shipment Rate, SLA 24h, Return Rate</span>
         </div>
       </div>
     </div>
@@ -313,42 +306,42 @@
   <section id="modules">
     <div class="wrap">
       <div class="sec-head">
-        <div class="kicker">Có gì bên trong?</div>
-        <h2>Không phải nhiều tool rời rạc, mà là một chỗ làm hết</h2>
-        <p>Từ lúc nhìn tổng quan đến lúc xử lý chi tiết, mọi thứ nối với nhau. Bạn xem doanh thu rồi bấm vào là thấy ngay SKU nào đang kéo xuống, vì sao mất Buy Box, quảng cáo đang đốt bao nhiêu.</p>
+        <div class="kicker">Module</div>
+        <h2>Một nền tảng duy nhất từ tổng quan đến chi tiết SKU/ASIN</h2>
+        <p>Từ GMV xuống SKU, từ Campaign xuống Search Term, mọi chỉ số liên kết với nhau. Click từ doanh thu giảm là thấy ngay ASIN nào Buy Box Lost, Days of Cover bao nhiêu, ACOS đang đốt bao nhiêu.</p>
       </div>
       <div class="modules-grid">
         <div class="module-card reveal">
           <div class="m-ico">📊</div>
-          <div><h3>Nhìn toàn cảnh</h3><p>Doanh thu, đơn hàng, lợi nhuận, TACOS, Buy Box, mã bán chạy, việc cần làm gấp — gom hết lên một màn hình, đỏ vàng xanh rõ ràng.</p></div>
+          <div><h3>Operations Dashboard</h3><p>GMV, Units Sold, Conversion Rate, TACOS, Buy Box Ownership, Best Seller SKU/ASIN, Action Center theo Revenue at Risk — đỏ/vàng/xanh rõ ràng.</p></div>
         </div>
         <div class="module-card reveal">
           <div class="m-ico">🛡️</div>
-          <div><h3>Sức khỏe tài khoản</h3><p>Điểm sức khỏe, ODR, tỷ lệ giao trễ, vi phạm thương hiệu, listing bị gỡ — Amazon báo gì là bạn thấy ngay, không phải đoán.</p></div>
+          <div><h3>Account Health</h3><p>AHR Score, ODR, Late Shipment Rate, Valid Tracking Rate, Policy Violation, Deactivated ASIN, Appeal Tracker — Amazon báo gì thấy ngay.</p></div>
         </div>
         <div class="module-card reveal">
           <div class="m-ico">🏷️</div>
-          <div><h3>Listing</h3><p>Mã nào đang bán, mã nào bị ẩn, hàng chết trong kho, giá, tồn FBA, Buy Box — muốn sửa nhiều mã cùng lúc cũng được, có duyệt trước khi lên sàn.</p></div>
+          <div><h3>Listing Management</h3><p>Suppressed, Stranded, Incomplete, Buy Box Suppressed, Price & FBA Stock, Bulk Edit với Approval Workflow trước khi push lên Seller Central.</p></div>
         </div>
         <div class="module-card reveal">
           <div class="m-ico">💲</div>
-          <div><h3>Lợi nhuận thực</h3><p>So giá đối thủ, tính lời thực sau khi trừ phí FBA, phí Amazon và tiền quảng cáo. Xem theo từng mã, từng ngày, từng shop — biết chính xác đang lời ở đâu.</p></div>
+          <div><h3>Profitability & Pricing</h3><p>Competitive Benchmark, Net Profit = Sales - Referral - FBA - Ads - Storage, SKU-level P&L, Price Change Approval & Rollback.</p></div>
         </div>
         <div class="module-card reveal">
           <div class="m-ico">📦</div>
-          <div><h3>Kho FBA & nhập hàng</h3><p>Tồn kho theo từng kho, dự báo khi nào hết, gợi ý nhập bao nhiêu, lô hàng đang đi tới đâu, mã nào nằm lâu đang tốn phí lưu kho.</p></div>
+          <div><h3>FBA Inventory & Inbound</h3><p>FC-level Stock, Days of Cover Forecast, Reorder Suggestion, Inbound Shipment Tracking (Working/Shipped/Receiving), Aged Inventory Surcharge Alert.</p></div>
         </div>
         <div class="module-card reveal">
           <div class="m-ico">🎯</div>
-          <div><h3>Quảng cáo & từ khóa khách gõ</h3><p>Từ chiến dịch xuống nhóm, xuống từ khóa — thấy rõ khách gõ gì (Search Term), từ nào nên giữ, từ nào nên loại trừ để giảm tiền quảng cáo.</p></div>
+          <div><h3>Advertising & Search Term</h3><p>Campaign &gt; Ad Group &gt; Keyword hierarchy, Search Term to Keyword mapping, Negative Harvesting, ACOS/TACOS/ROAS optimization, Budget Pacing.</p></div>
         </div>
         <div class="module-card reveal">
           <div class="m-ico">🧾</div>
-          <div><h3>Đơn hàng & trả hàng</h3><p>Đơn FBA, FBM, đếm ngược hạn giao, tin nhắn khách, lý do trả hàng — không để sót đơn nào làm tụt điểm vận hành.</p></div>
+          <div><h3>Orders & Returns</h3><p>FBA/FBM Order Timeline, Time to Ship Countdown, Buyer Message Central, Return Reason Breakdown, Feedback/Review Monitoring ảnh hưởng ODR.</p></div>
         </div>
         <div class="module-card reveal">
           <div class="m-ico">💰</div>
-          <div><h3>Tài chính Amazon</h3><p>Tiền Amazon trả (Settlement), các loại phí, tiền bồi hoàn FBA, lợi nhuận theo mã, tiền quảng cáo — đối soát rõ ràng, lưu lại không xóa được.</p></div>
+          <div><h3>Financial Reconciliation</h3><p>Settlement Report v2, Transaction Fees, FBA Reimbursement, Storage & Removal Fees, SKU-level Net Margin, Ad Spend Reconciliation — đối soát chính xác.</p></div>
         </div>
       </div>
     </div>
@@ -357,34 +350,34 @@
   <section id="security">
     <div class="wrap">
       <div class="sec-head">
-        <div class="kicker">Để bạn an tâm bán hàng</div>
-        <h2>Dữ liệu shop là tài sản, chúng tôi giữ như của mình</h2>
-        <p>Chỉ kết nối chính thức với Amazon, không dùng mẹo vặt. Mọi thứ làm theo đúng chuẩn Amazon yêu cầu về bảo mật và dữ liệu.</p>
+        <div class="kicker">Bảo mật & Tuân thủ</div>
+        <h2>Dữ liệu Seller là tài sản, tuân thủ chuẩn Amazon SP-API</h2>
+        <p>Chỉ tích hợp chính thức qua SP-API & Advertising API, không scraping. Tuân thủ Amazon Data Protection Policy (DPP), Acceptable Use Policy (AUP) và PII Protection.</p>
       </div>
       <div class="sec-grid">
         <div class="sec-item reveal">
           <div class="s-ico">✓</div>
-          <div><h3>Kết nối chính thức Amazon</h3><p>Lấy số trực tiếp từ Seller Central, không cào dữ liệu, không chia sẻ số liệu giữa các shop với nhau.</p></div>
+          <div><h3>Amazon SP-API Official</h3><p>Kết nối trực tiếp SP-API & Ads API, không cào dữ liệu, không chia sẻ dữ liệu giữa các Brand/Marketplace, tuân thủ Amazon AUP.</p></div>
         </div>
         <div class="sec-item reveal">
           <div class="s-ico">🔑</div>
-          <div><h3>Muốn ngắt lúc nào cũng được</h3><p>Bạn kết nối bằng tài khoản Amazon của mình. Không muốn dùng nữa thì vào Seller Central bấm ngắt là xong. Sắp hết hạn thì chúng tôi nhắc trước.</p></div>
+          <div><h3>OAuth & Revoke Control</h3><p>LWA OAuth với least-privilege scopes, revoke ngay trong Seller Central, cảnh báo trước khi token hết hạn, hỗ trợ multi-marketplace.</p></div>
         </div>
         <div class="sec-item reveal">
           <div class="s-ico">🔒</div>
-          <div><h3>Giữ kín thông tin</h3><p>Toàn bộ dữ liệu được mã hóa, không lưu thông tin nhạy cảm của người mua. Chỉ dùng để vận hành đơn hàng, không bán hay dùng cho việc khác.</p></div>
+          <div><h3>PII & Data Protection</h3><p>Không lưu Buyer PII, toàn bộ dữ liệu mã hóa at-rest & in-transit, tuân thủ DPP, sử dụng giới hạn cho mục đích vận hành đơn hàng.</p></div>
         </div>
         <div class="sec-item reveal">
           <div class="s-ico">🧑‍💻</div>
-          <div><h3>Ai làm gì đều ghi lại</h3><p>Mỗi người chỉ thấy shop và việc được giao. Đổi giá, sửa listing, chỉnh quảng cáo — ai đổi, đổi gì, trước sau ra sao, đều lưu lại hết.</p></div>
+          <div><h3>RBAC & Audit Log</h3><p>Phân quyền theo Brand/Marketplace/Module, mọi thay đổi giá/listing/campaign đều ghi audit log với before/after, người thực hiện và thời gian.</p></div>
         </div>
         <div class="sec-item reveal">
           <div class="s-ico">🗑️</div>
-          <div><h3>Ngắt là xóa</h3><p>Khi bạn ngắt kết nối, chúng tôi xóa dữ liệu shop theo đúng chính sách đã cam kết với Amazon. Không giữ lại gì thừa.</p></div>
+          <div><h3>Data Retention & Deletion</h3><p>Tự động xóa dữ liệu khi disconnect theo Amazon DPP, không lưu dư thừa, chính sách lưu trữ minh bạch, có báo cáo xóa.</p></div>
         </div>
         <div class="sec-item reveal">
           <div class="s-ico">🛠️</div>
-          <div><h3>Làm bởi người từng bán Amazon</h3><p>Đội VEXIM đã tự vận hành hàng chục gian hàng, từng mất Buy Box, từng hết hàng, từng đốt tiền quảng cáo — nên hiểu bạn cần gì.</p></div>
+          <div><h3>Built by Amazon Operators</h3><p>Team từng vận hành 10+ Brand Amazon, trải qua Buy Box Lost, FBA Stockout, ACOS spike, AHR drop — nên hiểu seller cần gì để giữ ODR và tăng Net Margin.</p></div>
         </div>
       </div>
     </div>
@@ -393,20 +386,20 @@
   <section id="about">
     <div class="wrap split">
       <div class="about">
-        <div class="kicker">Vì sao lại là VEXIM?</div>
-        <h2>Chúng tôi làm agency Amazon trước, rồi mới làm phần mềm</h2>
-        <p>VEXIM là đội vận hành Amazon ở Việt Nam, đang quản lý gian hàng cho nhiều thương hiệu. Ngày nào cũng làm listing, tối ưu quảng cáo, canh tồn kho FBA, xử lý đơn và đối soát tiền với Amazon.</p>
-        <p><b>VEXIM Ops</b> là cái chúng tôi tự làm cho mình dùng trước — vì không tìm được tool nào gọn việc như cách mình muốn: <b>nhìn vào là biết đang lời hay lỗ, ai phải làm gì hôm nay, việc nào quan trọng hơn.</b></p>
+        <div class="kicker">Vì sao VEXIM?</div>
+        <h2>Chúng tôi là Amazon Agency trước, rồi mới làm SaaS</h2>
+        <p>VEXIM là đội vận hành Amazon tại Việt Nam, đang quản lý nhiều Brand trên US/EU. Hàng ngày xử lý Listing Optimization, Sponsored Ads Optimization (ACOS/TACOS/ROAS), FBA Replenishment theo Days of Cover, FBM Order Fulfillment và Settlement Reconciliation.</p>
+        <p><b>VEXIM Ops</b> là hệ thống chúng tôi tự build để dùng trước — vì không tìm được tool nào đáp ứng đúng workflow Amazon: <b>nhìn vào là biết GMV, Net Margin, SKU nào đang Revenue at Risk và ai phải xử lý.</b></p>
         <ul>
-          <li>✅ <b>Đỡ hụt doanh thu:</b> không còn hết hàng FBA bất ngờ, mất Buy Box mà không biết, listing bị ẩn cả tuần, chiến dịch hết tiền giữa chừng.</li>
-          <li>✅ <b>Thấy rõ lời thực:</b> sau khi trừ phí FBA, phí Amazon, tiền quảng cáo và cả tiền Amazon bồi hoàn — biết chính xác mã nào đang gánh team, mã nào đang lỗ.</li>
-          <li>✅ <b>Đỡ mất thời gian:</b> bỏ Excel chắp vá, việc quan trọng tự nổi lên, duyệt đổi giá hay quảng cáo nhanh gọn, lỡ sai thì hoàn tác một chạm.</li>
-          <li>✅ <b>Khách hàng cũng an tâm:</b> có cổng báo cáo riêng để xem doanh thu, tồn kho, quảng cáo — khỏi phải hỏi qua chat mỗi ngày.</li>
+          <li>✅ <b>Giảm Revenue at Risk:</b> tránh FBA Stockout, Buy Box Lost, Suppressed/Stranded Listing kéo dài, Campaign Out-of-Budget mất Impression Share.</li>
+          <li>✅ <b>Nhìn rõ Net Margin thực:</b> sau khi trừ Referral Fee, FBA Fulfillment Fee, Storage Fee, Ad Spend và cộng FBA Reimbursement — biết chính xác SKU nào đang gánh P&L.</li>
+          <li>✅ <b>Tăng tốc vận hành:</b> bỏ Excel đối chiếu thủ công, Action Center ưu tiên theo tiền, Price/Ads Approval nhanh, rollback 1 chạm nếu sai.</li>
+          <li>✅ <b>Minh bạch với Brand Owner:</b> Client Portal riêng xem GMV, FBA Health, Ads Performance, Settlement — không cần hỏi qua chat mỗi ngày.</li>
         </ul>
       </div>
       <div class="contact-card" id="contact">
-        <h3>Nói chuyện thử xem?</h3>
-        <p>Chúng tôi demo trực tiếp trên số liệu Amazon thật, cho bạn thấy gian hàng của mình sẽ gọn lại thế nào khi dùng VEXIM Ops.</p>
+        <h3>Demo trên dữ liệu thật?</h3>
+        <p>Chúng tôi demo trực tiếp trên Seller Central & Ads Console của bạn, cho thấy Buy Box, FBA Days of Cover, Search Term và Settlement sẽ gọn lại thế nào với VEXIM Ops.</p>
         <div class="contact-row"><span class="c-ico">✉️</span><div><b>Email</b><span>ops@vexim.vn</span></div></div>
         <div class="contact-row"><span class="c-ico">📞</span><div><b>Hotline</b><span>+84 28 1234 5678</span></div></div>
         <div class="contact-row"><span class="c-ico">📍</span><div><b>Văn phòng</b><span>TP. Hồ Chí Minh, Việt Nam</span></div></div>
@@ -425,7 +418,7 @@
     <a href="/login">Đăng nhập</a>
   </div>
   <div class="wrap" style="margin-top:10px;font-size:12px;line-height:1.6">
-    VEXIM Ops là sản phẩm độc lập, không liên kết với Amazon. “Amazon”, “Buy Box”, “FBA”, “Sponsored Products” là nhãn hiệu của Amazon.com, Inc. Chúng tôi tuân thủ chính sách API và bảo vệ dữ liệu của Amazon.
+    VEXIM Ops là sản phẩm độc lập, không liên kết với Amazon. “Amazon”, “Buy Box”, “FBA”, “Sponsored Products”, “ACOS”, “TACOS” là nhãn hiệu của Amazon.com, Inc. Chúng tôi tuân thủ SP-API Acceptable Use Policy và Data Protection Policy.
   </div>
 </footer>
 
