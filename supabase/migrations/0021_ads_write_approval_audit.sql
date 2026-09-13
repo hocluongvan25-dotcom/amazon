@@ -954,6 +954,36 @@ comment on function public.vexim_decide_ads_suggestion(uuid, text, text) is
   'M5P3: duyệt/từ chối/bỏ qua gợi ý A3. Duyệt gợi ý negative ⇒ tự sinh yêu cầu ghi '
   '(đi cùng một đường: hàng đợi → worker → Ads API → audit). Chỉ người có quyền ghi.';
 
+-- ----------------------------------------------------------------------------
+-- 6.6 HAI HÀM HỎI QUYỀN CHO WEB (để UI nói thật "bạn được làm gì")
+-- ----------------------------------------------------------------------------
+-- VÌ SAO CẦN: RPC đã là chốt cuối (không có đường vòng), nhưng UI vẫn phải biết
+-- ẩn/hiện nút cho đúng — nếu để người vận hành bấm rồi mới báo "không có quyền"
+-- thì vừa mất thời gian vừa dễ hiểu sai là hệ thống lỗi. Hai hàm này chỉ ĐỌC
+-- quyền của chính người đang đăng nhập, không lộ thông tin gì của người khác.
+create or replace function public.vexim_can_ads_approve()
+returns boolean
+language sql
+stable
+security definer
+set search_path = iam, pg_catalog
+as $$ select iam.is_ads_approver() $$;
+
+comment on function public.vexim_can_ads_approve() is
+  'M5P3: người đang đăng nhập có phải người duyệt PPC (trưởng phòng PPC/ban điều hành) không — '
+  'để UI ẩn/hiện nút duyệt. Quyền thật vẫn do vexim_decide_ads_change kiểm lại.';
+
+create or replace function public.vexim_can_write_ads(p_seller uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = iam, pg_catalog
+as $$ select p_seller is not null and iam.can_write_seller_account(p_seller) $$;
+
+comment on function public.vexim_can_write_ads(uuid) is
+  'M5P3: người đang đăng nhập có quyền GHI (tạo yêu cầu đổi bid/ngân sách/negative) cho shop này không.';
+
 -- ============================================================================
 -- 7. RPC CHO WORKER — claim · ghi kết quả · gương negative
 -- ============================================================================
@@ -1558,6 +1588,8 @@ grant execute on function public.vexim_decide_ads_change(uuid, text, text)   to 
 grant execute on function public.vexim_cancel_ads_change(uuid, text)         to authenticated, service_role;
 grant execute on function public.vexim_revert_ads_change(uuid, text)         to authenticated, service_role;
 grant execute on function public.vexim_decide_ads_suggestion(uuid, text, text) to authenticated, service_role;
+grant execute on function public.vexim_can_ads_approve()          to authenticated, service_role;
+grant execute on function public.vexim_can_write_ads(uuid)        to authenticated, service_role;
 
 -- ============================================================================
 -- 10. TỰ SOÁT (DO-block) — migration sai thì phải NỔ ngay, không im lặng
@@ -1668,7 +1700,7 @@ begin
     raise exception '[0021] FAIL: service_role phải có toàn quyền trên bảng mới';
   end if;
 
-  -- 10.5 RPC đúng chữ ký
+  -- 10.5 RPC đúng chữ ký (5 cho web + 4 cho worker = 9)
   select count(*) into n from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
    where ns.nspname = 'public'
      and p.proname in ('vexim_request_ads_change','vexim_decide_ads_change','vexim_cancel_ads_change',
@@ -1677,6 +1709,17 @@ begin
                        'vexim_worker_upsert_ads_negative_keywords','vexim_worker_release_ads_change');
   if n <> 9 then
     raise exception '[0021] FAIL: thiếu RPC (%/9)', n;
+  end if;
+
+  -- 10.5b hai hàm HỎI QUYỀN cho UI: phải gọi được và không lộ gì
+  select count(*) into n from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
+   where ns.nspname = 'public' and p.proname in ('vexim_can_ads_approve','vexim_can_write_ads');
+  if n <> 2 then
+    raise exception '[0021] FAIL: thiếu hàm hỏi quyền cho UI (%/2)', n;
+  end if;
+  if not has_function_privilege('authenticated', 'public.vexim_can_ads_approve()', 'execute')
+     or not has_function_privilege('authenticated', 'public.vexim_can_write_ads(uuid)', 'execute') then
+    raise exception '[0021] FAIL: authenticated không gọi được hàm hỏi quyền ⇒ UI không biết ẩn/hiện nút';
   end if;
 
   -- 10.6 helper duyệt + ngưỡng đọc được

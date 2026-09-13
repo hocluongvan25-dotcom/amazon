@@ -336,3 +336,475 @@ export function computeTacos(
   if (seen === 0 || revenue <= 0) return null;
   return (Number(kpi.spend_7d) / revenue) * 100;
 }
+
+/* ==================================================================== */
+/* MODULE 5 PHẦN 2 & 3 — A2 (ad group/target) · A3 (search term) · P3  */
+/* (hàng đợi duyệt · revert · audit)                                   */
+/* ==================================================================== */
+/*
+ * NGUYÊN TẮC (đọc trước khi sửa):
+ *   • A2/A3 KHÔNG tự quyết định ngưỡng duyệt: DB (trigger 0021 §5) tính lại
+ *     `requires_approval` từ before/after thật. UI chỉ hiển thị lời DB trả về —
+ *     hiển thị "cần duyệt" mà DB cho auto-approve (hoặc ngược lại) là tự lừa.
+ *   • `before_value`/`after_value` là JSONB `{value: ...}` ⇒ đọc bằng `*_text`,
+ *     KHÔNG so sánh số trực tiếp trên `before_value` (jsonb không so sánh =).
+ *   • `pending_*` của A3 là gợi ý ĐANG CHỜ; `negative_keyword_id` là ĐÃ CHẶN.
+ *     Chỉ hiện nút "Thêm negative" khi CHƯA chặn; đã chặn thì hiện nhãn.
+ */
+
+export type AdsAdGroupRaw = {
+  seller_account_id: string;
+  shop: string;
+  ads_profile_id: string | null;
+  campaign_id: string;
+  campaign_name: string | null;
+  campaign_state: string | null;
+  ad_group_id: string;
+  name: string;
+  state: string | null;
+  default_bid: number | null;
+  currency: string | null;
+  last_day: string | null;
+  spend_7d: number | null;
+  sales_7d: number | null;
+  purchases_7d: number | null;
+  clicks_7d: number | null;
+  impressions_7d: number | null;
+  target_count: number | null;
+  enabled_targets: number | null;
+  cpc_7d: number | null;
+  ctr_7d: number | null;
+  acos_7d: number | null;
+  roas_7d: number | null;
+  updated_at: string | null;
+};
+
+export const ADS_AD_GROUP_SELECT =
+  "seller_account_id,shop,ads_profile_id,campaign_id,campaign_name,campaign_state,ad_group_id," +
+  "name,state,default_bid,currency,last_day,spend_7d,sales_7d,purchases_7d,clicks_7d,impressions_7d," +
+  "target_count,enabled_targets,cpc_7d,ctr_7d,acos_7d,roas_7d,updated_at";
+
+export type AdsTargetRaw = {
+  seller_account_id: string;
+  shop: string;
+  ads_profile_id: string | null;
+  campaign_id: string;
+  campaign_name: string | null;
+  ad_group_id: string;
+  ad_group_name: string | null;
+  target_kind: string;
+  target_key: string;
+  keyword_text: string | null;
+  match_type: string | null;
+  expression_type: string | null;
+  expression_value: string | null;
+  bid: number | null;
+  state: string | null;
+  currency: string | null;
+  last_day: string | null;
+  spend_7d: number | null;
+  sales_7d: number | null;
+  purchases_7d: number | null;
+  units_7d: number | null;
+  clicks_7d: number | null;
+  impressions_7d: number | null;
+  cpc_7d: number | null;
+  ctr_7d: number | null;
+  acos_7d: number | null;
+  roas_7d: number | null;
+  updated_at: string | null;
+};
+
+export const ADS_TARGET_SELECT =
+  "seller_account_id,shop,ads_profile_id,campaign_id,campaign_name,ad_group_id,ad_group_name," +
+  "target_kind,target_key,keyword_text,match_type,expression_type,expression_value,bid,state," +
+  "currency,last_day,spend_7d,sales_7d,purchases_7d,units_7d,clicks_7d,impressions_7d,cpc_7d," +
+  "ctr_7d,acos_7d,roas_7d,updated_at";
+
+export type AdsSearchTermRaw = {
+  seller_account_id: string;
+  shop: string;
+  campaign_id: string;
+  campaign_name: string | null;
+  campaign_state: string | null;
+  ad_group_id: string;
+  ad_group_name: string | null;
+  keyword_id: string | null;
+  keyword_text: string | null;
+  term: string | null;
+  match_type: string | null;
+  currency: string | null;
+  last_day: string | null;
+  impressions_7d: number | null;
+  clicks_7d: number | null;
+  spend_7d: number | null;
+  sales_7d: number | null;
+  purchases_7d: number | null;
+  units_7d: number | null;
+  spend_14d: number | null;
+  sales_14d: number | null;
+  has_orders_7d: boolean | null;
+  last_order_day: string | null;
+  cpc_7d: number | null;
+  ctr_7d: number | null;
+  acos_7d: number | null;
+  roas_7d: number | null;
+  acos_14d: number | null;
+  pending_suggestion_id: string | null;
+  pending_suggestion_type: string | null;
+  pending_confidence: number | null;
+  pending_confidence_label: string | null;
+  pending_reasons: unknown;
+  pending_evidence: unknown;
+  negative_keyword_id: string | null;
+  negative_match_type: string | null;
+};
+
+export const ADS_SEARCH_TERM_SELECT =
+  "seller_account_id,shop,campaign_id,campaign_name,campaign_state,ad_group_id,ad_group_name," +
+  "keyword_id,keyword_text,term,match_type,currency,last_day,impressions_7d,clicks_7d,spend_7d," +
+  "sales_7d,purchases_7d,units_7d,spend_14d,sales_14d,has_orders_7d,last_order_day,cpc_7d,ctr_7d," +
+  "acos_7d,roas_7d,acos_14d,pending_suggestion_id,pending_suggestion_type,pending_confidence," +
+  "pending_confidence_label,pending_reasons,pending_evidence,negative_keyword_id,negative_match_type";
+
+export type AdsChangeRaw = {
+  id: string;
+  seller_account_id: string;
+  shop: string;
+  ads_profile_id: string | null;
+  entity_type: string;
+  entity_key: string;
+  campaign_id: string | null;
+  ad_group_id: string | null;
+  entity_label: string | null;
+  action: string;
+  payload: unknown;
+  before_value: unknown;
+  after_value: unknown;
+  before_text: string | null;
+  after_text: string | null;
+  currency: string | null;
+  reason: string | null;
+  suggestion_id: string | null;
+  requires_approval: boolean;
+  approval_reason: string | null;
+  status: string;
+  requested_by: string | null;
+  requested_by_name: string | null;
+  requested_at: string | null;
+  decided_by: string | null;
+  decided_by_name: string | null;
+  decided_at: string | null;
+  decision_note: string | null;
+  applied_at: string | null;
+  error: string | null;
+  attempts: number | null;
+  revert_of: string | null;
+  reverted_by: string | null;
+  source: string | null;
+  is_open: boolean | null;
+  can_revert: boolean | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export const ADS_CHANGE_SELECT =
+  "id,seller_account_id,shop,ads_profile_id,entity_type,entity_key,campaign_id,ad_group_id," +
+  "entity_label,action,payload,before_value,after_value,before_text,after_text,currency,reason," +
+  "suggestion_id,requires_approval,approval_reason,status,requested_by,requested_by_name," +
+  "requested_at,decided_by,decided_by_name,decided_at,decision_note,applied_at,error,attempts," +
+  "revert_of,reverted_by,source,is_open,can_revert,created_at,updated_at";
+
+export type AdsNegativeKeywordRaw = {
+  id: string;
+  seller_account_id: string;
+  shop: string;
+  campaign_id: string | null;
+  campaign_name: string | null;
+  ad_group_id: string | null;
+  ad_group_name: string | null;
+  keyword_id: string | null;
+  keyword_text: string;
+  match_type: string | null;
+  state: string | null;
+  source: string | null;
+  change_request_id: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export const ADS_NEGATIVE_KEYWORD_SELECT =
+  "id,seller_account_id,shop,campaign_id,campaign_name,ad_group_id,ad_group_name,keyword_id," +
+  "keyword_text,match_type,state,source,change_request_id,created_at,updated_at";
+
+export type AdsAuditRaw = {
+  id: string;
+  created_at: string | null;
+  seller_account_id: string | null;
+  shop: string | null;
+  module: string | null;
+  action: string;
+  entity: string | null;
+  before_value: unknown;
+  after_value: unknown;
+  before_text: string | null;
+  after_text: string | null;
+  result: string | null;
+  actor_id: string | null;
+  actor_name: string | null;
+};
+
+export const ADS_AUDIT_SELECT =
+  "id,created_at,seller_account_id,shop,module,action,entity,before_value,after_value," +
+  "before_text,after_text,result,actor_id,actor_name";
+
+/* ---------------- Nhãn & suy diễn (thuần, test được) ---------------- */
+
+export function targetKindLabel(kind: string | null): string {
+  switch ((kind ?? "").toLowerCase()) {
+    case "keyword":
+      return "Từ khoá";
+    case "product":
+      return "Nhóm sản phẩm";
+    case "auto":
+      return "Tự động (auto)";
+    case "asin":
+      return "ASIN";
+    case "category":
+      return "Ngành hàng";
+    default:
+      return kind ?? "—";
+  }
+}
+
+export function matchTypeLabel(matchType: string | null): string {
+  switch ((matchType ?? "").toUpperCase()) {
+    case "BROAD":
+      return "Rộng";
+    case "PHRASE":
+      return "Cụm từ";
+    case "EXACT":
+      return "Chính xác";
+    case "NEGATIVE_EXACT":
+      return "Chặn chính xác";
+    case "NEGATIVE_PHRASE":
+      return "Chặn cụm từ";
+    case "AUTO":
+      return "Tự động";
+    default:
+      return matchType ?? "—";
+  }
+}
+
+/** Chữ hiển thị cho một target: keyword_text → expression_value → target_key. */
+export function targetText(row: {
+  keyword_text?: string | null;
+  expression_value?: string | null;
+  target_key?: string | null;
+}): string {
+  return (
+    row.keyword_text?.trim() ||
+    row.expression_value?.trim() ||
+    row.target_key?.trim() ||
+    "(không có tên)"
+  );
+}
+
+export type ChangeStatusMeta = { label: string; tone: "red" | "amber" | "green" | "gray" | "blue"; hint: string };
+
+export function changeStatusMeta(status: string | null): ChangeStatusMeta {
+  switch (status) {
+    case "pending_approval":
+      return {
+        label: "Chờ trưởng phòng duyệt",
+        tone: "amber",
+        hint: "Chưa gửi gì lên Amazon. Tăng > 30%/ngày phải được trưởng phòng PPC duyệt trước (SOP-05 bước 4).",
+      };
+    case "approved":
+      return {
+        label: "Đã duyệt — chờ worker gửi",
+        tone: "blue",
+        hint: "Worker (worker:ads-apply / cron 03:00) sẽ gửi lên Amazon Ads; chưa chắc Amazon đã nhận.",
+      };
+    case "applying":
+      return {
+        label: "Đang gửi Amazon",
+        tone: "blue",
+        hint: "Worker đã nhận yêu cầu và đang gọi API. Throttle 429 thì tự trả lại hàng đợi (không mất dấu).",
+      };
+    case "applied":
+      return { label: "Amazon đã nhận", tone: "green", hint: "API đã trả SUCCESS cho mọi phần tử." };
+    case "failed":
+      return {
+        label: "Amazon từ chối",
+        tone: "red",
+        hint: "Xem cột lỗi. Giá trị cục bộ GIỮ NGUYÊN — hệ thống không ghi số chưa được Amazon nhận.",
+      };
+    case "rejected":
+      return { label: "Bị từ chối", tone: "red", hint: "Trưởng phòng từ chối; không gửi lên Amazon." };
+    case "cancelled":
+      return { label: "Đã huỷ", tone: "gray", hint: "Người yêu cầu tự huỷ trước khi gửi." };
+    default:
+      return { label: status ?? "—", tone: "gray", hint: "Trạng thái không nhận dạng được." };
+  }
+}
+
+/** Chữ cho hành động (khớp `action` trong ads.change_requests). */
+export function changeActionLabel(action: string | null): string {
+  switch (action) {
+    case "set_budget":
+      return "Đổi ngân sách ngày";
+    case "set_bid":
+      return "Đổi bid từ khoá";
+    case "set_state":
+      return "Bật/tạm dừng";
+    case "add_negative_exact":
+      return "Thêm negative (chính xác)";
+    case "add_negative_phrase":
+      return "Thêm negative (cụm từ)";
+    default:
+      return action ?? "—";
+  }
+}
+
+/**
+ * % thay đổi so với giá trị cũ — DÙNG ĐỂ HIỂN THỊ.
+ * Không dùng để quyết định "cần duyệt": DB đã quyết (xem `requires_approval`).
+ * Trả null khi không so được (thiếu giá trị cũ, giá trị cũ ≤ 0, không phải số).
+ */
+export function changePct(before: string | null | undefined, after: string | null | undefined): number | null {
+  const b = Number(before);
+  const a = Number(after);
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b <= 0) return null;
+  return Math.round(((a - b) * 100 * 10) / b) / 10;
+}
+
+export function changePctLabel(before: string | null | undefined, after: string | null | undefined): string {
+  const pct = changePct(before, after);
+  if (pct === null) return "—";
+  return `${pct > 0 ? "+" : ""}${pct.toFixed(1)}%`;
+}
+
+/** "Ngân sách ngày 100 → 120 (+20.0%)" — một dòng đọc được trong hàng đợi. */
+export function changeSummary(row: Pick<AdsChangeRaw, "action" | "before_text" | "after_text" | "currency">): string {
+  const cur = row.currency ? `${row.currency} ` : "";
+  const b = row.before_text ?? "—";
+  const a = row.after_text ?? "—";
+  if (row.action === "set_state") return `${b} → ${a}`;
+  if (row.action?.startsWith("add_negative")) return `Chặn "${a}"`;
+  return `${cur}${b} → ${cur}${a} (${changePctLabel(row.before_text, row.after_text)})`;
+}
+
+export type SuggestionType = "negative_exact" | "negative_phrase" | string;
+
+export function suggestionMatchLabel(suggestionType: SuggestionType | null): string {
+  return suggestionType === "negative_phrase" ? "Negative Phrase (cụm từ)" : "Negative Exact (chính xác)";
+}
+
+/** Nhãn ngắn để hiện trên chip: "Exact" / "Phrase". */
+export function suggestionShortLabel(suggestionType: SuggestionType | null): string {
+  return suggestionType === "negative_phrase" ? "Phrase" : "Exact";
+}
+
+/* ---------------- A3: bộ lọc tự động theo SOP-04 ---------------- */
+
+export type A3Filter = {
+  /** Chi tối thiểu trong 7 ngày (đơn vị tiền của shop) — mặc định 10. */
+  minSpend: number;
+  /** Click tối thiểu trong 7 ngày — mặc định 5 (dưới 5 click thì chưa kết luận). */
+  minClicks: number;
+  /** Chỉ lấy dòng KHÔNG ra đơn trong 7 ngày (SOP-04: đốt tiền mà không chuyển đổi). */
+  onlyNoOrders: boolean;
+  /** Từ khoá tìm trong term/keyword/ad group. */
+  q?: string;
+  /** Lọc theo một campaign (A2 → A3 của campaign đó). */
+  campaignId?: string;
+  /** Lọc theo shop. */
+  sellerAccountId?: string;
+};
+
+export const A3_DEFAULT_FILTER: A3Filter = { minSpend: 10, minClicks: 5, onlyNoOrders: true };
+
+/**
+ * Bộ lọc A3 — "search term đốt tiền": có click, chi ≥ ngưỡng, KHÔNG ra đơn.
+ * Dòng đã được chặn rồi (`negative_keyword_id`) vẫn hiện để đối chiếu nhưng UI
+ * đánh dấu "đã chặn"; hàm này KHÔNG loại chúng (loại là quyết định hiển thị).
+ */
+export function filterSearchTerms(rows: AdsSearchTermRaw[], filter: Partial<A3Filter> = {}): AdsSearchTermRaw[] {
+  const f = { ...A3_DEFAULT_FILTER, ...filter };
+  const needle = (f.q ?? "").trim().toLowerCase();
+  return rows.filter((r) => {
+    if (f.sellerAccountId && r.seller_account_id !== f.sellerAccountId) return false;
+    if (f.campaignId && r.campaign_id !== f.campaignId) return false;
+    if (f.onlyNoOrders && (r.purchases_7d ?? 0) > 0) return false;
+    if ((r.clicks_7d ?? 0) < f.minClicks) return false;
+    if ((r.spend_7d ?? 0) < f.minSpend) return false;
+    if (needle) {
+      const hay = [r.term ?? "", r.keyword_text ?? "", r.ad_group_name ?? "", r.campaign_name ?? ""]
+        .join(" ")
+        .toLowerCase();
+      if (!hay.includes(needle)) return false;
+    }
+    return true;
+  });
+}
+
+/** Bằng chứng SOP-04 cho một dòng search term: "12 click · 0 đơn · 18.40 USD · 7 ngày". */
+export function a3Evidence(row: AdsSearchTermRaw): string {
+  const cur = row.currency ? `${row.currency} ` : "";
+  const spend = row.spend_7d === null || row.spend_7d === undefined ? "—" : `${cur}${Number(row.spend_7d).toFixed(2)}`;
+  return `${adsNum(row.clicks_7d)} click · ${adsNum(row.purchases_7d)} đơn · ${spend} · 7 ngày`;
+}
+
+/** Số dòng A3 đáng chặn mà CHƯA có gợi ý nào (để nhắc "bấm mở A3"). */
+export function a3ReadyToBlock(rows: AdsSearchTermRaw[], filter: Partial<A3Filter> = {}): AdsSearchTermRaw[] {
+  return filterSearchTerms(rows, filter).filter(
+    (r) => r.negative_keyword_id === null && r.pending_suggestion_id === null,
+  );
+}
+
+/* ---------------- Hàng đợi duyệt (P3) ---------------- */
+
+/** Chia hàng đợi thành 3 nhóm hiển thị: chờ duyệt · đang bay · đã xong. */
+export function splitQueue(rows: AdsChangeRaw[]): {
+  pending: AdsChangeRaw[];
+  inflight: AdsChangeRaw[];
+  done: AdsChangeRaw[];
+} {
+  const pending: AdsChangeRaw[] = [];
+  const inflight: AdsChangeRaw[] = [];
+  const done: AdsChangeRaw[] = [];
+  for (const r of rows) {
+    if (r.status === "pending_approval") pending.push(r);
+    else if (r.status === "approved" || r.status === "applying") inflight.push(r);
+    else done.push(r);
+  }
+  return { pending, inflight, done };
+}
+
+/** Dòng có thể bấm Revert 1 phát (Ops) — đúng luật `can_revert` của view. */
+export function revertible(rows: AdsChangeRaw[]): AdsChangeRaw[] {
+  return rows.filter((r) => r.can_revert === true);
+}
+
+export const AUDIT_ACTION_LABEL: Record<string, string> = {
+  "ads.change_request": "Tạo yêu cầu thay đổi",
+  "ads.budget_change_request": "Yêu cầu đổi ngân sách",
+  "ads.bid_change_request": "Yêu cầu đổi bid",
+  "ads.state_change_request": "Yêu cầu bật/tạm dừng",
+  "ads.negative_add_request": "Yêu cầu thêm negative",
+  "ads.change_approve": "Trưởng phòng duyệt",
+  "ads.change_reject": "Trưởng phòng từ chối",
+  "ads.change_cancel": "Huỷ yêu cầu",
+  "ads.change_applied": "Amazon đã nhận",
+  "ads.change_failed": "Amazon từ chối",
+  "ads.change_released": "Trả lại hàng đợi (throttle)",
+  "ads.change_revert": "Ops đảo thay đổi",
+  "ads.suggestion_approve": "Duyệt gợi ý A3",
+  "ads.suggestion_reject": "Từ chối gợi ý A3",
+  "ads.suggestion_dismiss": "Bỏ qua gợi ý A3",
+};
+
+export function auditActionLabel(action: string | null): string {
+  return AUDIT_ACTION_LABEL[action ?? ""] ?? action ?? "—";
+}

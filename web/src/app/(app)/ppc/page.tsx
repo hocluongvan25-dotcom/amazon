@@ -67,7 +67,13 @@ function CampaignTable({ rows }: { rows: AdsCampaignRaw[] }) {
           return (
             <tr key={`${c.seller_account_id}-${c.campaign_id}`}>
               <td className={tableCls.td}>
-                <div className="font-bold">{c.name}</div>
+                <a
+                  href={`/ppc/campaigns/${encodeURIComponent(c.campaign_id)}${c.seller_account_id ? `?shop=${encodeURIComponent(c.seller_account_id)}` : ""}`}
+                  className="font-bold text-accent-ink hover:underline"
+                  title="Mở A2 — ad group → từ khoá/nhóm sản phẩm"
+                >
+                  {c.name}
+                </a>
                 <div className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-soft">
                   <span title={type.title}>{type.label}</span>
                   <span>·</span>
@@ -269,19 +275,30 @@ async function LivePpc() {
             <CampaignTable rows={campaigns} />
           </Panel>
 
-          <Panel title="Chưa làm được ở bước này" hint="phần 2 và phần 3 của Module 5">
-            <ul className="flex list-disc flex-col gap-1 pl-5 text-[13px] text-soft">
+          <Panel title="Phần 2 &amp; 3 của Module 5 — đã nối vào màn này" hint="bấm để mở">
+            <ul className="flex list-disc flex-col gap-1.5 pl-5 text-[13px]">
               <li>
-                <b>A2 — chi tiết campaign</b> (ad group → từ khoá/nhóm sản phẩm): đã có bảng
-                <code className="mx-1">ads.targets</code> + view <code>vexim_ads_targets</code>, chưa có màn hình.
+                <b>A2 — chi tiết campaign</b> (ad group → từ khoá/nhóm sản phẩm, đổi bid · tạm dừng · nới ngân sách):{" "}
+                <span className="text-soft">bấm vào tên campaign ở bảng trên</span> — hoặc{" "}
+                <a className="font-bold text-accent-ink" href="/ppc/campaigns/C-DEMO-01">
+                  mở campaign mẫu
+                </a>
+                .
               </li>
               <li>
-                <b>A3 — search term &amp; gợi ý negative</b>: bảng <code>search_terms</code>/
-                <code>negative_suggestions</code> đã có dữ liệu, chờ màn duyệt.
+                <b>A3 — search term &amp; gợi ý negative</b> (SOP-04, duyệt là chặn):{" "}
+                <a className="font-bold text-accent-ink" href="/ppc/search-terms">
+                  mở màn A3
+                </a>
+                .
               </li>
               <li>
-                <b>Phần 3 — ghi ngược lên Amazon</b> (đổi ngân sách/bid, thêm negative): cần ngưỡng duyệt
-                trưởng phòng (tăng &gt; 30%/ngày, SOP-05 bước 4) + ghi <code>iam.audit_logs</code>.
+                <b>Phần 3 — hàng đợi duyệt + Revert 1 chạm</b> (tăng &gt; 30%/ngày phải có trưởng phòng PPC duyệt
+                TRƯỚC khi gọi Amazon; mọi bước ghi <code>iam.audit_logs</code>):{" "}
+                <a className="font-bold text-accent-ink" href="/ppc/approvals">
+                  mở hàng đợi duyệt
+                </a>
+                .
               </li>
             </ul>
           </Panel>

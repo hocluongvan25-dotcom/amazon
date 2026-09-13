@@ -3337,6 +3337,14 @@ await cmp(
   5,
 );
 await cmp(
+  "0021: 2 hàm HỎI QUYỀN cho UI (ẩn/hiện nút; quyền thật vẫn do RPC kiểm)",
+  `select count(*) n from pg_proc p where p.oid = any (array[
+     'public.vexim_can_ads_approve()'::regprocedure,
+     'public.vexim_can_write_ads(uuid)'::regprocedure])
+   and p.prosecdef and has_function_privilege('authenticated', p.oid, 'EXECUTE')`,
+  2,
+);
+await cmp(
   "0021: 4 RPC worker — CHỈ service_role gọi được",
   `select count(*) n from pg_proc p where p.oid = any (array[
      'public.vexim_worker_claim_ads_changes(uuid, int)'::regprocedure,
