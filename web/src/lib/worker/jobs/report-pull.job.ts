@@ -139,6 +139,17 @@ const RESUMABLE: readonly ReportRequestStatus[] = [
 const pad2 = (n: number) => String(n).padStart(2, "0");
 const isoDay = (d: Date) => `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
 
+/** Tạo ISO 8601 UTC chuẩn với milliseconds — Amazon yêu cầu toISOString() dạng 2023-01-15T00:00:00.000Z */
+function toIsoUtcStartOfDay(d: Date): string {
+  // Đảm bảo 00:00:00.000Z UTC — dùng toISOString() sau khi set UTC midnight
+  const utcMidnight = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0));
+  return utcMidnight.toISOString(); // e.g. 2023-01-15T00:00:00.000Z
+}
+function toIsoUtcEndOfDay(d: Date): string {
+  const utcEnd = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 23, 59, 59, 999));
+  return utcEnd.toISOString(); // e.g. 2023-01-15T23:59:59.999Z
+}
+
 /** Khoảng ngày gửi Amazon + lưu DB (UTC — Amazon hiểu dataStartTime theo UTC). */
 export function computePeriod(
   kind: ReportKind,
@@ -150,12 +161,35 @@ export function computePeriod(
   }
   const days = Math.max(1, Math.round(opts.days ?? spec.lookbackDays));
   const end = new Date(opts.now.getTime());
-  const start = new Date(end.getTime() - days * 86_400_000);
+
+  // FIX 2: ISO 8601 UTC chuẩn + FIX DAILY ledger
+  // - Trước: `${isoDay}T00:00:00Z` (thiếu ms, Amazon vẫn chấp nhận nhưng log mờ)
+  // - Nay: toISOString() với ms, chuẩn ISO8601 UTC: 2023-01-15T00:00:00.000Z
+  // - Với ledger SUMMARY DAILY (fc): Amazon yêu cầu start và end CÙNG NGÀY, nếu khác ngày sẽ trả 400 InvalidInput
+  //   hoặc empty. Nên với fc, start = end = today (hoặc now), không phải end - days.
+  const isLedgerDaily = spec.reportType === "GET_LEDGER_SUMMARY_VIEW_DATA" &&
+    spec.reportOptions?.aggregatedByTimePeriod === "DAILY";
+
+  let start: Date;
+  let startIso: string;
+  let endIso: string;
+
+  if (isLedgerDaily) {
+    // DAILY: start và end cùng ngày — Amazon docs: "If DAILY, start and end must be same day"
+    start = new Date(end.getTime());
+    startIso = toIsoUtcStartOfDay(start);
+    endIso = toIsoUtcEndOfDay(end);
+  } else {
+    start = new Date(end.getTime() - days * 86_400_000);
+    startIso = toIsoUtcStartOfDay(start);
+    endIso = toIsoUtcEndOfDay(end);
+  }
+
   return {
     start: isoDay(start),
     end: isoDay(end),
-    startIso: `${isoDay(start)}T00:00:00Z`,
-    endIso: `${isoDay(end)}T23:59:59Z`,
+    startIso,
+    endIso,
   };
 }
 
@@ -431,11 +465,25 @@ export async function runReportPull(opts: ReportPullOptions): Promise<ReportPull
 
       if (!reportId) {
         try {
+          // FIX 1: truyền reportOptions cho ledger reports (FC/DAILY) — nếu thiếu Amazon trả 400 InvalidInput "Missing reportOptions"
+          // FIX 2: ISO8601 UTC chuẩn với ms — log chi tiết để Worker console thấy
+          const reportOptions = spec.reportOptions && Object.keys(spec.reportOptions).length > 0
+            ? spec.reportOptions
+            : undefined;
+          log(
+            `[report-pull] → createReport ${shop.displayName} ${spec.reportType}` +
+            ` marketplace=${shop.marketplace}` +
+            ` period=${period.startIso ?? "—"} → ${period.endIso ?? "—"}` +
+            (reportOptions ? ` options=${JSON.stringify(reportOptions)}` : "") +
+            (spec.deprecatedNote ? ` note=${spec.deprecatedNote}` : "") +
+            `\n`,
+          );
           const created = await client.createReport({
             reportType: spec.reportType,
             marketplaceIds: [shop.marketplace],
             dataStartTime: period.startIso,
             dataEndTime: period.endIso,
+            reportOptions,
           });
           reportId = created.reportId;
           try {

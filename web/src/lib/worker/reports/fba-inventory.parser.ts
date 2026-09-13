@@ -1,48 +1,32 @@
 /**
  * Parser 2 report FBA inventory dùng cho Module 3 nâng cao (I2 / I4).
  *
- * ┌ (1) FBA Daily Inventory History Report — PHÂN BỔ TỒN THEO FC
- * │   reportType : GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA
- * │   Cột (đúng tên của Amazon):
- * │     snapshot-date · fnsku · sku · product-name · quantity ·
- * │     fulfillment-center-id · detailed-disposition · country
- * │   Mỗi ngày một snapshot; một SKU có thể nằm ở NHIỀU FC và mỗi FC có thể có
- * │   nhiều dòng theo disposition (Sellable / Unsellable / Damaged / …).
- * │
- * └ (2) FBA Received Inventory Report — LỊCH SỬ NHẬN HÀNG
- *     reportType : GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA
- *     Cột: received-date · fnsku · sku · product-name · quantity ·
- *          fba-shipment-id · fulfillment-center-id
- *     Chỉ chứa các lần nhận ĐÃ HOÀN TẤT tại FC, nội dung cập nhật mỗi ngày.
+ * (1) PHÂN BỔ TỒN THEO FC:
+ *   Cũ (DEPRECATED 31/01/2023 → 400 InvalidInput):
+ *     GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA
+ *   Mới:
+ *     GET_LEDGER_SUMMARY_VIEW_DATA + aggregateByLocation=FC + DAILY
+ *   Cột cũ: snapshot-date, fnsku, sku, product-name, quantity, fulfillment-center-id, detailed-disposition, country
+ *   Cột mới Ledger Summary: Date, FNSKU, MSKU, Title, Disposition, StartingWarehouseBalance, EndingWarehouseBalance, Location, Country
+ *
+ * (2) LỊCH SỬ NHẬN HÀNG:
+ *   Cũ: GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA (deprecated → 400)
+ *   Mới: GET_LEDGER_DETAIL_VIEW_DATA (filter EventType=Receipts)
+ *   Cột cũ: received-date, fnsku, sku, product-name, quantity, fba-shipment-id, fulfillment-center-id
+ *   Cột mới: Date, FNSKU, MSKU, Title, EventType, ReferenceID, Quantity, FulfillmentCenter, Disposition, Reason, Country
+ *
+ * FIX 400 09/2026:
+ *   P1-US/P2-CA bị 400 InvalidInput "Report type is deprecated" → migrate sang ledger reports.
+ *   Parser hỗ trợ CẢ 2 format (cũ và mới) để không gãy khi file cũ còn cache.
  *
  * NGUỒN CỘT: developer-docs.amazon.com/sp-api/docs/report-type-values-fba
- * (mục "FBA Inventory Reports"). Cả hai KHÔNG có PII người mua → không cần
- * Restricted Data Token; role cần có là "Amazon Fulfillment".
- *
- * HAI ĐIỀU API KHÔNG CHO BIẾT (lý do phải đi đường report):
- *   • getFulfillmentInventory / listInventorySummaries chỉ trả TỔNG theo SKU,
- *     không tách theo FC → I2 không có "hàng đang nằm ở đâu".
- *   • Inbound API chỉ mô tả lô ĐANG mở; lô đã CLOSED thì không còn số nhận chi
- *     tiết → không có "lịch sử nhận hàng" nếu không giữ report lại.
- *
- * NGUYÊN TẮC PARSE (giống inventory-ledger.parser.ts / merchant-listings.parser.ts):
- *   1. Header đọc theo TÊN, đã chuẩn hoá (bỏ khoảng trắng, gạch, hoa/thường) →
- *      Amazon đổi thứ tự cột vẫn chạy.
- *   2. Thiếu cột BẮT BUỘC → trả rỗng + cảnh báo nói rõ thiếu cột nào. KHÔNG đoán
- *      cột theo vị trí (đoán sai là âm thầm ghi nhầm số tồn).
- *   3. Dòng không đọc được (thiếu SKU / ngày sai định dạng / quantity không phải
- *      số nguyên) → BỎ QUA + cảnh báo + đếm vào `skipped`; không làm hỏng cả file.
- *   4. Ngày trả về dạng YYYY-MM-DD vì RPC 0018 chỉ nhận đúng định dạng đó.
- *      Không đọc được → null (dòng bị bỏ), KHÔNG suy ra "hôm nay".
- *   5. Trùng khoá trong cùng file vẫn được GIỮ ở tầng parse (job/RPC mới cộng
- *      dồn) — parser không tự ý gộp, để log còn nói được "file có dòng trùng".
  */
 
 export type ReportSource = "report";
 
 /** Một dòng phân bổ tồn theo FC (đã chuẩn hoá để ghi thẳng qua RPC 0018). */
 export type FcAllocationRow = {
-  /** YYYY-MM-DD — ngày Amazon chụp snapshot (cột snapshot-date) */
+  /** YYYY-MM-DD — ngày Amazon chụp snapshot (cột snapshot-date hoặc Date) */
   snapshotDate: string;
   sku: string;
   fnsku: string | null;
@@ -69,7 +53,7 @@ export type FcAllocationParseResult = {
 
 /** Một dòng lịch sử nhận hàng. */
 export type ReceiptRow = {
-  /** YYYY-MM-DD — ngày Amazon hoàn tất nhận (cột received-date) */
+  /** YYYY-MM-DD — ngày Amazon hoàn tất nhận (cột received-date hoặc Date) */
   receivedDate: string;
   sku: string;
   fnsku: string | null;
@@ -116,16 +100,42 @@ const RX_COL = {
   fc: "fulfillment-center-id",
 } as const;
 
+// Ledger Summary View columns (new)
+const LEDGER_SUMMARY_COL = {
+  date: "date",
+  fnsku: "fnsku",
+  asin: "asin",
+  msku: "msku",
+  title: "title",
+  disposition: "disposition",
+  startingBalance: "startingwarehousebalance",
+  endingBalance: "endingwarehousebalance",
+  location: "location",
+  country: "country",
+  // fallback names
+  countryAlt: "countryregion",
+  skuAlt: "msku",
+  fcAlt: "fulfillmentcenter",
+} as const;
+
+const LEDGER_DETAIL_COL = {
+  date: "date",
+  fnsku: "fnsku",
+  msku: "msku",
+  title: "title",
+  eventType: "eventtype",
+  referenceId: "referenceid",
+  quantity: "quantity",
+  fc: "fulfillmentcenter",
+  disposition: "disposition",
+  country: "country",
+} as const;
+
 const FC_REQUIRED: readonly string[] = [FC_COL.snapshotDate, FC_COL.sku, FC_COL.quantity];
 const RX_REQUIRED: readonly string[] = [RX_COL.receivedDate, RX_COL.sku, RX_COL.quantity];
+const LEDGER_SUMMARY_REQUIRED: readonly string[] = [LEDGER_SUMMARY_COL.date, LEDGER_SUMMARY_COL.endingBalance];
+const LEDGER_DETAIL_REQUIRED: readonly string[] = [LEDGER_DETAIL_COL.date, LEDGER_DETAIL_COL.quantity];
 
-/**
- * `readTsv` / `columnIndex` / `pushWarning` được EXPORT để parser phí (0019)
- * dùng chung: report phí lưu kho đặt tên cột bằng GẠCH DƯỚI
- * (`estimated_monthly_storage_fee`) trong khi report tồn kho dùng GẠCH NỐI
- * (`snapshot-date`). columnIndex() đã bỏ cả hai loại dấu nên một bảng ánh xạ
- * dùng được cho cả hai kiểu file — không nhân đôi code.
- */
 const MONTHS: Record<string, number> = {
   jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
   jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
@@ -139,10 +149,6 @@ const pad2 = (n: number) => String(n).padStart(2, "0");
  *   • kiểu Mỹ        09/11/2026 (MM/DD/YYYY — Seller Central NA)
  *   • chữ            Sep 11, 2026
  * Trả về YYYY-MM-DD hoặc NULL nếu không đọc được.
- *
- * Với dạng số có gạch chéo: mặc định hiểu MM/DD/YYYY (thị trường NA của VEXIM),
- * nhưng nếu vị trí đầu > 12 thì rõ ràng là DD/MM → đảo lại. Cả hai trường hợp
- * đều được báo về để tầng trên ghi cảnh báo một lần (không âm thầm đoán).
  */
 export function toIsoDate(raw: string | null): { iso: string | null; ambiguous: boolean } {
   if (!raw) return { iso: null, ambiguous: false };
@@ -161,7 +167,7 @@ export function toIsoDate(raw: string | null): { iso: string | null; ambiguous: 
   if (slash) {
     let m = Number(slash[1]);
     let d = Number(slash[2]);
-    let ambiguous = true; // MM/DD hay DD/MM — phải nói ra, không im lặng
+    let ambiguous = true;
     if (m > 12 && d <= 12) {
       const t = m;
       m = d;
@@ -226,7 +232,7 @@ function noteAmbiguousDate(warnings: string[], label: string, sample: string): v
 }
 
 // ============================================================================
-// (1) GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA — phân bổ tồn theo FC
+// (1) CŨ: GET_FBA_FULFILLMENT_CURRENT_INVENTORY_DATA — phân bổ tồn theo FC
 // ============================================================================
 export function parseFcAllocationReport(text: string): FcAllocationParseResult {
   const warnings: string[] = [];
@@ -264,7 +270,7 @@ export function parseFcAllocationReport(text: string): FcAllocationParseResult {
   let skipped = 0;
   for (let i = 0; i < table.lines.length; i++) {
     const cells = table.lines[i];
-    const lineNo = i + 2; // +1 header, +1 vì index 0-based
+    const lineNo = i + 2;
 
     const sku = at(cells, FC_COL.sku);
     const qty = intOrNull(at(cells, FC_COL.quantity));
@@ -288,7 +294,6 @@ export function parseFcAllocationReport(text: string): FcAllocationParseResult {
       fnsku: at(cells, FC_COL.fnsku),
       productName: at(cells, FC_COL.productName),
       quantity: qty,
-      // FC rỗng → '' (khoá của RPC 0018); UI sẽ hiện "không rõ FC" chứ không bịa.
       fulfillmentCenterId: (at(cells, FC_COL.fc) ?? "").toUpperCase(),
       detailedDisposition: (at(cells, FC_COL.disposition) ?? "").toUpperCase(),
       country: at(cells, FC_COL.country)?.toUpperCase() ?? null,
@@ -296,8 +301,6 @@ export function parseFcAllocationReport(text: string): FcAllocationParseResult {
     });
   }
 
-  // Chỉ thống kê SNAPSHOT MỚI NHẤT: cộng cả các ngày cũ vào một con số là vô nghĩa
-  // (cùng 100 đơn vị của hôm qua và hôm nay sẽ thành 200).
   const snapshotDates = Array.from(new Set(rows.map((r) => r.snapshotDate))).sort();
   const newest = snapshotDates[snapshotDates.length - 1];
   const fcTotals: Record<string, number> = {};
@@ -311,7 +314,119 @@ export function parseFcAllocationReport(text: string): FcAllocationParseResult {
 }
 
 // ============================================================================
-// (2) GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA — lịch sử nhận hàng
+// (1b) MỚI: GET_LEDGER_SUMMARY_VIEW_DATA FC/DAILY → FcAllocationRow
+// ============================================================================
+export function parseLedgerSummaryAsFc(text: string): FcAllocationParseResult {
+  const warnings: string[] = [];
+  const empty: FcAllocationParseResult = {
+    rows: [],
+    warnings,
+    skipped: 0,
+    fcTotals: {},
+    snapshotDates: [],
+  };
+
+  const table = readTsv(text);
+  if (!table) {
+    warnings.push("Ledger Summary FC rỗng (không có dòng dữ liệu nào)");
+    return empty;
+  }
+
+  // Kiểm tra cột bắt buộc của ledger summary
+  const hasDate = columnIndex(table.header, LEDGER_SUMMARY_COL.date) >= 0;
+  const hasEnding = columnIndex(table.header, LEDGER_SUMMARY_COL.endingBalance) >= 0;
+  if (!hasDate || !hasEnding) {
+    const missing = [];
+    if (!hasDate) missing.push(LEDGER_SUMMARY_COL.date);
+    if (!hasEnding) missing.push(LEDGER_SUMMARY_COL.endingBalance);
+    warnings.push(
+      `Ledger Summary FC thiếu cột bắt buộc: ${missing.join(", ")} — ` +
+        `đây có phải file GET_LEDGER_SUMMARY_VIEW_DATA (FC/DAILY) không? Header: ${table.header.join(", ")}`,
+    );
+    return empty;
+  }
+
+  const at = (cells: string[], name: string): string | null => {
+    const k = columnIndex(table.header, name);
+    if (k < 0) return null;
+    const v = cells[k];
+    return v === undefined || v.trim() === "" ? null : v.trim();
+  };
+
+  // Helper lấy cột với nhiều tên thay thế
+  const atAny = (cells: string[], names: string[]): string | null => {
+    for (const n of names) {
+      const v = at(cells, n);
+      if (v !== null) return v;
+    }
+    return null;
+  };
+
+  const rows: FcAllocationRow[] = [];
+  let skipped = 0;
+  for (let i = 0; i < table.lines.length; i++) {
+    const cells = table.lines[i];
+    const lineNo = i + 2;
+
+    // MSKU là SKU chính trong ledger, fallback sku nếu có
+    const sku = atAny(cells, [LEDGER_SUMMARY_COL.msku, LEDGER_SUMMARY_COL.skuAlt, FC_COL.sku, "sku"]);
+    const qtyRaw = at(cells, LEDGER_SUMMARY_COL.endingBalance);
+    const qty = intOrNull(qtyRaw);
+    const dateRaw = at(cells, LEDGER_SUMMARY_COL.date);
+    const date = toIsoDate(dateRaw);
+
+    // Ledger summary có thể có nhiều dòng với quantity 0 → vẫn giữ, nhưng thiếu sku/date/qty thì bỏ
+    if (!sku || qty === null || date.iso === null) {
+      skipped++;
+      pushWarning(
+        warnings,
+        skipped,
+        `Dòng ${lineNo}: thiếu ${!sku ? "MSKU/sku" : qty === null ? "EndingWarehouseBalance" : "Date"} — bỏ qua`,
+      );
+      continue;
+    }
+    if (date.ambiguous) noteAmbiguousDate(warnings, "Ledger Summary FC", dateRaw ?? "");
+
+    // Nếu quantity = 0 thì vẫn giữ để biết FC có SKU nhưng hết tồn? Quyết định giữ, RPC sẽ upsert 0
+    // Nhưng nếu muốn giảm rác, có thể bỏ 0. Hiện tại giữ để I2 hiển thị đúng.
+
+    const fnsku = atAny(cells, [LEDGER_SUMMARY_COL.fnsku, FC_COL.fnsku]);
+    const productName = atAny(cells, [LEDGER_SUMMARY_COL.title, FC_COL.productName, "productname", "title"]);
+    const fcRaw = atAny(cells, [LEDGER_SUMMARY_COL.location, LEDGER_SUMMARY_COL.fcAlt, FC_COL.fc, "fulfillmentcenterid"]);
+    const dispositionRaw = atAny(cells, [LEDGER_SUMMARY_COL.disposition, FC_COL.disposition, "detaileddisposition"]);
+    const countryRaw = atAny(cells, [LEDGER_SUMMARY_COL.country, LEDGER_SUMMARY_COL.countryAlt, FC_COL.country]);
+
+    rows.push({
+      snapshotDate: date.iso,
+      sku,
+      fnsku,
+      productName,
+      quantity: qty,
+      fulfillmentCenterId: (fcRaw ?? "").toUpperCase(),
+      detailedDisposition: (dispositionRaw ?? "").toUpperCase(),
+      country: countryRaw?.toUpperCase() ?? null,
+      source: "report",
+    });
+  }
+
+  const snapshotDates = Array.from(new Set(rows.map((r) => r.snapshotDate))).sort();
+  const newest = snapshotDates[snapshotDates.length - 1];
+  const fcTotals: Record<string, number> = {};
+  for (const r of rows) {
+    if (newest && r.snapshotDate !== newest) continue;
+    const key = r.fulfillmentCenterId === "" ? "(không rõ FC)" : r.fulfillmentCenterId;
+    fcTotals[key] = (fcTotals[key] ?? 0) + r.quantity;
+  }
+
+  if (rows.length === 0 && skipped === 0) {
+    warnings.push("Ledger Summary FC: không có dòng nào sau khi parse — kiểm tra report có rỗng hay filter sai?");
+  }
+
+  return { rows, warnings, skipped, fcTotals, snapshotDates };
+}
+
+// ============================================================================
+// (2) CŨ: GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA — lịch sử nhận hàng
 // ============================================================================
 export function parseReceiptsReport(text: string): ReceiptsParseResult {
   const warnings: string[] = [];
@@ -382,7 +497,124 @@ export function parseReceiptsReport(text: string): ReceiptsParseResult {
 
   const shipmentTotals: Record<string, number> = {};
   for (const r of rows) {
-    if (r.fbaShipmentId === "") continue; // không gắn lô → không đối soát theo lô được
+    if (r.fbaShipmentId === "") continue;
+    shipmentTotals[r.fbaShipmentId] = (shipmentTotals[r.fbaShipmentId] ?? 0) + r.quantity;
+  }
+  const dates = rows.map((r) => r.receivedDate).sort();
+
+  return {
+    rows,
+    warnings,
+    skipped,
+    shipmentTotals,
+    receivedFrom: dates[0] ?? null,
+    receivedTo: dates[dates.length - 1] ?? null,
+  };
+}
+
+// ============================================================================
+// (2b) MỚI: GET_LEDGER_DETAIL_VIEW_DATA (EventType=Receipts) → ReceiptRow
+// ============================================================================
+export function parseLedgerDetailAsReceipts(text: string): ReceiptsParseResult {
+  const warnings: string[] = [];
+  const empty: ReceiptsParseResult = {
+    rows: [],
+    warnings,
+    skipped: 0,
+    shipmentTotals: {},
+    receivedFrom: null,
+    receivedTo: null,
+  };
+
+  const table = readTsv(text);
+  if (!table) {
+    warnings.push("Ledger Detail Receipts rỗng (không có dòng dữ liệu nào)");
+    return empty;
+  }
+
+  const hasDate = columnIndex(table.header, LEDGER_DETAIL_COL.date) >= 0;
+  const hasQty = columnIndex(table.header, LEDGER_DETAIL_COL.quantity) >= 0;
+  const hasEvent = columnIndex(table.header, LEDGER_DETAIL_COL.eventType) >= 0;
+  if (!hasDate || !hasQty) {
+    warnings.push(
+      `Ledger Detail thiếu cột bắt buộc: ${[!hasDate && LEDGER_DETAIL_COL.date, !hasQty && LEDGER_DETAIL_COL.quantity].filter(Boolean).join(", ")} — Header: ${table.header.join(", ")}`,
+    );
+    return empty;
+  }
+
+  const at = (cells: string[], name: string): string | null => {
+    const k = columnIndex(table.header, name);
+    if (k < 0) return null;
+    const v = cells[k];
+    return v === undefined || v.trim() === "" ? null : v.trim();
+  };
+
+  const atAny = (cells: string[], names: string[]): string | null => {
+    for (const n of names) {
+      const v = at(cells, n);
+      if (v !== null) return v;
+    }
+    return null;
+  };
+
+  const rows: ReceiptRow[] = [];
+  let skipped = 0;
+  let filteredNonReceipts = 0;
+
+  for (let i = 0; i < table.lines.length; i++) {
+    const cells = table.lines[i];
+    const lineNo = i + 2;
+
+    // Filter EventType = Receipts nếu có cột eventType
+    if (hasEvent) {
+      const eventType = at(cells, LEDGER_DETAIL_COL.eventType);
+      if (eventType && eventType.toLowerCase() !== "receipts" && eventType.toLowerCase() !== "receipt") {
+        filteredNonReceipts++;
+        continue;
+      }
+    }
+
+    const sku = atAny(cells, [LEDGER_DETAIL_COL.msku, "msku", "sku", RX_COL.sku]);
+    const qtyRaw = at(cells, LEDGER_DETAIL_COL.quantity);
+    const qty = intOrNull(qtyRaw);
+    const dateRaw = at(cells, LEDGER_DETAIL_COL.date);
+    const date = toIsoDate(dateRaw);
+
+    if (!sku || qty === null || date.iso === null) {
+      skipped++;
+      pushWarning(
+        warnings,
+        skipped,
+        `Dòng ${lineNo}: thiếu ${!sku ? "MSKU/sku" : qty === null ? "Quantity" : "Date"} — bỏ qua`,
+      );
+      continue;
+    }
+    if (date.ambiguous) noteAmbiguousDate(warnings, "Ledger Detail Receipts", dateRaw ?? "");
+
+    const fnsku = atAny(cells, [LEDGER_DETAIL_COL.fnsku, FC_COL.fnsku, "fnsku"]);
+    const productName = atAny(cells, [LEDGER_DETAIL_COL.title, "title", "productname"]);
+    const shipmentId = atAny(cells, [LEDGER_DETAIL_COL.referenceId, "referenceid", RX_COL.shipmentId, "fbashipmentid"]);
+    const fc = atAny(cells, [LEDGER_DETAIL_COL.fc, "fulfillmentcenter", FC_COL.fc, "fulfillmentcenterid"]);
+
+    rows.push({
+      receivedDate: date.iso,
+      sku,
+      fnsku,
+      productName,
+      quantity: qty,
+      fbaShipmentId: (shipmentId ?? "").toUpperCase(),
+      fulfillmentCenterId: (fc ?? "").toUpperCase(),
+      source: "report",
+    });
+  }
+
+  if (filteredNonReceipts > 0) {
+    warnings.push(`Ledger Detail: đã lọc ${filteredNonReceipts} dòng không phải Receipts (giữ lại ${rows.length} dòng Receipts)`);
+  }
+
+  const shipmentTotals: Record<string, number> = {};
+  for (const r of rows) {
+    if (r.fbaShipmentId === "") continue;
     shipmentTotals[r.fbaShipmentId] = (shipmentTotals[r.fbaShipmentId] ?? 0) + r.quantity;
   }
   const dates = rows.map((r) => r.receivedDate).sort();
