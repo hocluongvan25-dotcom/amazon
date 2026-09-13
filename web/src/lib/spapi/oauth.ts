@@ -268,6 +268,86 @@ export async function exchangeCodeForRefreshToken(opts: {
   };
 }
 
+/** Host SP-API theo vùng — dùng cho lời gọi ngay trong callback OAuth. */
+export function spapiHost(region: SpApiRegion): string {
+  switch (region) {
+    case "EU":
+      return "sellingpartnerapi-eu.amazon.com";
+    case "FE":
+      return "sellingpartnerapi-fe.amazon.com";
+    default:
+      return "sellingpartnerapi-na.amazon.com";
+  }
+}
+
+export type StoreNameRow = { marketplaceId: string; storeName: string };
+
+/**
+ * Parse storeName từ payload Sellers API getMarketplaceParticipations.
+ * Amazon trả mỗi phần tử dạng { marketplace: {id,...}, participation: {...}, storeName: "..." }
+ * — storeName có thể nằm ở cấp phần tử hoặc (phòng hờ) trong participation.
+ * Hàm THUẦN để test được không cần mạng.
+ */
+export function parseStoreNames(data: unknown): StoreNameRow[] {
+  const root = (typeof data === "object" && data !== null ? (data as Record<string, unknown>) : {});
+  const payload = "payload" in root ? root.payload : data;
+  const list = Array.isArray(payload)
+    ? payload
+    : typeof payload === "object" && payload !== null && Array.isArray((payload as Record<string, unknown>).marketplaceParticipations)
+      ? ((payload as Record<string, unknown>).marketplaceParticipations as unknown[])
+      : [];
+  const out: StoreNameRow[] = [];
+  for (const item of list) {
+    if (typeof item !== "object" || item === null) continue;
+    const row = item as Record<string, unknown>;
+    const mp = (typeof row.marketplace === "object" && row.marketplace !== null ? (row.marketplace as Record<string, unknown>) : row);
+    const part = typeof row.participation === "object" && row.participation !== null ? (row.participation as Record<string, unknown>) : null;
+    const marketplaceId = typeof mp.id === "string" ? mp.id : "";
+    const storeName =
+      typeof row.storeName === "string" && row.storeName.trim() !== ""
+        ? row.storeName.trim()
+        : typeof part?.storeName === "string" && (part.storeName as string).trim() !== ""
+          ? (part.storeName as string).trim()
+          : "";
+    if (marketplaceId && storeName) out.push({ marketplaceId, storeName });
+  }
+  return out;
+}
+
+/**
+ * Gọi Sellers API lấy tên cửa hàng THẬT ngay sau khi đổi code lấy token.
+ * Không ném lỗi — tên shop là "nice to have", callback không được fail vì nó.
+ */
+export async function fetchStoreNames(opts: {
+  accessToken: string;
+  region: SpApiRegion;
+  fetchFn?: typeof fetch;
+}): Promise<{ ok: true; stores: StoreNameRow[] } | { ok: false; error: string }> {
+  const fetchFn = opts.fetchFn ?? fetch;
+  try {
+    const res = await fetchFn(`https://${spapiHost(opts.region)}/sellers/v1/marketplaceParticipations`, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        "x-amz-access-token": opts.accessToken,
+        "User-Agent": "VeximOps/1.0 (Language=TypeScript)",
+      },
+      cache: "no-store",
+    });
+    const text = await res.text();
+    if (!res.ok) return { ok: false, error: `HTTP ${res.status}: ${text.slice(0, 200)}` };
+    let json: unknown = null;
+    try {
+      json = text ? JSON.parse(text) : null;
+    } catch {
+      return { ok: false, error: "response không phải JSON" };
+    }
+    return { ok: true, stores: parseStoreNames(json) };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
 /** Thông báo tiếng Việt cho người dùng — không phơi chi tiết kỹ thuật thô. */
 export function explainLwaError(error: string, description: string | null): string {
   switch (error) {

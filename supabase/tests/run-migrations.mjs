@@ -4336,6 +4336,63 @@ ok(await mustBlock(`select * from public.vexim_rename_shop('ab270000-0000-4000-8
   "0027 CHẶN: chưa đăng nhập không đổi tên được");
 await ex(`delete from connections.seller_accounts where id='ab270000-0000-4000-8000-000000000001'`, "dọn fixture 0027");
 
+// ===========================================================================
+console.log("\n=== BƯỚC 27: 0028 — tên cửa hàng THẬT từ Amazon (storeName) ===");
+// ===========================================================================
+// Callback OAuth có access token ngay sau exchange → gọi Sellers API
+// getMarketplaceParticipations lấy storeName thật → RPC worker lưu vào
+// display_name. Quy tắc: tên manual (người vận hành đặt) KHÔNG bị ghi đè.
+ok(
+  await ex(rd("migrations/0028_shop_name_from_amazon.sql"), "0028_shop_name_from_amazon.sql"),
+  "0028 chạy sạch (DO-block tự soát: cột name_source, RPC set_shop_name, get_shop 5 cột)",
+);
+ok(await ex(rd("migrations/0028_shop_name_from_amazon.sql"), "0028 lần 2"), "0028 idempotent");
+
+// Fixture: shop khách US, tên mặc định generic (name_source='default')
+await ex("select set_config('request.jwt.claim.sub','',false)");
+await ex(`insert into connections.seller_accounts (id, org_id, seller_id, marketplace, display_name, status, data_source)
+  select 'ab280000-0000-4000-8000-000000000001', org_id, 'A9KHACHHANG2', 'ATVPDKIKX0DER', 'Shop US · A9KH', 'active', 'production'
+  from connections.seller_accounts limit 1`, "fixture shop khách 0028 (US, tên generic)");
+
+// get_shop bản mới phải trả marketplace + name_source
+const gs28 = await at(`select * from public.vexim_worker_get_shop('ab280000-0000-4000-8000-000000000001')`);
+ok(gs28.marketplace === "ATVPDKIKX0DER" && gs28.name_source === "default",
+  `0028 get_shop: trả marketplace + name_source — got mp=${gs28.marketplace} src=${gs28.name_source}`);
+
+// storeName Amazon GHI ĐÈ tên mặc định
+const sn28a = await at(`select * from public.vexim_worker_set_shop_name('ab280000-0000-4000-8000-000000000001', '  Cửa hàng ABC Official  ')`);
+const row28a = await one(`select display_name, name_source from connections.seller_accounts where id='ab280000-0000-4000-8000-000000000001'`);
+ok(sn28a.updated === true && row28a.display_name === "Cửa hàng ABC Official" && row28a.name_source === "amazon",
+  `0028 set_shop_name: storeName Amazon ghi đè tên mặc định (trim + name_source=amazon) — got: ${row28a.display_name}/${row28a.name_source}`);
+
+// Gọi lại cùng tên → không update (idempotent, updated=false)
+const sn28b = await at(`select * from public.vexim_worker_set_shop_name('ab280000-0000-4000-8000-000000000001', 'Cửa hàng ABC Official')`);
+ok(sn28b.updated === false, `0028 set_shop_name: tên đã khớp thì updated=false — ${J(sn28b)}`);
+
+// storeName rỗng → bỏ qua, không đụng tên hiện tại
+const sn28c = await at(`select * from public.vexim_worker_set_shop_name('ab280000-0000-4000-8000-000000000001', '   ')`);
+const row28c = await one(`select display_name from connections.seller_accounts where id='ab280000-0000-4000-8000-000000000001'`);
+ok(sn28c.updated === false && row28c.display_name === "Cửa hàng ABC Official",
+  "0028 set_shop_name: storeName rỗng → bỏ qua, giữ tên cũ");
+
+// Người vận hành rename tay → name_source='manual' → Amazon KHÔNG ghi đè nữa
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+await at(`select * from public.vexim_rename_shop('ab280000-0000-4000-8000-000000000001', 'Tên Do Người Vận Hành Đặt')`);
+const row28d = await one(`select name_source from connections.seller_accounts where id='ab280000-0000-4000-8000-000000000001'`);
+ok(row28d.name_source === "manual", `0028 rename tay: name_source=manual — got: ${row28d.name_source}`);
+await ex("select set_config('request.jwt.claim.sub','',false)");
+const sn28d = await at(`select * from public.vexim_worker_set_shop_name('ab280000-0000-4000-8000-000000000001', 'Store Name Từ Amazon')`);
+const row28e = await one(`select display_name from connections.seller_accounts where id='ab280000-0000-4000-8000-000000000001'`);
+ok(sn28d.updated === false && row28e.display_name === "Tên Do Người Vận Hành Đặt",
+  `0028 ƯU TIÊN: tên manual KHÔNG bị storeName Amazon ghi đè — got: ${row28e.display_name}`);
+
+// authenticated/anon không gọi được RPC worker
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+ok(await mustBlock(`select * from public.vexim_worker_set_shop_name('ab280000-0000-4000-8000-000000000001', 'Hack Name')`),
+  "0028 CHẶN: user đăng nhập không gọi được RPC worker set_shop_name");
+await ex("select set_config('request.jwt.claim.sub','',false)");
+await ex(`delete from connections.seller_accounts where id='ab280000-0000-4000-8000-000000000001'`, "dọn fixture 0028");
+
 console.log(`\n${"=".repeat(70)}`);
 console.log(fails === 0 ? "TẤT CẢ PASS" : `${fails} MỤC FAIL`);
 console.log("=".repeat(70));

@@ -27,13 +27,25 @@
 
 import { NextResponse } from "next/server";
 
-import { normalizeRegion, exchangeCodeForRefreshToken, explainLwaError, validateRedirectUri } from "@/lib/spapi/oauth";
+import {
+  normalizeRegion,
+  exchangeCodeForRefreshToken,
+  explainLwaError,
+  fetchStoreNames,
+  validateRedirectUri,
+} from "@/lib/spapi/oauth";
 
 export const dynamic = "force-dynamic";
 
-const SHOP_SELECT = "id,display_name,seller_id";
+const SHOP_SELECT = "id,display_name,seller_id,marketplace";
 
-type ShopRow = { id: string; display_name: string | null; seller_id: string | null };
+type ShopRow = {
+  id: string;
+  display_name: string | null;
+  seller_id: string | null;
+  /** null khi DB chưa chạy 0028 (get_shop bản cũ chỉ trả 3 cột) */
+  marketplace?: string | null;
+};
 
 function back(req: Request, params: Record<string, string>): NextResponse {
   const url = new URL("/module0/connect", new URL(req.url).origin);
@@ -264,6 +276,40 @@ export async function GET(req: Request) {
         | { claimed?: boolean; message?: string }
         | undefined;
       console.log(`[OAuth Callback] claim seller_id: claimed=${claimRow?.claimed} msg=${claimRow?.message}`);
+    }
+  }
+
+  // ---- Lấy TÊN CỬA HÀNG THẬT từ Amazon (Sellers API storeName) --------------
+  // Access token vừa đổi được còn sống ~1h — gọi luôn getMarketplaceParticipations
+  // để lấy storeName thật thay vì tên mặc định 'Shop US · XXXX'. NON-FATAL:
+  // token đã lưu OK, thiếu tên đẹp không được làm fail cả luồng.
+  if (exchanged.accessToken) {
+    const region = normalizeRegion(process.env.AMAZON_SP_API_REGION);
+    const stores = await fetchStoreNames({ accessToken: exchanged.accessToken, region });
+    if (!stores.ok) {
+      console.warn(`[OAuth Callback] fetch storeName failed (non-fatal): ${stores.error}`);
+    } else if (stores.stores.length === 0) {
+      console.log(`[OAuth Callback] Amazon không trả storeName nào — giữ tên hiện tại`);
+    } else {
+      // Chọn storeName đúng marketplace của shop; không khớp thì lấy cái đầu tiên
+      const shopMarketplace = (shop.marketplace ?? "").trim();
+      const match =
+        stores.stores.find((s) => s.marketplaceId === shopMarketplace) ?? stores.stores[0];
+      const named = await adminRest("/rest/v1/rpc/vexim_worker_set_shop_name", {
+        method: "POST",
+        body: { p_seller: sellerId, p_name: match.storeName },
+      });
+      if (!named.ok) {
+        // PGRST202 = chưa push migration 0028 — chỉ log, không fail
+        console.warn(
+          `[OAuth Callback] set_shop_name failed (non-fatal${isMissingRpc(named) ? " — chưa push migration 0028?" : ""}): ${named.error}`,
+        );
+      } else {
+        const namedRow = (Array.isArray(named.data) ? named.data[0] : named.data) as
+          | { updated?: boolean; message?: string }
+          | undefined;
+        console.log(`[OAuth Callback] storeName Amazon: updated=${namedRow?.updated} msg=${namedRow?.message}`);
+      }
     }
   }
 
