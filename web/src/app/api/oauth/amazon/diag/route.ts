@@ -41,14 +41,14 @@ export async function GET(req: Request) {
   // Phân tích log bạn gửi
   const logAnalysis = {
     yourLog: {
-      redirectUri: "https://vexim.vercel.app/api/oauth/amazon/callback",
-      appId: "amzn1.sp.solution.ee3dce31-d836-4416-ada5-9a29178b0937",
-      region: "NA",
+      redirectUri: redirectUri || "https://amazon-dx1l.vercel.app/api/oauth/amazon/callback",
+      appId: appId || "amzn1.sp.solution.ee3dce31-d836-4416-ada5-9a29178b0937",
+      region: region,
       versionBeta: "có (version=beta trong URL)",
-      status: "redirect_uri OK theo env, nhưng vẫn MD9100",
+      status: "redirect_uri OK theo env, nhưng vẫn MD9100 nếu Console lệch",
     },
-    conclusion: "Log cho thấy code đã đúng (có beta, redirect_uri OK theo env), nhưng Amazon vẫn báo MD9100 → 99% là redirect_uri trong Console LWA Credentials KHÔNG khớp 100% với env, hoặc App Draft thiếu Test Accounts / sai Region",
-    mostLikelyCause: "Allowed Return URLs trong Console đang là https://vexim.vercel.app/api/oauth/amazon/callback/ (CÓ / cuối) hoặc https://www.vexim.vercel.app/... hoặc http, trong khi env là https://vexim.vercel.app/api/oauth/amazon/callback (KHÔNG / cuối) — lệch 1 ký tự là MD9100",
+    conclusion: "Log cho thấy code đã đúng (có beta, redirect_uri OK theo env), nhưng Amazon vẫn báo MD9100 → 99% là redirect_uri trong Console LWA Credentials KHÔNG khớp 100% với env, hoặc App Draft thiếu Test Accounts / sai Region. Hiện tại production đúng phải là https://amazon-dx1l.vercel.app/api/oauth/amazon/callback",
+    mostLikelyCause: `Allowed Return URLs trong Console đang là ${redirectUri}/ (CÓ / cuối) hoặc https://www... hoặc http, trong khi env là ${redirectUri} (KHÔNG / cuối) — lệch 1 ký tự là MD9100. Domain đúng hiện tại là https://amazon-dx1l.vercel.app`,
   };
 
   return NextResponse.json({
@@ -89,7 +89,7 @@ export async function GET(req: Request) {
             `So sánh với env hiện tại: [${redirectUri}] — phải khớp TỪNG KÝ TỰ, bao gồm:`,
             "  - https vs http (phải https)",
             "  - có / cuối hay không (https://.../callback vs https://.../callback/ là KHÁC NHAU → MD9100)",
-            "  - www vs non-www (vexim.vercel.app vs www.vexim.vercel.app)",
+            "  - www vs non-www (amazon-dx1l.vercel.app vs www.amazon-dx1l.vercel.app) — domain đúng hiện tại là amazon-dx1l.vercel.app, KHÔNG phải vexim.vercel.app (vexim là project retail khác)",
             "  - chữ hoa/thường, port",
             `Hiện tại env: ${redirectUri} — ${redirectUri.endsWith("/") ? "CÓ / cuối" : "KHÔNG có / cuối"}`,
             "Nếu lệch, sửa trong Console cho khớp 100% với env, HOẶC sửa env cho khớp Console, rồi Redeploy Vercel",
@@ -137,7 +137,7 @@ export async function GET(req: Request) {
       currentRedirectUri: redirectUri,
       steps: [
         "1. Vào developer.amazon.com → Apps & Services → chọn app ee3dce31...",
-        "2. LWA Credentials → Allowed Return URLs → kiểm tra có https://vexim.vercel.app/api/oauth/amazon/callback không, khớp 100% không",
+        "2. LWA Credentials → Allowed Return URLs → kiểm tra có https://amazon-dx1l.vercel.app/api/oauth/amazon/callback không, khớp 100% không (KHÔNG dùng vexim.vercel.app — đó là project retail khác, sẽ 404)",
         "3. Nếu có / cuối trong Console mà env không có → xóa / cuối trong Console hoặc thêm / cuối vào env cho khớp",
         "4. Roles → Test Accounts → thêm email Seller pilot nếu App Draft",
         "5. SP-API → Regions → chọn NA",
