@@ -29,8 +29,16 @@ const config: Config = {
       },
       fontFamily: {
         sans: [
-          "ui-sans-serif", "system-ui", "-apple-system", "Segoe UI",
-          "Roboto", "Helvetica Neue", "Arial", "sans-serif",
+          "var(--font-inter)",
+          "Inter",
+          "ui-sans-serif",
+          "system-ui",
+          "-apple-system",
+          "Segoe UI",
+          "Roboto",
+          "Helvetica Neue",
+          "Arial",
+          "sans-serif",
         ],
       },
     },

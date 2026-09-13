@@ -38,7 +38,8 @@ export default function ViLanding() {
           --radius:14px;
           --shadow:0 1px 2px rgba(15,23,32,.05), 0 8px 24px rgba(15,23,32,.06);
         }
-        .landing-wrap{max-width:1120px;margin:0 auto;padding:0 24px}
+        *{ -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; }
+        .landing-wrap{max-width:1120px;margin:0 auto;padding:0 24px; font-family:"Inter", var(--font-inter, "Inter"), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; letter-spacing:-0.011em}
         .landing-header{position:sticky;top:0;z-index:50;background:rgba(255,255,255,.86);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
         .landing-nav{display:flex;align-items:center;gap:28px;height:68px}
         .landing-logo{display:flex;align-items:center;gap:10px;font-weight:900;font-size:18px;letter-spacing:-.02em;color:var(--ink)}
