@@ -37,6 +37,9 @@ export default function NewUserForm() {
   const [error, setError] = useState<string | null>(null);
   const [createdName, setCreatedName] = useState("");
   const [createdEmail, setCreatedEmail] = useState("");
+  const [inviteRedirect, setInviteRedirect] = useState<string | null>(null);
+  const [siteWarning, setSiteWarning] = useState<string | null>(null);
+  const [siteOrigin, setSiteOrigin] = useState<string | null>(null);
 
   useEffect(() => {
     if (!supabase) return;
@@ -71,8 +74,9 @@ export default function NewUserForm() {
     setSubmitting(true);
     try {
       if (isDemo) {
-        // DEMO: giả lập thành công
         await new Promise((r) => setTimeout(r, 600));
+        setInviteRedirect("http://localhost:3000/invite");
+        setSiteOrigin("http://localhost:3000");
       } else {
         const deptCode = depts.find((d) => d.id === deptId)?.code ?? null;
         const res = await fetch("/api/admin/invite-user", {
@@ -85,6 +89,9 @@ export default function NewUserForm() {
         });
         const j = await res.json();
         if (!res.ok) throw new Error(j.error ?? "Lỗi không xác định");
+        if (j.inviteRedirect) setInviteRedirect(j.inviteRedirect);
+        if (j.warning) setSiteWarning(j.warning);
+        if (j.siteOrigin) setSiteOrigin(j.siteOrigin);
       }
       setCreatedName(name);
       setCreatedEmail(email);
@@ -106,16 +113,34 @@ export default function NewUserForm() {
           {selectedShops.length > 0 ? <> · {selectedShops.length} shop</> : null}
         </div>
         {sendInvite && !isDemo ? (
-          <div className="mt-1 text-[12px] text-[#0b7a55]">Email mời đặt mật khẩu đã được gửi đến {createdEmail}.</div>
+          <>
+            <div className="mt-1 text-[12px] text-[#0b7a55]">Email mời đặt mật khẩu đã được gửi đến {createdEmail}.</div>
+            {inviteRedirect ? (
+              <div className="mt-2 rounded-[8px] border border-line bg-card px-3 py-2 text-[11.5px] text-muted">
+                Link trong email sẽ mở trang đặt mật khẩu tại <code className="font-bold">{inviteRedirect}</code>
+                {siteOrigin ? <> (origin: <code>{siteOrigin}</code>)</> : null}.
+              </div>
+            ) : null}
+            {siteWarning ? (
+              <div className="mt-2 rounded-[8px] border-2 border-amber/60 bg-amber-soft px-3 py-2 text-[11.5px] font-bold text-[#8a5602]">
+                ⚠️ {siteWarning}
+              </div>
+            ) : null}
+          </>
         ) : isDemo ? (
-          <div className="mt-1 text-[12px] text-[#0b7a55]">Đang ở DEMO MODE — không gửi email thật.</div>
+          <>
+            <div className="mt-1 text-[12px] text-[#0b7a55]">Đang ở DEMO MODE — không gửi email thật.</div>
+            <div className="mt-2 rounded-[8px] border border-line bg-card px-3 py-2 text-[11.5px] text-muted">
+              Link trong email sẽ mở trang đặt mật khẩu tại <code className="font-bold">/invite</code> (DEMO: {inviteRedirect ?? "http://localhost:3000/invite"}).
+            </div>
+          </>
         ) : null}
         <div className="mt-4 flex flex-wrap gap-2">
           <button onClick={() => router.push("/module0/users")}
             className="h-9 rounded-full bg-green px-4 py-2 text-[12.5px] font-extrabold text-white hover:bg-[#0b7a55]">
             Về danh sách người dùng →
           </button>
-          <button onClick={() => { setDone(false); setName(""); setEmail(""); setPhone(""); setSelectedShops([]); }}
+          <button onClick={() => { setDone(false); setName(""); setEmail(""); setPhone(""); setSelectedShops([]); setInviteRedirect(null); setSiteWarning(null); }}
             className="h-9 rounded-full border border-line bg-card px-4 py-2 text-[12.5px] font-bold text-muted">
             ＋ Tạo tiếp người dùng
           </button>
@@ -234,7 +259,7 @@ export default function NewUserForm() {
           <label className="mt-3 flex items-start gap-2 text-[12.5px]">
             <input type="checkbox" checked={sendInvite} onChange={(e) => setSendInvite(e.target.checked)}
               className="mt-0.5 accent-accent" />
-            <span>Gửi email mời đến <b>{email || "địa chỉ trên"}</b> để người dùng tự đặt mật khẩu</span>
+            <span>Gửi email mời đến <b>{email || "địa chỉ trên"}</b> để người dùng tự đặt mật khẩu — Link trong email sẽ mở trang đặt mật khẩu tại <code>/invite</code></span>
           </label>
           {error ? (
             <div className="mt-3 rounded-[8px] bg-red-soft px-3 py-2 text-[12px] font-bold text-[#a01717]">{error}</div>

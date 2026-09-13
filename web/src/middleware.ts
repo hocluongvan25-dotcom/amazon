@@ -16,7 +16,15 @@ import { NextResponse, type NextRequest } from "next/server";
  * (hoặc signature webhook) — KHÔNG đòi cookie session. Phải return next()
  * TRƯỚC khi gọi getUser(), nếu không request không cookie bị 307 /login.
  */
-const PUBLIC_PATHS = ["/login"];
+/**
+ * Đường dẫn công khai KHÔNG yêu cầu đăng nhập:
+ * - /login: trang đăng nhập
+ * - /invite: trang đặt mật khẩu cho người được mời — nhận #access_token (implicit grant)
+ *   từ email. Nếu không mở công khai, request không cookie bị đá về /login và mất token.
+ * - /auth/confirm: xử lý nhánh email template dùng {{ .TokenHash }} (verifyOtp + chặn open-redirect).
+ *   Cũng phải mở công khai, nếu không token_hash bị mất khi redirect.
+ */
+const PUBLIC_PATHS = ["/login", "/invite", "/auth/confirm"];
 const BYPASS_AUTH_PATHS = [
   "/api/cron",
   "/api/webhooks",

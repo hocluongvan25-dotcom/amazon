@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { getSiteOrigin } from "@/lib/site-origin";
 
 /**
  * POST /api/admin/invite-user
@@ -72,6 +73,11 @@ export async function POST(req: Request) {
     }
 
     // 3. Mời qua GoTrue (cần service_role — chỉ ở server)
+    // Tính origin thật để truyền redirect_to: <origin>/invite — nếu không Supabase
+    // dùng Site URL mặc định (localhost:3000) và email toàn link localhost.
+    const site = getSiteOrigin(req);
+    const inviteRedirect = site.inviteUrl;
+
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!url || !key) {
@@ -84,7 +90,7 @@ export async function POST(req: Request) {
         apikey: key,
         Authorization: `Bearer ${key}`,
       },
-      body: JSON.stringify({ email }),
+      body: JSON.stringify({ email, redirect_to: inviteRedirect }),
     });
     if (!adminAuth.ok) {
       const e = await adminAuth.json().catch(() => ({}));
@@ -123,7 +129,16 @@ export async function POST(req: Request) {
     }
 
     const row = (Array.isArray(data) ? data[0] : undefined) as { message?: string } | undefined;
-    return NextResponse.json({ ok: true, userId: newUserId, message: row?.message ?? "Đã tạo tài khoản." });
+    return NextResponse.json({
+      ok: true,
+      userId: newUserId,
+      message: row?.message ?? "Đã tạo tài khoản.",
+      inviteRedirect,
+      siteOrigin: site.origin,
+      siteSource: site.source,
+      warning: site.warning,
+      isLocalhost: site.isLocalhost,
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: msg }, { status: 500 });
