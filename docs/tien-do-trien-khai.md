@@ -2,6 +2,111 @@
 
 > Cập nhật: 13/09/2026 · Thứ tự build đã chốt: **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** (21 màn Đợt 1)
 
+## Cập nhật 13/09 — MODULE 5 PHẦN 2 & 3 (A2 · A3 · GHI NGƯỢC LÊN AMAZON: hàng đợi duyệt > 30%/ngày · audit · REVERT 1 chạm) — migration 0021
+
+Phần 2 (đọc sâu) và phần 3 (ghi thật) của Module 5 đã xong trong cùng một đợt, vì
+**A3 không có nghĩa nếu bấm "chặn" mà không có đường ghi**. Một đường ghi duy nhất:
+
+```
+web (RPC 0021)  →  ads.change_requests (hàng đợi + máy trạng thái)
+                →  worker:ads-apply / cron 03:00  →  Amazon Ads API v3 (PUT/POST)
+                →  ghi kết quả + iam.audit_logs  →  gương DB (campaign/target/negative)
+```
+
+### Luật duyệt nằm ở DB, không ở màn hình (SOP-05 bước 4)
+
+- `ads.approval_reason(action, before, after, entity)`: `pct = round((after−before)*100/before, 1)`,
+  **> 30 ⇒ "Tăng X%/ngày > 30% (SOP-05 bước 4) ⇒ cần trưởng phòng PPC duyệt."**
+- Trigger `ads.change_request_guard` **tính LẠI `requires_approval` khi INSERT** ⇒ client gửi
+  `requiresApproval: false` cũng vô ích (đã có test đúng ca này).
+- Không đọc được giá trị cũ (before NULL/≤ 0) ⇒ **đòi duyệt** (không đoán).
+- Tăng bid > 30% cũng cần duyệt (tiền chảy như nhau); **GIẢM** giá ⇒ tự duyệt.
+- `PAUSED → ENABLED` (bật lại) ⇒ cần duyệt; `ENABLED → PAUSED` (chặn chi tiêu) ⇒ tự chạy.
+- **Negative keyword KHÔNG cần ngưỡng** (là hành động giảm chi tiêu) nhưng vẫn đi cùng đường ghi
+  và vẫn có audit.
+- Người yêu cầu CHÍNH LÀ trưởng phòng PPC ⇒ tự duyệt, `decided_by` vẫn ghi rõ (audit đọc được).
+- Người duyệt: `iam.is_ads_approver()` = `super_admin`/`org_admin` **hoặc `dept_lead` phòng PPC**
+  (trưởng phòng Listing không duyệt được thay đổi quảng cáo — có test chặn).
+
+### Máy trạng thái + chống mất dấu khi Amazon throttle
+
+`pending_approval → approved|rejected|cancelled` · `approved → applying|cancelled` ·
+`applying → applied|failed|approved (trả lại hàng đợi khi 429/5xx)` · `failed → approved|cancelled`.
+Dòng `applied` **không sửa được nội dung** (bằng chứng audit, trigger chặn UPDATE).
+`attempts` tăng mỗi lần claim; RPC `vexim_worker_release_ads_change` đưa dòng `applying` về
+`approved` **giữ nguyên số lần thử** ⇒ sáng hôm sau worker gửi tiếp, **không bắt trưởng phòng duyệt lại**.
+
+### Ghi lên Amazon — Ads API v3 (4 lời gọi)
+
+| Việc | API | Ghi chú |
+|---|---|---|
+| Ngân sách ngày | `PUT /sp/campaigns` | `{campaignId, budget:{budgetType:"DAILY", budget:round2(v)}}` |
+| Bid từ khoá | `PUT /sp/keywords` | bid làm tròn 2 chữ số; state `ENABLED`/`PAUSED` |
+| Thêm negative | `POST /sp/negativeKeywords` | `NEGATIVE_EXACT`/`NEGATIVE_PHRASE`, `state: ENABLED` |
+| Đọc negative | `GET /sp/negativeKeywords` | đồng bộ về gương `ads.negative_keywords` |
+
+**HTTP 200 KHÔNG phải thành công.** Ads v3 trả 200 kèm `[{code:"INVALID_ARGUMENT"}]`; nặng hơn,
+có lần trả 200 + `[]` (không phần tử nào). `normalizeWriteResponse` xử lý cả hai:
+`ok = sentCount > 0 && items.length > 0 && failed === 0`. Thất bại ⇒ **KHÔNG ghi giá trị cục bộ**
+(không để DB khoe số mà Amazon chưa hề nhận) + ghi `error` để người vận hành đọc.
+
+### An toàn dữ liệu của worker (đúng như 2 job Ads trước)
+
+- Chỉ ghi DB thật khi `mode === "production"`; thiếu credential Ads ⇒ `skipped` kèm hướng dẫn,
+  **không bắn yêu cầu nào lên Amazon**.
+- Thiếu `ads_profile_id` ⇒ dừng yêu cầu đó (không đoán profile — ghi sai shop là tiêu tiền sai shop).
+- 401/403 ⇒ **trả lại hàng đợi** (không tính là thất bại, không bắt duyệt lại) + `needsReauth` để
+  Module 0 nhắc kết nối lại.
+- 429/5xx ⇒ trả lại hàng đợi, tối đa `maxAttempts = 5` rồi mới `failed`.
+
+### Màn hình
+
+- **A2 `/ppc/campaigns/[campaignId]`** — ad group → từ khoá/nhóm sản phẩm: đổi bid, tạm dừng/bật lại
+  từ khoá, nới ngân sách campaign, danh sách negative đã chặn. Bấm campaign ở A1 là sang A2.
+- **A3 `/ppc/search-terms`** — bảng search term với **bộ lọc mặc định = luật SOP-04** (≥ 5 click ·
+  chi ≥ 10 · 0 đơn trong 7 ngày), gợi ý Exact/Phrase kèm **bằng chứng + lý do + độ tin cậy**;
+  duyệt/từ chối từng gợi ý; dòng **đã chặn thì không hiện nút** (chống tạo yêu cầu trùng).
+- **P3 `/ppc/approvals`** — 3 nhóm: *chờ trưởng phòng duyệt* (chưa gửi gì lên Amazon) · *đã duyệt
+  chờ worker gửi* · *đã xong*; nút Duyệt/Từ chối/Huỷ + **REVERT 1 chạm** cho Ops; kèm nhật ký
+  `iam.audit_logs` đọc từ `vexim_ads_audit`.
+- Web **không** dùng service_role, **không** ghi thẳng bảng: mọi nút đi qua 5 RPC `vexim_*` của 0021
+  (RLS + `iam.can_write_seller_account` quyết định quyền). Hai hàm hỏi quyền
+  (`vexim_can_ads_approve`, `vexim_can_write_ads`) chỉ để **ẩn/hiện nút cho đúng** — không phải phân quyền.
+
+### REVERT 1 chạm (Ops)
+
+Revert **không sửa dòng cũ**: nó tạo một yêu cầu MỚI đi ngược lại (`payload.revertOf = id gốc`), dòng gốc
+được đánh dấu `reverted_by` và **mất nút Revert** (chống đảo hai lần). Đảo một lần giảm giá ⇒ tự duyệt;
+đảo một lần tăng ngân sách ⇒ vẫn phải qua trưởng phòng. Negative keyword **không revert qua API**
+(Amazon không có endpoint xoá theo cách này) — DB từ chối và nói rõ phải xoá trên console rồi sync lại.
+
+### Vá lỗi RLS tự tham chiếu (phát hiện khi đọc tên người duyệt)
+
+Khi làm hàng đợi duyệt thì thấy **không đọc được tên người yêu cầu/người duyệt**: policy đọc của
+`iam.user_profiles` / `iam.role_assignments` / `iam.assignments` (và 3 policy của `ops.*`) **truy vấn
+vòng tròn chính bảng bị RLS bảo vệ** ⇒ Postgres báo `infinite recursion detected in policy for relation`
+và **mọi câu SELECT trên các bảng đó đều lỗi** cho user thật (không phải lỗi quyền — là lỗi hạ tầng).
+0021 §0 vá bằng 2 hàm `SECURITY DEFINER` (`iam.has_role(text[])`, `iam.current_org_id()`) rồi tạo lại
+11 policy với **đúng ngữ nghĩa cũ**; harness có test cho cả hai chiều (đọc được hồ sơ của mình +
+không thấy hồ sơ người khác, hết đệ quy ⇒ đọc được `ops.alert_rules`).
+
+### Kiểm chứng đợt này
+
+```bash
+cd supabase && npm test    # BƯỚC 22 của 0021: 551 kiểm tra — TẤT CẢ PASS (gồm 429→release→thử lại, revert, RLS, tự soát)
+cd worker   && npm test    # 443 test (39 test mới cho chiều GHI: payload v3 · 200-vẫn-là-lỗi · claim chỉ dòng đã duyệt · release khi throttle)
+cd web      && npm test    # 169 test (8 test mới: bộ lọc SOP-04 · nhãn trạng thái · % hiển thị · hợp đồng cột)
+cd web      && npx tsc --noEmit && npx next build   # sạch
+```
+
+### CÒN LẠI của Module 5
+
+1. Chạy `0021` trên Supabase rồi `npm run worker:ads-sync` → `ads:pull` → **`ads:apply`** (lần đầu nên
+   `--dry-run` để xem worker sẽ gửi gì).
+2. Gợi ý negative do job tổng hợp sinh trong `ads.negative_suggestions` (0020) — phần A3 chỉ **duyệt**;
+   muốn tinh chỉnh ngưỡng gợi ý thì sửa rule `ads.negative_suggestions` của 0020.
+3. Amazon Marketing Stream (giờ cạn ngân sách) vẫn là hạng mục chưa làm — Reporting v3 không có hourly.
+
 ## Cập nhật 13/09 — MODULE 5 PHẦN 1 (AMAZON ADS: campaign số thật + cảnh báo ACOS/ngân sách + ads_spend → F4/TACOS) + MODULE 0: KẾT NỐI SHOP THẬT (migration 0020)
 
 Module 5 chia 3 phần như cách đã làm với Module 3. **Phần 1 (đợt này) = đọc + A1 chạy số thật**:
@@ -901,6 +1006,7 @@ nên không phụ thuộc bước này).
 - ✅ Tạo project Supabase (`pitmyzovjwflkyoqjbkz`) + set 14 biến môi trường trên Vercel — **xong 12/09**
 - ☐ **Chạy `0006` rồi `0007` trong SQL Editor** (dọn fixture test + tạo super_admin/alerts)
 - ☐ Chạy `0008` → `0009` → **`0010`** (wrapper RPC · shop production · hạ tầng Module 4/6/7)
+- ☐ **Chạy `0020` rồi `0021`** (Amazon Ads đọc + phần 2/3: hàng đợi duyệt · audit · revert) — 0021 cần chạy SAU 0020
 - ☐ ✅ `0011`/`0012`/`0013` đã chạy · ☐ **`0014`** (trình soạn listing L3) · ☐ **`0015`** (bồi hoàn FBA + lợi nhuận SKU) · ☐ **`0016`** (Đợt A: giá vốn + ghi listing + `vexim_pricing` dùng giá vốn) · ☐ **`0017`** (Đợt B: doanh số 30 ngày + người phụ trách + giá trị tồn kho) · ☐ **`0018`** (Module 3 nâng cao: phân bổ tồn theo FC + lịch sử nhận hàng)
 - ☐ **Thêm `CRON_SECRET` trên Vercel** (Production + Preview) → Redeploy
 - ☐ `AMAZON_LWA_CLIENT_ID` / `_CLIENT_SECRET` / `_REFRESH_TOKEN` khi Developer Profile được duyệt — thiếu 3 biến này thì worker chỉ chạy demo trong bộ nhớ (an toàn, không ghi DB thật)
