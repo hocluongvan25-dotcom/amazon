@@ -5,11 +5,14 @@
  * được các module này trực tiếp (Node ESM không tự đoán đuôi file).
  */
 export {
+  ADS_APPLY_CRON,
   ADS_HOSTS,
   ADS_MEDIA,
   ADS_REPORT_MAX_DAYS,
   ADS_REPORT_RETENTION_DAYS,
+  ADS_WRITE_BATCH_SIZE,
   adsHostForRegion,
+  adsWriteEnabled,
   loadAdsConfig,
   type AdsRuntimeConfig,
 } from "./config.ts";
@@ -81,7 +84,12 @@ export {
   type AdsShop,
   type FillAdsSpendResult,
   type PendingAdsReport,
+  type PpcCapLeft,
+  type PpcPendingBatch,
+  type PpcResultRow,
+  type PpcSetResultRow,
   type UpsertCounts,
+  PPC_REQUEST_SELECT,
 } from "./db.ts";
 
 export {
@@ -94,3 +102,40 @@ export {
   type AdsSyncShopResult,
   type AdsSyncStep,
 } from "./sync.ts";
+
+export {
+  ADS_WRITE_OPS,
+  VERIFY_TOLERANCE,
+  buildWriteItem,
+  chunk,
+  emptySnapshot,
+  groupByOp,
+  isSponsoredProducts,
+  matchResults,
+  negativeKey,
+  numOrNull,
+  opForRequest,
+  parseMultiStatus,
+  readSnapshot,
+  roundBid,
+  runAdsApply,
+  strOrNull,
+  toWireMatchType,
+  NEGATIVE_MATCH_TYPES,
+  verifyRequest,
+  type AdsApplyCounts,
+  type AdsApplyOptions,
+  type AdsApplyResult,
+  type AdsApplyShopResult,
+  type AmazonSnapshot,
+  type ApplyItemResult,
+  type MultiStatus,
+  type MultiStatusEntry,
+  type MultiStatusError,
+  type PpcChangeRequest,
+  type PpcChangeType,
+  type PpcEntityType,
+  type VerifyOutcome,
+  type WriteOp,
+  type WriteOpKey,
+} from "./write.ts";

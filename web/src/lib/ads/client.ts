@@ -76,7 +76,11 @@ export class AdsClient {
     return h;
   }
 
-  async request<T = unknown>(method: "GET" | "POST", path: string, opts: RequestOptions = {}): Promise<T> {
+  async request<T = unknown>(
+    method: "GET" | "POST" | "PUT",
+    path: string,
+    opts: RequestOptions = {},
+  ): Promise<T> {
     const url = new URL(`${this.host}${path.startsWith("/") ? path : `/${path}`}`);
     if (opts.query) {
       for (const [k, v] of Object.entries(opts.query)) {
@@ -119,6 +123,9 @@ export class AdsClient {
       );
     }
 
+    // 207 Multi-Status (chiều GHI SP v3) vẫn là res.ok — trong body có cả
+    // success[] lẫn error[]. Tầng ghi tự tách (parseMultiStatus trong write.ts);
+    // ở đây chỉ đánh dấu status để log không nhầm "thành công tuyệt đối".
     if (!res.ok) {
       const text = await safeText(res);
       throw new AdsApiError(

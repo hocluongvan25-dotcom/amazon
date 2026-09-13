@@ -13,6 +13,7 @@
  *   RPC nằm ở public → không cần header.
  */
 import type { AdsTokenRow, TokenStore } from "./tokens.ts";
+import type { PpcChangeRequest, PpcChangeType, PpcEntityType } from "./write.ts";
 
 export class AdsDbError extends Error {
   readonly code: string;
@@ -38,6 +39,10 @@ export const ADS_RPC = {
   raiseAlerts: "vexim_ads_raise_alerts",
   fillProfitAdsSpend: "vexim_worker_fill_profit_ads_spend",
   recordEvent: "vexim_oauth_record_event",
+  /** Module 5 PHẦN 2&3 (migration 0021) — chiều GHI PPC. */
+  ppcPendingChanges: "vexim_worker_ppc_pending_changes",
+  ppcSetResult: "vexim_worker_ppc_set_result",
+  ppcRaiseAlerts: "vexim_ppc_raise_alerts",
 } as const;
 
 /** Cột đọc từ connections.oauth_tokens — KHÔNG select encrypted token ngoài lúc cần đổi. */
@@ -64,6 +69,70 @@ export type AdsShop = {
   status: string | null;
   dataSource: string | null;
 };
+
+/** Cột đọc khi dryRun duyệt hàng đợi (không giành lô). */
+export const PPC_REQUEST_SELECT = [
+  "id",
+  "seller_account_id",
+  "ads_profile_id",
+  "entity_type",
+  "change_type",
+  "amazon_entity_id",
+  "campaign_id",
+  "ad_group_id",
+  "label",
+  "match_type",
+  "currency",
+  "before_value",
+  "after_value",
+  "delta_pct",
+  "attempts",
+  "batch_id",
+  "status",
+  "proposed_at",
+  "decided_at",
+  "expires_at",
+  "claimed_at",
+  "last_error",
+].join(",");
+
+/** Đổi tên cột snake_case (RPC/bảng) → PpcChangeRequest của write.ts. */
+function toPpcRequest(r: Record<string, unknown>): PpcChangeRequest {
+  return {
+    requestId: String(r.request_id ?? r.id ?? ""),
+    sellerAccountId: String(r.seller_account_id ?? ""),
+    shop: toStr(r.shop),
+    adsProfileId: toStr(r.ads_profile_id) ?? "",
+    entityType: (toStr(r.entity_type) ?? "campaign") as PpcEntityType,
+    changeType: (toStr(r.change_type) ?? "bid") as PpcChangeType,
+    amazonEntityId: toStr(r.amazon_entity_id) ?? "",
+    campaignId: toStr(r.campaign_id) ?? "",
+    adGroupId: toStr(r.ad_group_id) ?? "",
+    label: toStr(r.label) ?? "",
+    matchType: toStr(r.match_type),
+    currency: toStr(r.currency),
+    beforeValue: asRecord(r.before_value),
+    afterValue: asRecord(r.after_value),
+    deltaPct: toNumOrNull(r.delta_pct),
+    attempts: toNum(r.attempts),
+    batchId: toStr(r.batch_id),
+    campaignType: toStr(r.campaign_type),
+    campaignName: toStr(r.campaign_name),
+    campaignState: toStr(r.campaign_state),
+    campaignDailyBudget: toNumOrNull(r.campaign_daily_budget),
+    status: toStr(r.status),
+    lastError: toStr(r.last_error),
+    proposedAt: toStr(r.proposed_at),
+    decidedAt: toStr(r.decided_at),
+    expiresAt: toStr(r.expires_at),
+    claimedAt: toStr(r.claimed_at),
+  };
+}
+
+function asRecord(v: unknown): Record<string, unknown> | null {
+  if (v && typeof v === "object" && !Array.isArray(v)) return v as Record<string, unknown>;
+  return null;
+}
 
 export type AdsReportRequestInput = {
   reportTypeId: string;
@@ -130,6 +199,52 @@ export type AdsAlertRow = {
   nextAction: string | null;
 };
 
+/** Một đề xuất ĐÃ DUYỆT trong hàng đợi, do RPC worker trả về (đã đổi tên cột). */
+export type PpcCapLeft = {
+  sellerAccountId: string;
+  shop: string | null;
+  dailyCap: number;
+  usedToday: number;
+  waiting: number;
+};
+
+/** Lô hàng RPC "giành" cho cron: status approved → applying + batch_id + attempts+1. */
+export type PpcPendingBatch = {
+  batchId: string | null;
+  expired: number;
+  reclaimed: number;
+  skippedUnsupported: number;
+  count: number;
+  capLeft: PpcCapLeft[];
+  requests: PpcChangeRequest[];
+};
+
+/** Kết quả MỘT dòng sau khi gọi Amazon (RPC chỉ nhận applied/failed/skipped). */
+export type PpcResultRow = {
+  id: string;
+  status: "applied" | "failed" | "skipped";
+  batchId?: string | null;
+  error?: string | null;
+  /** id Amazon trả về khi TẠO negative keyword (để lần sau bật/tắt bằng id thật) */
+  createdId?: string | null;
+  amazonResponse?: Record<string, unknown> | null;
+  /** cron đã đọc lại Amazon và khớp before_value (audit ghi giá trị này) */
+  verifiedBefore?: boolean;
+};
+
+export type PpcSetResultRow = {
+  ok: boolean;
+  id: string;
+  status: string;
+  label: string | null;
+  entityType: string | null;
+  changeType: string | null;
+  attempts: number;
+  createdId: string | null;
+  alertId: string | null;
+  error: string | null;
+};
+
 export type FillAdsSpendResult = {
   rowsUpdated: number;
   days: number;
@@ -160,6 +275,14 @@ export interface AdsDb extends TokenStore {
   }): Promise<PendingAdsReport[]>;
   raiseAlerts(seller: string | null, day?: string | null): Promise<AdsAlertRow[]>;
   fillProfitAdsSpend(seller: string, opts?: { from?: string | null; to?: string | null }): Promise<FillAdsSpendResult>;
+  /** Giành lô đề xuất đã duyệt (RPC tự quét TTL, đòi lại lô kẹt, skip non-SP). */
+  pendingChanges(shopId: string | null, limit?: number, staleMinutes?: number): Promise<PpcPendingBatch>;
+  /** Đọc đề xuất approved mà KHÔNG giành lô — chỉ cho dryRun. */
+  listApprovedChanges(shopId: string | null, limit?: number): Promise<PpcChangeRequest[]>;
+  /** Ghi kết quả áp dụng của MỘT dòng (kèm audit + upsert negative keyword + alert). */
+  setChangeResult(row: PpcResultRow): Promise<PpcSetResultRow>;
+  /** Nổ/đóng alert của hàng đợi PPC cho MỘT shop (cuối mỗi lượt cron). */
+  raisePpcAlerts(shopId: string | null): Promise<AdsAlertRow[]>;
   recordEvent(input: {
     sellerAccountId?: string | null;
     service?: "ads" | "spapi";
@@ -462,6 +585,115 @@ export function createAdsDb(cfg: AdsDbConfig, fetchFn: typeof fetch = fetch): Ad
         unmatched: toNum(r.unmatched),
         currencies: toStr(r.currencies)?.split(",").map((c) => c.trim()).filter(Boolean) ?? [],
       };
+    },
+
+    async pendingChanges(shopId, limit, staleMinutes) {
+      const out = await rpc<unknown>(ADS_RPC.ppcPendingChanges, {
+        p_seller: shopId ?? null,
+        p_limit: limit ?? 100,
+        p_stale_minutes: staleMinutes ?? 30,
+      });
+      const r = (first<Record<string, unknown>>(out as Record<string, unknown>[]) ?? {}) as Record<string, unknown>;
+      const rows = Array.isArray(r.requests) ? (r.requests as Record<string, unknown>[]) : [];
+      const caps = Array.isArray(r.cap_left) ? (r.cap_left as Record<string, unknown>[]) : [];
+      return {
+        batchId: toStr(r.batch_id),
+        expired: toNum(r.expired),
+        reclaimed: toNum(r.reclaimed),
+        skippedUnsupported: toNum(r.skipped_unsupported),
+        count: toNum(r.count),
+        capLeft: caps.map((c) => ({
+          sellerAccountId: String(c.seller_account_id ?? ""),
+          shop: toStr(c.shop),
+          dailyCap: toNum(c.daily_cap),
+          usedToday: toNum(c.used_today),
+          waiting: toNum(c.waiting),
+        })),
+        requests: rows.map(toPpcRequest),
+      };
+    },
+
+    async listApprovedChanges(shopId, limit) {
+      // dryRun: đọc thẳng hàng đợi qua PostgREST, KHÔNG giành lô.
+      const params = new URLSearchParams({
+        select: PPC_REQUEST_SELECT,
+        status: "eq.approved",
+        order: "decided_at.asc,proposed_at.asc",
+        limit: String(limit ?? 100),
+      });
+      if (shopId) params.set("seller_account_id", `eq.${shopId}`);
+      const rows = await call<Record<string, unknown>[]>("GET", `/rest/v1/change_requests?${params.toString()}`, {
+        schema: "ads",
+      });
+      const requests = (rows ?? []).map(toPpcRequest);
+      // campaign_type không nằm trong ads.change_requests → đọc thêm để dryRun nói
+      // thật là dòng nào sẽ bị skip (chiều ghi chỉ mở cho Sponsored Products).
+      const campaignIds = [...new Set(requests.map((r) => r.campaignId).filter(Boolean))];
+      if (campaignIds.length > 0) {
+        const q = new URLSearchParams({
+          select: "campaign_id,campaign_type",
+          campaign_id: `in.(${campaignIds.map((c) => `"${c}"`).join(",")})`,
+        });
+        if (shopId) q.set("seller_account_id", `eq.${shopId}`);
+        try {
+          const camps = await call<Record<string, unknown>[]>("GET", `/rest/v1/campaigns?${q.toString()}`, {
+            schema: "ads",
+          });
+          const byId = new Map<string, string>();
+          for (const c of camps ?? []) {
+            const id = toStr(c.campaign_id);
+            if (id) byId.set(id, toStr(c.campaign_type) ?? "");
+          }
+          for (const r of requests) r.campaignType = byId.get(r.campaignId) ?? r.campaignType;
+        } catch {
+          // không đọc được campaign_type thì dryRun coi như SP (RPC giành lô mới là
+          // lớp chắn thật: nó đã tự skip non-SP trước khi giao cho cron).
+        }
+      }
+      return requests;
+    },
+
+    async setChangeResult(row) {
+      const out = await rpc<unknown>(ADS_RPC.ppcSetResult, {
+        p_payload: {
+          id: row.id,
+          status: row.status,
+          batch_id: row.batchId ?? null,
+          error: row.error ?? null,
+          created_id: row.createdId ?? null,
+          amazon_response: row.amazonResponse ?? null,
+          verified_before: row.verifiedBefore ?? false,
+        },
+      });
+      const r = (first<Record<string, unknown>>(out as Record<string, unknown>[]) ?? {}) as Record<string, unknown>;
+      return {
+        ok: r.ok === true,
+        id: String(r.id ?? row.id),
+        status: toStr(r.status) ?? row.status,
+        label: toStr(r.label),
+        entityType: toStr(r.entity_type),
+        changeType: toStr(r.change_type),
+        attempts: toNum(r.attempts),
+        createdId: toStr(r.created_id),
+        alertId: toStr(r.alert_id),
+        error: toStr(r.error),
+      };
+    },
+
+    async raisePpcAlerts(shopId) {
+      const out = await rpc<unknown>(ADS_RPC.ppcRaiseAlerts, { p_seller: shopId ?? null });
+      const rows = (Array.isArray(out) ? out : out ? [out] : []) as Record<string, unknown>[];
+      return rows.map((r) => ({
+        shopId: String(r.shop_id ?? ""),
+        shopName: toStr(r.shop_name),
+        ruleCode: String(r.rule_code ?? ""),
+        entityKey: toStr(r.entity_key),
+        severity: toStr(r.severity),
+        metric: toNumOrNull(r.metric),
+        threshold: toNumOrNull(r.threshold),
+        alertId: toStr(r.alert_id),
+        nextAction: toStr(r.next_action),
+      }));
     },
 
     async recordEvent(input) {
