@@ -10,6 +10,19 @@
  *   - Nay đọc cả `spapi_oauth_code` và `code` (ưu tiên spapi_oauth_code)
  *   - Thêm bypass /api/oauth trong middleware để tránh 404/redirect login
  *   - Log full URL để debug
+ *
+ * FIX PGRST205 09/2026 ("Could not find the table 'public.seller_accounts'"):
+ *   - Bảng seller_accounts nằm ở schema `connections` (migration 0001), KHÔNG
+ *     phải `public`. Trước đây route gọi GET/PATCH /rest/v1/seller_accounts
+ *     không kèm header Accept-Profile/Content-Profile → PostgREST tìm trong
+ *     public → PGRST205 → "Không đọc được shop" dù OAuth đã thành công.
+ *   - Nay đọc/ghi qua RPC public (migration 0025): vexim_worker_get_shop +
+ *     vexim_worker_claim_seller_id — cùng pattern với consume_oauth_state /
+ *     set_oauth_token (0020) vốn chạy OK trong cùng luồng. RPC public không
+ *     phụ thuộc "Exposed schemas" (bài học 0008 của worker).
+ *   - Nếu RPC chưa tồn tại (chưa push 0025 — PGRST202): fallback gọi REST kèm
+ *     header Accept-Profile: connections; nếu vẫn fail thì báo đúng việc cần
+ *     làm (push migration 0025) thay vì thông báo PGRST205 khó hiểu.
  */
 
 import { NextResponse } from "next/server";
@@ -30,7 +43,7 @@ function back(req: Request, params: Record<string, string>): NextResponse {
 
 async function adminRest(
   path: string,
-  init: { method: string; body?: unknown; prefer?: string },
+  init: { method: string; body?: unknown; prefer?: string; schema?: string },
 ): Promise<{ ok: boolean; data: unknown; error: string | null }> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -43,6 +56,9 @@ async function adminRest(
       apikey: key,
       Authorization: `Bearer ${key}`,
       ...(init.prefer ? { Prefer: init.prefer } : {}),
+      // PostgREST chọn schema bằng HEADER, không phải prefix path (xem 0008):
+      //   GET/HEAD → Accept-Profile · POST/PATCH/DELETE → Content-Profile
+      ...(init.schema ? { "Accept-Profile": init.schema, "Content-Profile": init.schema } : {}),
     },
     body: init.body === undefined ? undefined : JSON.stringify(init.body),
     cache: "no-store",
@@ -62,6 +78,53 @@ async function adminRest(
     return { ok: false, data, error: msg };
   }
   return { ok: true, data, error: null };
+}
+
+/** PGRST202 = function không tồn tại trong schema cache (chưa push migration 0025). */
+function isMissingRpc(r: { ok: boolean; data: unknown; error: string | null }): boolean {
+  if (r.ok) return false;
+  const codeStr =
+    typeof r.data === "object" && r.data !== null && "code" in r.data
+      ? String((r.data as { code: unknown }).code)
+      : "";
+  return codeStr === "PGRST202" || /could not find the function/i.test(r.error ?? "");
+}
+
+/**
+ * Đọc shop: ưu tiên RPC public.vexim_worker_get_shop (0025); nếu RPC chưa có
+ * thì fallback REST với header Accept-Profile: connections (chỉ chạy được khi
+ * schema connections nằm trong "Exposed schemas").
+ */
+async function readShop(sellerId: string): Promise<{ ok: boolean; shop: ShopRow | null; error: string | null }> {
+  const viaRpc = await adminRest("/rest/v1/rpc/vexim_worker_get_shop", {
+    method: "POST",
+    body: { p_seller: sellerId },
+  });
+  if (viaRpc.ok) {
+    const shop = (Array.isArray(viaRpc.data) ? viaRpc.data[0] : viaRpc.data) as ShopRow | undefined;
+    return { ok: true, shop: shop ?? null, error: null };
+  }
+  if (!isMissingRpc(viaRpc)) return { ok: false, shop: null, error: viaRpc.error };
+
+  console.warn(
+    `[OAuth Callback] RPC vexim_worker_get_shop chưa có (PGRST202) — chưa push migration 0025? Fallback REST + Accept-Profile: connections`,
+  );
+  const viaRest = await adminRest(
+    `/rest/v1/seller_accounts?id=eq.${sellerId}&select=${SHOP_SELECT}&limit=1`,
+    { method: "GET", schema: "connections" },
+  );
+  if (viaRest.ok) {
+    const shop = (Array.isArray(viaRest.data) ? viaRest.data[0] : undefined) as ShopRow | undefined;
+    return { ok: true, shop: shop ?? null, error: null };
+  }
+  return {
+    ok: false,
+    shop: null,
+    error:
+      `${viaRest.error} — bảng seller_accounts nằm ở schema connections (không phải public). ` +
+      `Fix: push migration 0025 (supabase db push) để có RPC vexim_worker_get_shop, ` +
+      `hoặc thêm 'connections' vào Exposed schemas (Dashboard → Settings → API).`,
+  };
 }
 
 export async function GET(req: Request) {
@@ -132,15 +195,13 @@ export async function GET(req: Request) {
     return back(req, { oauth: "error", seller: sellerId, msg: "Thiếu redirect_uri/clientId/clientSecret trên server." });
   }
 
-  const shopRes = await adminRest(
-    `/rest/v1/seller_accounts?id=eq.${sellerId}&select=${SHOP_SELECT}&limit=1`,
-    { method: "GET" },
-  );
+  const shopRes = await readShop(sellerId);
   if (!shopRes.ok) {
-    return back(req, { oauth: "error", msg: `Không đọc được shop: ${shopRes.error}` });
+    console.error(`[OAuth Callback] Read shop failed: ${shopRes.error} seller=${sellerId}`);
+    return back(req, { oauth: "error", seller: sellerId, msg: `Không đọc được shop: ${shopRes.error}` });
   }
-  const shop = (Array.isArray(shopRes.data) ? shopRes.data[0] : undefined) as ShopRow | undefined;
-  if (!shop) return back(req, { oauth: "error", msg: "Shop không tồn tại." });
+  const shop = shopRes.shop;
+  if (!shop) return back(req, { oauth: "error", seller: sellerId, msg: "Shop không tồn tại." });
 
   if (sellingPartnerId !== "" && shop.seller_id && shop.seller_id !== sellingPartnerId) {
     return back(req, {
@@ -179,11 +240,31 @@ export async function GET(req: Request) {
     | undefined;
 
   if (sellingPartnerId !== "" && !shop.seller_id) {
-    await adminRest(`/rest/v1/seller_accounts?id=eq.${sellerId}`, {
-      method: "PATCH",
-      body: { seller_id: sellingPartnerId },
-      prefer: "return=minimal",
+    // Điền seller_id Amazon lần đầu — RPC 0025 (chỉ ghi khi đang rỗng, không ghi đè).
+    const claimed = await adminRest("/rest/v1/rpc/vexim_worker_claim_seller_id", {
+      method: "POST",
+      body: { p_seller: sellerId, p_seller_id: sellingPartnerId },
     });
+    if (!claimed.ok && isMissingRpc(claimed)) {
+      // Chưa push 0025 — fallback PATCH kèm Content-Profile: connections.
+      const patched = await adminRest(`/rest/v1/seller_accounts?id=eq.${sellerId}&seller_id=is.null`, {
+        method: "PATCH",
+        body: { seller_id: sellingPartnerId },
+        prefer: "return=minimal",
+        schema: "connections",
+      });
+      if (!patched.ok) {
+        // Token ĐÃ lưu OK — thiếu seller_id chỉ là metadata, không fail cả luồng.
+        console.warn(`[OAuth Callback] claim seller_id fallback failed (non-fatal): ${patched.error}`);
+      }
+    } else if (!claimed.ok) {
+      console.warn(`[OAuth Callback] claim seller_id failed (non-fatal): ${claimed.error}`);
+    } else {
+      const claimRow = (Array.isArray(claimed.data) ? claimed.data[0] : claimed.data) as
+        | { claimed?: boolean; message?: string }
+        | undefined;
+      console.log(`[OAuth Callback] claim seller_id: claimed=${claimRow?.claimed} msg=${claimRow?.message}`);
+    }
   }
 
   console.log(`[OAuth Callback] Success seller=${sellerId} days=${savedRow?.days_left} replaced=${savedRow?.replaced}`);

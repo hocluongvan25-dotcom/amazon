@@ -4200,6 +4200,55 @@ ok(tamper, "0022 CHẶN: người thường KHÔNG sửa được hồ sơ ngư�
 await ex("rollback");
 await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
 
+// ===========================================================================
+console.log("\n=== BƯỚC 24: 0025 — RPC public cho callback OAuth (fix PGRST205 seller_accounts) ===");
+// ===========================================================================
+// Bối cảnh: callback OAuth từng gọi GET/PATCH /rest/v1/seller_accounts không có
+// profile header → PostgREST tìm public.seller_accounts → PGRST205 "Could not
+// find the table 'public.seller_accounts' in the schema cache". 0025 tạo
+// wrapper RPC public (get_shop + claim_seller_id) — cùng pattern 0008/0020.
+ok(
+  await ex(rd("migrations/0025_oauth_callback_shop_rpc.sql"), "0025_oauth_callback_shop_rpc.sql"),
+  "0025 chạy sạch (DO-block tự soát: 2 RPC security definer, anon/authenticated bị revoke)",
+);
+ok(await ex(rd("migrations/0025_oauth_callback_shop_rpc.sql"), "0025 lần 2"), "0025 idempotent");
+
+// service_role context: auth.uid() phải là null (RPC worker chặn user thường)
+await ex("select set_config('request.jwt.claim.sub','',false)");
+
+const gs = await at(`select * from public.vexim_worker_get_shop('${pShop}')`);
+ok(gs && gs.id === pShop && typeof gs.display_name === "string",
+  `0025 get_shop: đọc được shop qua RPC public (không cần Exposed schemas) — ${J(gs)}`);
+
+const gsNone = await at(`select count(*) n from public.vexim_worker_get_shop('00000000-0000-4000-8000-00000000dead')`);
+ok(Number(gsNone.n) === 0, "0025 get_shop: shop không tồn tại → 0 dòng (callback báo 'Shop không tồn tại')");
+
+// claim_seller_id: chỉ điền khi đang rỗng — pShop từ seed đã có seller_id
+const preSid = (await one(`select seller_id from connections.seller_accounts where id='${pShop}'`)).seller_id;
+const clKeep = await at(`select * from public.vexim_worker_claim_seller_id('${pShop}', 'A-KHAC-HOAN-TOAN')`);
+ok(clKeep.claimed === false && (await one(`select seller_id from connections.seller_accounts where id='${pShop}'`)).seller_id === preSid,
+  `0025 claim: KHÔNG ghi đè seller_id đã có (claimed=false, giữ nguyên ${preSid}) — ${J(clKeep)}`);
+const clSame = await at(`select * from public.vexim_worker_claim_seller_id('${pShop}', '${preSid}')`);
+ok(clSame.claimed === true, "0025 claim: seller_id trùng giá trị cũ → claimed=true (đã đúng từ trước)");
+
+// điền lần đầu thật sự: tạo shop mới seller_id rỗng
+await ex(`insert into connections.seller_accounts (id, org_id, seller_id, marketplace, display_name, status, data_source)
+  select 'ab250000-0000-4000-8000-000000000001', org_id, '', 'A2EUQ1WTGCTBG2', 'Shop test 0025', 'active', 'mock'
+  from connections.seller_accounts where id='${pShop}'`, "fixture shop 0025");
+const clNew = await at(`select * from public.vexim_worker_claim_seller_id('ab250000-0000-4000-8000-000000000001', 'ANEWSELLER25')`);
+ok(clNew.claimed === true
+    && (await one(`select seller_id from connections.seller_accounts where id='ab250000-0000-4000-8000-000000000001'`)).seller_id === "ANEWSELLER25",
+  `0025 claim: điền seller_id lần đầu khi đang rỗng — ${J(clNew)}`);
+await ex(`delete from connections.seller_accounts where id='ab250000-0000-4000-8000-000000000001'`, "dọn fixture 0025");
+
+// user thường (auth.uid() != null) phải bị chặn
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+ok(await mustBlock(`select * from public.vexim_worker_get_shop('${pShop}')`),
+  "0025 CHẶN: user đăng nhập (auth.uid() != null) không gọi được get_shop");
+ok(await mustBlock(`select * from public.vexim_worker_claim_seller_id('${pShop}','X')`),
+  "0025 CHẶN: user đăng nhập không gọi được claim_seller_id");
+await ex("select set_config('request.jwt.claim.sub','',false)");
+
 console.log(`\n${"=".repeat(70)}`);
 console.log(fails === 0 ? "TẤT CẢ PASS" : `${fails} MỤC FAIL`);
 console.log("=".repeat(70));
