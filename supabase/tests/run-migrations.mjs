@@ -32,6 +32,17 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { screens } from "../../web/src/lib/data/operations-model.ts";
+// Hợp đồng cột web ↔ DB cho Module 5: web đọc bằng select CỐ ĐỊNH, sai một tên cột
+// là PostgREST trả 400 ngay trên production nên phải chốt ở đây (chạy trên PG thật).
+import {
+  ADS_BUDGET_SELECT,
+  ADS_CAMPAIGN_SELECT,
+  ADS_DAILY_SELECT,
+  ADS_KPI_SELECT,
+  ADS_PROFILE_SELECT,
+  ADS_REPORT_REQUEST_SELECT,
+  ADS_SEARCH_TERM_SELECT,
+} from "../../web/src/lib/data/ads-model.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const rd = (p) => readFileSync(join(ROOT, p), "utf8");
@@ -3581,6 +3592,59 @@ await cmp(
 );
 await ex("rollback;");
 await ex("reset role;");
+
+// ---- 17b. HỢP ĐỒNG CỘT web ↔ DB (Module 5): mọi cột trong select của web phải tồn tại ----
+{
+  const webSelects = {
+    vexim_ads_kpis: ADS_KPI_SELECT,
+    vexim_ads_campaigns: ADS_CAMPAIGN_SELECT,
+    vexim_ads_campaign_daily: ADS_DAILY_SELECT,
+    vexim_ads_search_terms: ADS_SEARCH_TERM_SELECT,
+    vexim_ads_budget_usage: ADS_BUDGET_SELECT,
+    vexim_ads_report_requests: ADS_REPORT_REQUEST_SELECT,
+    vexim_ads_profiles: ADS_PROFILE_SELECT,
+  };
+  for (const [view, select] of Object.entries(webSelects)) {
+    const wanted = select.split(",").map((c) => c.trim()).filter(Boolean);
+    const have = new Set((await colsOf(view)).split(","));
+    const missing = wanted.filter((c) => !have.has(c));
+    ok(
+      missing.length === 0,
+      `0020: ${view} đủ ${wanted.length} cột mà web select` +
+        (missing.length > 0 ? ` — THIẾU: ${missing.join(", ")}` : ""),
+    );
+  }
+  // Cột mà reader web dùng để ORDER BY / lọc (ads.ts) — cũng phải tồn tại, vì
+  // PostgREST trả 400 cho order trên cột không có, và lỗi này chỉ nổ lúc chạy thật.
+  const webOrderFilters = {
+    vexim_ads_kpis: ["currency", "spend7"],
+    vexim_ads_campaigns: ["spend7", "campaign_name", "seller_account_id"],
+    vexim_ads_campaign_daily: ["day", "seller_account_id"],
+    vexim_ads_search_terms: ["spend", "seller_account_id", "wasted_spend_signal"],
+    vexim_ads_budget_usage: ["percentage_used", "seller_account_id"],
+    vexim_ads_report_requests: ["requested_at", "seller_account_id"],
+    vexim_ads_profiles: ["shop", "is_default", "seller_account_id"],
+  };
+  for (const [view, wanted] of Object.entries(webOrderFilters)) {
+    const have = new Set((await colsOf(view)).split(","));
+    const missing = wanted.filter((c) => !have.has(c));
+    ok(
+      missing.length === 0,
+      `0020: ${view} có đủ cột web dùng để sắp xếp/lọc` +
+        (missing.length > 0 ? ` — THIẾU: ${missing.join(", ")}` : ""),
+    );
+  }
+
+  // Ngược lại: cột mới thêm vào view mà web KHÔNG đọc → không fail, chỉ nhắc
+  // (để biết UI đang bỏ sót thông tin Amazon đã trả).
+  const kpiCols = (await colsOf("vexim_ads_kpis")).split(",");
+  const kpiRead = new Set(ADS_KPI_SELECT.split(",").map((c) => c.trim()));
+  const kpiUnused = kpiCols.filter((c) => !kpiRead.has(c));
+  ok(
+    kpiUnused.length <= 1,
+    `0020: vexim_ads_kpis gần như được web đọc hết (bỏ qua: ${kpiUnused.join(", ") || "không"})`,
+  );
+}
 
 // ---- 18. idempotent ----------------------------------------------------------
 ok(

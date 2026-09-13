@@ -80,6 +80,10 @@ export function ImportTokenForm({
   const [shop, setShop] = useState(shops[0]?.id ?? "");
   const [source, setSource] = useState<"env" | "manual">(envToken[services[0] ?? "ads"] ? "env" : "manual");
   const [token, setToken] = useState("");
+  // Profile Ads (Amazon-Advertising-API-Scope). Chỉ CẦN khi một shop có nhiều tài
+  // khoản Ads / nhiều thị trường mà cron không tự chốt được — để trống thì hệ
+  // thống tự chọn theo marketplaceStringId của shop.
+  const [adsProfileId, setAdsProfileId] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Result>(null);
 
@@ -109,11 +113,14 @@ export function ImportTokenForm({
       const res = await fetch("/api/amazon/oauth/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          source === "env"
-            ? { service, shop, source }
-            : { service, shop, source, refreshToken: token.trim() },
-        ),
+        body: JSON.stringify({
+          service,
+          shop,
+          source,
+          ...(source === "manual" ? { refreshToken: token.trim() } : {}),
+          // lưu vào connections.oauth_tokens.ads_account_id — sync.ts dùng để ÉP profileId
+          ...(service === "ads" && adsProfileId.trim() ? { adsAccountId: adsProfileId.trim() } : {}),
+        }),
       });
       const body = (await res.json()) as Record<string, unknown>;
       if (!res.ok || body.ok !== true) {
@@ -220,6 +227,26 @@ export function ImportTokenForm({
           Token đọc thẳng từ biến môi trường trên server — không đi qua trình duyệt, không hiện ra màn hình.
         </p>
       )}
+
+      {service === "ads" ? (
+        <label className="flex flex-col gap-1 text-[11.5px] font-bold uppercase tracking-wide text-soft">
+          Profile ID Ads (không bắt buộc)
+          <input
+            value={adsProfileId}
+            onChange={(e) => setAdsProfileId(e.target.value)}
+            spellCheck={false}
+            autoComplete="off"
+            inputMode="numeric"
+            placeholder="vd 1234567890 — để trống thì hệ thống tự chọn theo marketplace của shop"
+            className="w-full rounded-md border border-line bg-white px-2 py-1.5 font-mono text-[12px] normal-case tracking-normal text-ink"
+          />
+          <span className="text-[11.5px] font-medium normal-case tracking-normal text-soft">
+            Chỉ điền khi shop có NHIỀU tài khoản Ads (nhiều thị trường) và trang Quảng cáo báo “không chốt được
+            profileId”. Đây là giá trị header <code>Amazon-Advertising-API-Scope</code>, lấy từ{" "}
+            <code>GET /v2/profiles</code> — điền sai thì cron sẽ dừng và báo, không ghi nhầm số liệu.
+          </span>
+        </label>
+      ) : null}
 
       <div className="flex items-center gap-3">
         <button

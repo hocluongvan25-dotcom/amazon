@@ -77,8 +77,15 @@ export async function LiveSkuProfit({ month, shop }: { month?: string; shop?: st
             thì ngày sau dùng giá mới.
           </li>
           <li>
-            • <b>Ads</b>: cột riêng, không trừ vào lãi gộp; Module 5 (PPC) chưa đồng bộ nên để “—” chứ không
-            mặc định 0.
+            • <b>Ads</b>: cột riêng, <b>không trừ vào lãi gộp</b>. Nguồn thật là report{" "}
+            <code>spAdvertisedProduct</code> (spend theo ASIN/SKU) → cron ads-sync ghi vào{" "}
+            <code>ads.advertised_product_daily</code> → <code>vexim_worker_fill_profit_ads_spend</code> lấp vào{" "}
+            <code>finance.sku_profit_daily.ads_spend</code>. Ngày/SKU chưa lấp thì để “chưa có” chứ không mặc định 0.
+          </li>
+          <li>
+            • <b>TACOS</b> = chi phí ads / doanh thu thuần của SKU trong kỳ. Chỉ hiện khi đã có số ads; nếu chỉ một
+            phần số ngày có ads thì nhãn <code>n/m ngày</code> báo rõ con tổng đang thiếu. Muốn đối chiếu TACOS ở mức
+            shop (ads / TỔNG doanh thu mọi kênh) thì xem trang <b>Quảng cáo (PPC)</b>.
           </li>
           <li>
             • <b>Không đoán số</b>: thiếu giá vốn → lãi gộp và biên để “—”; vẫn hiện doanh thu để đối chiếu.

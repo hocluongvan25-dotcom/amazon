@@ -40,6 +40,14 @@ Mỗi module gồm 6 phần:
 
 **Nền kỹ thuật:** Notifications API v1 (destination EventBridge/SQS + subscription từng loại), Reports API 2021-06-30 (`createReport` → nhận `REPORT_PROCESSING_FINISHED` → `getReportDocument`, không polling), Feeds API 2021-06-30 (`createFeed` JSON_LISTINGS_FEED → `FEED_PROCESSING_FINISHED`), Tokens API (RDT — chỉ bật khi có role restricted).
 
+> **TRẠNG THÁI 13/09 — ĐÃ XONG phần OAuth & multi-tenant (migration `0020` + `web/src/lib/oauth`):**
+> luồng authorize thật cho **cả SP-API lẫn Ads API** (`/module0/connect` → `/api/amazon/oauth/start` →
+> Amazon → `/callback`), state ký HMAC TTL 10 phút, refresh token mã hoá **AES-256-GCM** trong
+> `connections.oauth_tokens` (cột token **không có policy SELECT** cho client), link `/start` ký sẵn để
+> GỬI CHỦ SHOP tự authorize, cron `oauth-reauth` đếm ngược hạn **365 ngày** và nhắc trước 30 ngày,
+> ô nạp refresh token có sẵn (kèm ô Profile ID Ads cho shop nhiều tài khoản), view `vexim_connections`
+> + `vexim_oauth_events` cho màn 0.1/0.2. Phần Notifications/Tokens (RDT) vẫn chưa build (thuộc Module 4).
+
 **Effort:** 3 người-tuần (đã bắt đầu từ Tier 0).
 
 ---
@@ -218,6 +226,27 @@ Nguồn log tin nhắn (email shared mailbox? nhập tay?) — **cần VEXIM ch�
 ### Đầu ra cho dashboard
 KPI: spend, ACOS, TACOS, đơn từ ads. Alert: `acos_over_target`, `budget_exhausted` → SOP-04, SOP-05.
 
+> **TRẠNG THÁI 13/09 — PHẦN 1 (ĐỌC/PHÂN TÍCH) ĐÃ XONG**; Phần 2 & 3 (chiều ghi: bật/tắt, đổi
+> bid/budget, negative keyword, bảng quyết định tuần A4 + audit/duyệt) CHƯA build.
+> - **DB (`0020`)**: 4 bảng ads mới (`targeting_metrics_daily`, `advertised_product_daily`,
+>   `budget_usage`, `report_requests`) + cột mới cho `ad_profiles`/`campaigns`/`ad_metrics_daily`/
+>   `search_terms`; **16 RPC** `vexim_worker_upsert_ads_*` / `set_ads_report_request` /
+>   `pending_ads_reports` / `vexim_ads_raise_alerts` / `vexim_worker_fill_profit_ads_spend`;
+>   **8 view đọc** (`vexim_ads_kpis`, `_campaigns`, `_campaign_daily`, `_search_terms`, `_targeting`,
+>   `_budget_usage`, `_report_requests`, `_profiles`) đều `security_invoker` + RLS theo shop.
+> - **Worker (`web/src/lib/ads` + cron `/api/cron/ads-sync`, 04:00 UTC)**: LWA đổi access token theo
+>   từng shop, tự lấy `profileId` qua `GET /v2/profiles` (chọn theo marketplaceStringId, KHÔNG đoán),
+>   Reporting v3 async cho `spCampaigns`/`spAdvertisedProduct`/`spSearchTerm`/`spTargeting`
+>   (GZIP_JSON, trần 31 ngày, tự bớt cột khi Amazon chê, 425 = trùng chứ không phải lỗi, 429 = không
+>   retry dồn), **PHA POLL trước PHA REQUEST** nên không bao giờ ngồi chờ Amazon trong serverless.
+> - **UI**: `/ppc` đọc số liệu thật (KPI spend/ACOS/**TACOS**/CPC theo **shop × tiền tệ**, campaign vượt
+>   ngưỡng, ngân sách cạn, search term đốt tiền, biểu đồ spend theo ngày, tiến trình report, profile đã
+>   đồng bộ); Dashboard CEO có card Ads + card phòng ban PPC; **F4 có cột Ads + TACOS** và
+>   `ads_spend` được lấp từ report `spAdvertisedProduct`.
+> - **SP không có endpoint Budget Usage như SB** → `% ngân sách` là số THẬT khi có, còn không thì
+>   ƯỚC LƯỢNG từ spend/ngân sách ngày và đánh dấu `source` rõ ràng; giờ cạn là suy ra từ lần chụp
+>   đầu tiên thấy ≥100% (UI ghi nhãn “ước lượng”, không trình bày như số Amazon đưa).
+
 **Effort:** A1–A3: 4 người-tuần (🟡) · A4: 1.5 người-tuần (🔵)
 
 ---
@@ -261,7 +290,10 @@ KPI: tiền về, phí, doanh thu chưa thanh toán, giá trị claim. Alert: l�
   `Adjustments` → `lost_fc`/`damaged_fc`/`fee_error`/`other` (lý do `FOUND` không tính là claim).
 - **F4**: `finance.sku_profit_daily` (PK shop+sku+ngày+tiền tệ), ghi kiểu **replace theo ngày** (không cộng dồn).
   `gross = ProductSale + ShippingCredit + Reimbursement + Refund + PromotionRebate + phí (âm) − giá vốn`;
-  **ads_spend là cột riêng, không trừ vào lãi gộp** (Module 5 chưa đồng bộ → `NULL`, không mặc định 0).
+  **ads_spend là cột riêng, không trừ vào lãi gộp** (ngày/SKU nào Module 5 chưa đồng bộ → `NULL`, không
+  mặc định 0). **Cập nhật 13/09:** Module 5 Phần 1 đã lấp số THẬT từ report `spAdvertisedProduct`
+  (spend theo ASIN/SKU) bằng `vexim_worker_fill_profit_ads_spend`; F4 trên web hiện cột **Ads** + **TACOS**
+  và gắn nhãn `n/m ngày` khi chỉ một phần số ngày có số ads (con tổng đang thiếu, không phải tổng đầy đủ).
   Thiếu giá vốn → `cogs`/`gross_profit` = **NULL** để web hiện “—” thay vì bịa số.
   `fee_source` ghi rõ `settled` (từ settlement) hay `fees_api` (ước tính Product Fees).
 

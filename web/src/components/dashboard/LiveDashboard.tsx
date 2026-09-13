@@ -1,6 +1,10 @@
 /**
  * LiveDashboard — server component đọc Supabase cho Dashboard CEO tổng hợp.
- * Gom KPI từ: orders, inventory, listings, pricing, settlements, health, alerts.
+ * Gom KPI từ: orders, inventory, listings, pricing, settlements, health, alerts,
+ * và Ads (Module 5: spend 7 ngày, ACOS, TACOS theo shop × tiền tệ).
+ *
+ * Khối Ads đọc TÁCH BIỆT và không ném lỗi: 0020 chưa chạy thì Dashboard vẫn lên,
+ * chỉ card Ads hiện "chưa đọc được + lý do".
  */
 import {
   KpiCard,
@@ -10,21 +14,26 @@ import {
   Panel,
   tableCls,
 } from "@/components/ui";
-import { readDashboardStats } from "@/lib/data/dashboard";
+import { readDashboardAds, readDashboardStats } from "@/lib/data/dashboard";
 import {
+  buildAdsDetailLine,
+  buildAdsKpi,
   buildCeoKpis,
   buildDeptSummaries,
+  buildPpcDeptSummary,
 } from "@/lib/data/dashboard-model";
 
 export async function LiveDashboard() {
   let stats;
   let failed = false;
 
-  try {
-    stats = await readDashboardStats();
-  } catch {
-    failed = true;
-  }
+  // Hai khối đọc song song; Ads hỏng thì vẫn có Dashboard (ads.error mang lý do).
+  const [statsResult, ads] = await Promise.all([
+    readDashboardStats().catch(() => null),
+    readDashboardAds(),
+  ]);
+  stats = statsResult;
+  failed = statsResult === null;
 
   if (failed || !stats) {
     return (
@@ -43,8 +52,9 @@ export async function LiveDashboard() {
     );
   }
 
-  const kpis = buildCeoKpis(stats);
-  const depts = buildDeptSummaries(stats);
+  const kpis = [...buildCeoKpis(stats), buildAdsKpi(ads.summary, ads.error)];
+  const depts = [...buildDeptSummaries(stats), buildPpcDeptSummary(ads.summary)];
+  const adsLine = buildAdsDetailLine(ads.summary);
 
   return (
     <>
@@ -54,7 +64,7 @@ export async function LiveDashboard() {
       <PageHeader
         title="Tổng quan"
         sub={`${stats.orderCount} đơn · ${stats.totalSku} SKU · ${stats.openAlerts} cảnh báo`}
-        desc="KPI tổng hợp từ: vexim_orders, vexim_inventory_latest, vexim_listings, vexim_pricing, vexim_settlements, vexim_shop_health, ops.my_alerts."
+        desc="KPI tổng hợp từ: vexim_orders, vexim_inventory_latest, vexim_listings, vexim_pricing, vexim_settlements, vexim_shop_health, ops.my_alerts, vexim_ads_kpis."
       />
       <KpiGrid>
         {kpis.map((k) => (
@@ -143,6 +153,20 @@ export async function LiveDashboard() {
               <td className={`${tableCls.td} font-bold`}>🛡️ Health</td>
               <td className={tableCls.td}>
                 {stats.healthShopsOk}/{stats.healthShopsTotal} shop khỏe
+              </td>
+            </tr>
+            <tr>
+              <td className={`${tableCls.td} font-bold`}>📣 Quảng cáo</td>
+              <td className={tableCls.td}>
+                {adsLine ? (
+                  adsLine
+                ) : ads.error ? (
+                  <span className="text-amber">{ads.error}</span>
+                ) : (
+                  <span className="text-amber">
+                    Chưa đồng bộ Ads — bật cron <code>/api/cron/ads-sync</code> (Module 5) để có spend/ACOS/TACOS thật.
+                  </span>
+                )}
               </td>
             </tr>
           </tbody>

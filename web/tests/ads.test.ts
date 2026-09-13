@@ -242,7 +242,11 @@ test("không khớp gì: 1 profile thì dùng kèm cảnh báo, nhiều profile 
   const d2 = pickProfile(normalizeProfiles(PROFILES_RAW), { countryCode: "FR" });
   assert.equal(d2.profile, null);
   assert.match(d2.reason, /Không đoán/);
-  assert.match(d2.reason, /AMAZON_ADS_PROFILE_ID|ads_account_id/);
+  // Lý do phải chỉ ĐÚNG cơ chế thật: nhập Profile ID ở /module0/connect
+  // (lưu vào connections.oauth_tokens.ads_account_id). Không được hứa hẹn một
+  // biến env không tồn tại — Ops sẽ đặt biến đó rồi vẫn kẹt.
+  assert.match(d2.reason, /module0\/connect/);
+  assert.match(d2.reason, /ads_account_id/);
 });
 
 test("profileId bị ép: không có trong danh sách thì DỪNG, không chọn cái gần giống", () => {

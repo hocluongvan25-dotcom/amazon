@@ -7,7 +7,11 @@ import type { PersonaKey } from "@/lib/roles";
 
 const ALLOWED: PersonaKey[] = ["ceo"];
 
-/** Dữ liệu minh họa DEMO MODE — khớp hình dạng view vexim_sku_profit. */
+/**
+ * Dữ liệu minh họa DEMO MODE — khớp hình dạng view vexim_sku_profit.
+ * ads_spend cố tình để MIXED (2 dòng có, 2 dòng null) để xem cả hai trạng thái
+ * của cột Ads/TACOS: "chưa có" (Module 5 chưa lấp) KHÁC với 0.
+ */
 const demoProfit: SkuProfitDbRow[] = [
   {
     seller_account_id: "demo",
@@ -21,7 +25,7 @@ const demoProfit: SkuProfitDbRow[] = [
     amazon_fees: -63,
     promo: -5,
     cogs: 75,
-    ads_spend: null,
+    ads_spend: 38.4,
     gross_profit: 132,
     unit_cost: 12.5,
     fee_source: "settled",
@@ -57,7 +61,7 @@ const demoProfit: SkuProfitDbRow[] = [
     amazon_fees: -21,
     promo: 0,
     cogs: 56,
-    ads_spend: null,
+    ads_spend: 21.75,
     gross_profit: -29,
     unit_cost: 14,
     fee_source: "settled",

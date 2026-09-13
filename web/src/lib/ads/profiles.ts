@@ -117,7 +117,9 @@ export function normalizeProfiles(res: unknown): AdsProfile[] {
 }
 
 export type PickProfileInput = {
-  /** Ép dùng đúng profileId này (env AMAZON_ADS_PROFILE_ID / cột ads_account_id). */
+  /** Ép dùng đúng profileId này — lấy từ cột connections.oauth_tokens.ads_account_id
+   *  (nhập ở /module0/connect, ô “Profile ID Ads”). Không có biến env nào làm việc này
+   *  vì profileId là THEO SHOP: một biến toàn cục sẽ ép nhầm cho mọi shop. */
   profileId?: string | null;
   /** Marketplace của shop (từ connections.seller_accounts). */
   marketplaceId?: string | null;
@@ -256,7 +258,8 @@ export function pickProfile(profiles: AdsProfile[], input: PickProfileInput = {}
     reason:
       `Không xác định được profile cho shop${country ? ` (${country})` : ""}: token có ${profiles.length} profile ` +
       `(${profiles.map((p) => `${p.profileId}/${p.countryCode ?? "?"}/${p.accountType ?? "?"}`).join(", ")}) ` +
-      `và KHÔNG cái nào khớp. Không đoán — hãy chốt profileId (AMAZON_ADS_PROFILE_ID hoặc cột ads_account_id).`,
+      `và KHÔNG cái nào khớp. Không đoán — hãy chốt profileId cho shop này: /module0/connect → ` +
+        `ô “Profile ID Ads” (lưu vào connections.oauth_tokens.ads_account_id), rồi chạy lại cron.`,
     candidates: profiles.length,
     warnings,
   };

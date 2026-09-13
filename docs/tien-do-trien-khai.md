@@ -1,6 +1,83 @@
 # TIẾN ĐỘ TRIỂN KHAI — VEXIM OPS
 
-> Cập nhật: 12/09/2026 · Thứ tự build đã chốt: **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** (21 màn Đợt 1)
+> Cập nhật: 13/09/2026 · Thứ tự build đã chốt: **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** (21 màn Đợt 1)
+
+## Cập nhật 13/09 — MODULE 0 (OAuth & multi-tenant) + MODULE 5 PHẦN 1 (PPC đọc/phân tích): migration 0020 · luồng authorize thật · cron ads-sync · /ppc số liệu thật · F4 có ads_spend + TACOS
+
+Hai module đi cùng nhau vì **refresh token là nền của cả SP-API lẫn Ads API**: không có luồng authorize
+thật thì mọi con số PPC đều phải dán tay. Bốn đợt commit:
+
+1. **`0020_module0_oauth_module5_ppc_read.sql`** — bảng `connections.oauth_tokens` (token mã hoá
+   AES-256-GCM, **không có policy SELECT cho client**), `oauth_states`, `oauth_events`; 4 bảng ads mới
+   (`targeting_metrics_daily`, `advertised_product_daily`, `budget_usage`, `report_requests`);
+   **16 RPC public** cho worker (`vexim_oauth_*`, `vexim_worker_upsert_ads_*`, `set_ads_report_request`,
+   `pending_ads_reports`, `vexim_ads_raise_alerts`, `vexim_worker_fill_profit_ads_spend`);
+   **8 view đọc** `vexim_ads_*` (security_invoker + RLS theo shop) và 2 view Module 0
+   (`vexim_connections`, `vexim_oauth_events`).
+2. **OAuth web** (`web/src/lib/oauth` + 3 route + cron `oauth-reauth`): state ký HMAC TTL 10 phút,
+   link `/start` ký sẵn để GỬI CHỦ SHOP tự authorize, callback nhận cả `spapi_oauth_code` lẫn `code`,
+   đếm ngược hạn **365 ngày** + nhắc trước 30 ngày, ô nạp refresh token có sẵn.
+3. **Ads worker** (`web/src/lib/ads` 9 module + cron `/api/cron/ads-sync` 04:00 UTC): LWA đổi access
+   token theo shop, tự lấy `profileId` qua `GET /v2/profiles`, Reporting v3 async cho 4 loại report,
+   **PHA POLL trước PHA REQUEST** (không ngồi chờ Amazon trong serverless 60s), tự bớt cột khi Amazon
+   chê, 425 = trùng (không phải lỗi), 429 = không retry dồn.
+4. **UI đọc số liệu thật** (`web/src/lib/data/ads-model.ts` + `ads.ts`, `/ppc` mới, Dashboard, F4):
+   KPI spend/ACOS/**TACOS**/CPC theo **shop × tiền tệ** (không cộng khác tiền tệ, tỷ lệ tổng = tổng/tổng),
+   campaign vượt ngưỡng ACOS, ngân sách cạn, search term đốt tiền (loại placement `*`), biểu đồ spend
+   theo ngày, tiến trình report + profile đã đồng bộ; Dashboard CEO có card Ads/TACOS + card phòng ban
+   PPC; **F4 thêm cột Ads + TACOS** (ads_spend là cột riêng, KHÔNG trừ vào lãi gộp).
+
+**Ba quy ước dữ liệu giữ chặt ở cả DB lẫn UI:** chưa biết ≠ 0 (`NULL` → hiện “—”); không cộng tiền khác
+tiền tệ; số ƯỚC LƯỢNG phải gắn nhãn (giờ cạn ngân sách, % ngân sách khi SP không có Budget Usage API,
+TACOS tính trên một phần shop).
+
+### Việc VEXIM cần làm để Module 5 chạy thật
+
+1. Chạy **`0020`** trong SQL Editor (sau `0019`). Migration có DO-block tự soát nên sai là fail ngay.
+2. Supabase → Settings → API → **Exposed schemas**: thêm **`connections`** (worker dùng
+   `Accept-Profile: connections` để đọc `oauth_tokens`/`seller_accounts` bằng service role).
+   Web chỉ đọc view trong `public` nên không cần expose `ads`.
+3. Biến môi trường trên Vercel (Production + Preview) → Redeploy:
+
+| Biến | Dùng làm gì | Bắt buộc |
+|---|---|---|
+| `AMAZON_ADS_CLIENT_ID` / `AMAZON_ADS_CLIENT_SECRET` | LWA + header `Amazon-Ads-ClientId` | ✅ để gọi Ads API |
+| `AMAZON_ADS_REFRESH_TOKEN` | Fallback khi shop chưa có token trong DB (kèm cảnh báo “không gắn shop”) | ⬜ nên có để chạy thử |
+| `AMAZON_ADS_REGION` | `NA` / `EU` / `FE` → chọn host `advertising-api[-eu|-fe].amazon.com` | ⬜ mặc định NA |
+| `OAUTH_TOKEN_ENC_KEY` | Khoá AES-256-GCM (32 byte hex) mã hoá refresh token | ✅ để lưu/đọc token |
+| `OAUTH_STATE_SECRET` | Ký state chống CSRF + ký link `/start` gửi chủ shop | ✅ cho luồng OAuth |
+| `APP_BASE_URL` (hoặc `OAUTH_REDIRECT_URI`) | Redirect URI phải KHỚP ĐÚNG cái đã khai trong Developer Console | ✅ cho luồng OAuth |
+| `AMAZON_SP_API_APPLICATION_ID` | SP-API dùng trang consent Seller Central (callback trả `spapi_oauth_code`) | ⬜ cho Module 3/4 |
+| `AMAZON_ADS_ATTRIBUTION_DAYS` | `7` (seller) hay `14` (vendor/author) — sai là ACOS lệch hẳn | ⬜ mặc định 7 |
+| `AMAZON_ADS_PROFILE_TYPE` | `seller` (mặc định) — vendor bị loại khi chọn profile | ⬜ |
+| `AMAZON_ADS_ACCOUNT_ID` | Header `Amazon-Ads-AccountId` (chỉ gửi khi đặt) | ⬜ |
+| `CRON_SECRET` | Bảo vệ 4 cron: inventory-sync, report-pull, oauth-reauth, **ads-sync** | ✅ |
+
+4. **Authorize Ads cho từng shop**: `/module0/connect` → nút Authorize (hoặc gửi link `/start` cho chủ
+   shop) → nếu đã có refresh token thì dùng ô Import. Shop có NHIỀU tài khoản Ads thì điền luôn ô
+   **“Profile ID Ads”** (lưu vào `oauth_tokens.ads_account_id`) — hệ thống KHÔNG tự đoán profileId.
+5. Chạy cron: `curl -H "Authorization: Bearer $CRON_SECRET" "$APP/api/cron/ads-sync"` (hoặc
+   `?dryRun=1&shop=<uuid>` để thử mà không ghi DB). Lần đầu chỉ XIN report; chạy
+   `?phase=poll` sau vài phút để nhập số.
+
+### Verify nhanh (không cần Amazon)
+
+- `cd supabase && npm test` → **550 PASS**, gồm **15 mục chốt hợp đồng cột web ↔ DB**: mọi cột trong
+  `ADS_*_SELECT` và mọi cột web dùng để sắp xếp/lọc phải tồn tại trong view (sai một tên cột là
+  PostgREST trả 400 lúc chạy thật, nên bắt ngay trong test).
+- `cd web && npm test` → **319 PASS** (thêm 76 test Ads API + 37 test model UI/F4/Dashboard),
+  `npx tsc --noEmit` sạch, `npm run build` OK.
+- Trên app: `/module0/connect` (kết nối + đếm ngược 365 ngày) → `/ppc` (KPI, campaign, search term,
+  tiến trình report) → `/finance/profit` (cột Ads + TACOS) → `/dashboard` (card Ads + card PPC).
+  Chưa đồng bộ thì các trang hiện “—” kèm LÝ DO và việc cần làm, không hiện 0.
+
+### Còn thiếu (đã chốt làm sau)
+
+- **Module 5 Phần 2 & 3**: chiều ghi (bật/tắt campaign, đổi bid/budget, negative keyword), luồng duyệt
+  theo ngưỡng + audit log, bảng quyết định tuần (A4). `/ppc` hiện ghi rõ “trang này chỉ ĐỌC”.
+- TACOS cần **Module 4** đồng bộ `sales.order_daily` (tổng doanh thu mọi kênh): thiếu thì `tacos_unknown`
+  và UI hiện “—” + nói rõ bao nhiêu shop đang thiếu.
+- SB/SD reports (v3 đang preview) và intraday metrics theo giờ.
 
 ## Cập nhật 12/09 — MODULE 3 NÂNG CAO (phần 2): PHÍ theo FC + phí inbound noncompliance + cron tự kéo Reports API (migration 0019)
 
@@ -786,16 +863,26 @@ nên không phụ thuộc bước này).
 
 ### Biến môi trường Vercel: cái nào code thật sự đọc
 
-Code chỉ đọc **5 tên** này (`grep -rn "process.env" web/src`):
+*(Bảng 12/09 ở dưới đã lỗi thời — từ 13/09 Module 0 + Module 5 thêm nhóm OAuth và Ads.)*
+Danh sách đầy đủ lấy bằng `grep -rhoE "(process\.env|env)\.[A-Z][A-Z_0-9]{3,}" web/src`:
 
-| Biến | Dùng ở | Trạng thái |
+| Nhóm | Biến | Ghi chú |
 |---|---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | supabase client/server, login, invite-user | ✅ đã set |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | supabase client/server, login | ✅ đã set |
-| `SUPABASE_SERVICE_ROLE_KEY` | invite-user, worker | ✅ đã set |
-| `CRON_SECRET` | cron inventory-sync | ❌ **THIẾU** |
-| `AMAZON_LWA_CLIENT_ID/_SECRET/_REFRESH_TOKEN` | spapi client, worker | ⬜ chờ Amazon duyệt |
+| Supabase | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | web đọc view bằng anon + RLS |
+| | `SUPABASE_SERVICE_ROLE_KEY` (hoặc `SUPABASE_URL` + service key) | worker/cron ghi qua RPC; **không** đưa ra client bundle |
+| Cron | `CRON_SECRET` | bảo vệ 4 cron: inventory-sync · report-pull · oauth-reauth · **ads-sync** |
+| OAuth (Module 0) | `OAUTH_TOKEN_ENC_KEY` | 32 byte hex — khoá AES-256-GCM mã hoá refresh token. **Mất khoá = mọi shop phải authorize lại** |
+| | `OAUTH_STATE_SECRET` | ký state chống CSRF + ký link `/start` gửi chủ shop |
+| | `APP_BASE_URL` (fallback `NEXT_PUBLIC_APP_URL`, `VERCEL_PROJECT_PRODUCTION_URL`) · `OAUTH_REDIRECT_URI` (hoặc `NEXT_PUBLIC_OAUTH_REDIRECT_URI`) | redirect URI phải KHỚP Developer Console |
+| SP-API | `AMAZON_LWA_CLIENT_ID`/`_CLIENT_SECRET`/`_REFRESH_TOKEN` (alias `SPAPI_LWA_*`), `AMAZON_SP_API_APPLICATION_ID`, `AMAZON_SP_API_REGION`, `AMAZON_LWA_TOKEN_URL`, `AMAZON_APP_ID` | có `APPLICATION_ID` thì dùng trang consent Seller Central (callback trả `spapi_oauth_code`) |
+| Ads (Module 5) | `AMAZON_ADS_CLIENT_ID`, `AMAZON_ADS_CLIENT_SECRET`, `AMAZON_ADS_REFRESH_TOKEN`, `AMAZON_ADS_REGION`, `AMAZON_ADS_TOKEN_URL`, `AMAZON_ADS_BASE_URL` | `REFRESH_TOKEN` chỉ là FALLBACK khi shop chưa có token trong DB (kèm cảnh báo “không gắn shop”) |
+| | `AMAZON_ADS_ATTRIBUTION_DAYS` (7 seller / 14 vendor), `AMAZON_ADS_REPORT_DAYS` (mặc định 7, trần 31), `AMAZON_ADS_PROFILE_TYPE`, `AMAZON_ADS_COUNTRY`, `AMAZON_ADS_ACCOUNT_ID` | chọn profile + cửa sổ report |
+| Nghiệp vụ | `VEXIM_LEAD_DAYS`, `VEXIM_SAFETY_DAYS`, `AMAZON_WHOAMI_FALLBACK_ASIN` | đã có từ trước |
 
-9 biến còn lại trên Vercel (`POSTGRES_*`, `SUPABASE_PUBLISHABLE_KEY`,
-`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`, `SUPABASE_ANON_KEY`,
-`SUPABASE_URL`, `SUPABASE_JWT_SECRET`) **code không đọc** — không gây hại, có thể để nguyên.
+Không có biến `AMAZON_ADS_PROFILE_ID`: profileId là **THEO SHOP** (cột
+`connections.oauth_tokens.ads_account_id`, nhập ở `/module0/connect`) — một biến toàn cục sẽ ép nhầm
+profile cho mọi shop.
+
+Các biến `POSTGRES_*`, `SUPABASE_PUBLISHABLE_KEY`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`,
+`SUPABASE_SECRET_KEY`, `SUPABASE_ANON_KEY`, `SUPABASE_JWT_SECRET` **code không đọc** — không gây hại,
+có thể để nguyên.
