@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="vi">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>VEXIM Ops — Amazon Operations Platform for Selling Partners</title>
-<meta name="description" content="VEXIM Ops is an operations management platform for Amazon selling partners. Connect your seller account via the official Amazon Selling Partner API and manage orders, inventory, pricing, advertising, finance and account health in one clean dashboard.">
-<meta property="og:title" content="VEXIM Ops — Amazon Operations Platform">
-<meta property="og:description" content="One clean dashboard for every team running your Amazon business. Built on the official Amazon Selling Partner API.">
+<title>VEXIM Ops — Nền tảng quản trị vận hành Amazon cho doanh nghiệp tăng trưởng</title>
+<meta name="description" content="VEXIM Ops là nền tảng quản trị vận hành Amazon đa gian hàng, kết nối chính thức qua Amazon SP-API & Ads API. Tập trung đơn hàng, tồn kho FBA, listing, giá & Buy Box, quảng cáo PPC, tài chính đối soát và sức khỏe tài khoản trên một dashboard duy nhất — phân quyền theo phòng ban, chuẩn hoá SOP.">
+<meta property="og:title" content="VEXIM Ops — Nền tảng vận hành Amazon">
+<meta property="og:description" content="Một dashboard cho mọi phòng ban vận hành Amazon: giảm thất thoát doanh thu, giữ Buy Box, tối ưu ACOS/TACOS, chống hết hàng, bảo vệ sức khỏe tài khoản.">
 <meta property="og:type" content="website">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f1720'/%3E%3Cpath d='M9 10l7 13 7-13h-4.2L16 16.2 13.2 10z' fill='%23ff9900'/%3E%3C/svg%3E">
 <style>
@@ -25,50 +25,49 @@
   html{scroll-behavior:smooth}
   body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;color:var(--ink);background:var(--bg);line-height:1.6;-webkit-font-smoothing:antialiased}
   a{color:inherit;text-decoration:none}
-  .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+  .wrap{max-width:1120px;margin:0 auto;padding:0 24px}
 
-  /* ---------- header ---------- */
-  header{position:sticky;top:0;z-index:50;background:rgba(255,255,255,.82);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
-  .nav{display:flex;align-items:center;gap:28px;height:64px}
-  .logo{display:flex;align-items:center;gap:10px;font-weight:800;font-size:17px;letter-spacing:-.02em}
-  .logo-mark{width:30px;height:30px;border-radius:8px;background:var(--ink);display:grid;place-items:center;color:var(--accent);font-size:15px;font-weight:900}
-  .logo small{font-weight:600;color:var(--soft);font-size:11px;letter-spacing:.14em;text-transform:uppercase;margin-left:2px}
-  .nav-links{display:flex;gap:22px;margin-left:auto;font-size:14.5px;color:var(--muted);font-weight:500}
+  header{position:sticky;top:0;z-index:50;background:rgba(255,255,255,.86);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  .nav{display:flex;align-items:center;gap:28px;height:68px}
+  .logo{display:flex;align-items:center;gap:10px;font-weight:900;font-size:18px;letter-spacing:-.02em}
+  .logo-mark{width:32px;height:32px;border-radius:9px;background:var(--ink);display:grid;place-items:center;color:var(--accent);font-size:16px;font-weight:900}
+  .logo small{font-weight:700;color:var(--soft);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;margin-left:2px}
+  .nav-links{display:flex;gap:24px;margin-left:auto;font-size:14.5px;color:var(--muted);font-weight:600}
   .nav-links a:hover{color:var(--ink)}
-  .btn{display:inline-flex;align-items:center;gap:8px;font-weight:600;font-size:14.5px;border-radius:999px;padding:10px 20px;cursor:pointer;border:1px solid transparent;transition:.18s}
+  .btn{display:inline-flex;align-items:center;gap:8px;font-weight:700;font-size:14.5px;border-radius:999px;padding:11px 22px;cursor:pointer;border:1px solid transparent;transition:.18s}
   .btn-dark{background:var(--ink);color:#fff}
   .btn-dark:hover{background:#232f3e;transform:translateY(-1px)}
   .btn-ghost{border-color:var(--line);background:#fff;color:var(--ink)}
   .btn-ghost:hover{border-color:#c9cfda}
   .burger{display:none;margin-left:auto;background:none;border:0;font-size:22px;cursor:pointer;color:var(--ink)}
 
-  /* ---------- hero ---------- */
-  .hero{padding:76px 0 64px;background:
+  .hero{padding:84px 0 72px;background:
     radial-gradient(1000px 400px at 85% -10%, #fff4e5 0%, transparent 60%),
     radial-gradient(700px 380px at -10% 10%, #eaf1ff 0%, transparent 55%), var(--bg)}
-  .hero-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:48px;align-items:center}
-  .badge{display:inline-flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line);color:var(--muted);font-size:13px;font-weight:600;padding:7px 14px;border-radius:999px;box-shadow:var(--shadow)}
+  .hero-grid{display:grid;grid-template-columns:1.08fr .92fr;gap:52px;align-items:center}
+  .badge{display:inline-flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line);color:var(--muted);font-size:12.5px;font-weight:700;padding:7px 14px;border-radius:999px;box-shadow:var(--shadow)}
   .badge .b-dot{width:7px;height:7px;border-radius:50%;background:var(--green)}
-  h1{font-size:clamp(34px,4.6vw,52px);line-height:1.08;letter-spacing:-.03em;font-weight:800;margin:20px 0 18px}
+  h1{font-size:clamp(34px,4.8vw,54px);line-height:1.05;letter-spacing:-.035em;font-weight:900;margin:20px 0 18px}
   h1 em{font-style:normal;color:var(--accent-ink);position:relative;white-space:nowrap}
-  .hero p.lead{font-size:17.5px;color:var(--muted);max-width:520px;margin-bottom:30px}
+  .hero p.lead{font-size:17.5px;color:var(--muted);max-width:560px;margin-bottom:30px}
   .hero-ctas{display:flex;gap:12px;flex-wrap:wrap}
-  .hero-note{margin-top:18px;font-size:13px;color:var(--soft)}
+  .hero-note{margin-top:18px;font-size:12.5px;color:var(--soft);line-height:1.5}
+  .hero-bullets{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+  .hero-bullets span{font-size:11.5px;font-weight:700;color:var(--muted);background:#fff;border:1px solid var(--line);padding:5px 11px;border-radius:999px}
 
-  /* ---------- hero mock ---------- */
   .mock{background:var(--card);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);overflow:hidden}
   .mock-top{display:flex;align-items:center;gap:10px;padding:13px 18px;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--muted);font-weight:600}
   .dots{display:flex;gap:5px}
   .dots i{width:9px;height:9px;border-radius:50%;background:#e3e7ee}
-  .live{margin-left:auto;display:inline-flex;align-items:center;gap:6px;color:var(--green);font-weight:700}
+  .live{margin-left:auto;display:inline-flex;align-items:center;gap:6px;color:var(--green);font-weight:800}
   .live i{width:7px;height:7px;border-radius:50%;background:var(--green);animation:pulse 1.6s infinite}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
   .mock-body{padding:18px}
-  .mock-title{font-size:12px;font-weight:700;color:var(--soft);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px}
+  .mock-title{font-size:11.5px;font-weight:800;color:var(--soft);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px}
   .kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px}
   .kpi{border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:#fbfcfe}
-  .kpi .k-label{font-size:11.5px;color:var(--soft);font-weight:600}
-  .kpi .k-value{font-size:20px;font-weight:800;letter-spacing:-.02em;margin-top:2px}
+  .kpi .k-label{font-size:11px;color:var(--soft);font-weight:700;text-transform:uppercase;letter-spacing:.06em}
+  .kpi .k-value{font-size:20px;font-weight:900;letter-spacing:-.02em;margin-top:2px}
   .kpi .k-delta{font-size:11.5px;font-weight:700;margin-top:2px}
   .up{color:var(--green)} .down{color:var(--red)} .flat{color:var(--soft)}
   .spark{display:flex;align-items:flex-end;gap:5px;height:44px;margin:4px 0 14px}
@@ -81,70 +80,72 @@
   .alert.amber{background:var(--amber-soft);color:#8a5602}.alert.amber .a-icon{background:var(--amber)}
   .alert.green{background:var(--green-soft);color:#0b7a55}.alert.green .a-icon{background:var(--green)}
 
-  /* ---------- sections ---------- */
-  section{padding:72px 0}
-  .sec-head{max-width:640px;margin-bottom:40px}
-  .kicker{font-size:12.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--accent-ink);margin-bottom:10px}
-  h2{font-size:clamp(26px,3.4vw,36px);letter-spacing:-.02em;line-height:1.15;font-weight:800;margin-bottom:12px}
-  .sec-head p{color:var(--muted);font-size:16.5px}
+  section{padding:80px 0}
+  .sec-head{max-width:720px;margin-bottom:44px}
+  .kicker{font-size:12px;font-weight:900;letter-spacing:.14em;text-transform:uppercase;color:var(--accent-ink);margin-bottom:12px}
+  h2{font-size:clamp(28px,3.6vw,40px);letter-spacing:-.025em;line-height:1.12;font-weight:900;margin-bottom:14px}
+  .sec-head p{color:var(--muted);font-size:17px;line-height:1.6}
 
-  /* steps */
   .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
-  .step{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:26px 24px;box-shadow:var(--shadow)}
-  .step-n{width:34px;height:34px;border-radius:10px;background:var(--accent-soft);color:var(--accent-ink);display:grid;place-items:center;font-weight:800;font-size:15px;margin-bottom:16px}
-  .step h3{font-size:17px;margin-bottom:8px;letter-spacing:-.01em}
+  .step{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:28px 24px;box-shadow:var(--shadow)}
+  .step-n{width:36px;height:36px;border-radius:10px;background:var(--accent-soft);color:var(--accent-ink);display:grid;place-items:center;font-weight:900;font-size:15px;margin-bottom:16px}
+  .step h3{font-size:17.5px;margin-bottom:8px;letter-spacing:-.01em}
   .step p{font-size:14.5px;color:var(--muted)}
 
-  /* departments */
   .departments{background:#fff;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
   .dept-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
-  .dept{background:var(--bg);border:1px solid var(--line);border-radius:var(--radius);padding:24px;transition:.18s}
+  .dept{background:var(--bg);border:1px solid var(--line);border-radius:var(--radius);padding:26px;transition:.18s}
   .dept:hover{transform:translateY(-3px);box-shadow:var(--shadow);background:#fff}
-  .dept-ico{font-size:22px;width:46px;height:46px;border-radius:12px;background:#fff;border:1px solid var(--line);display:grid;place-items:center;margin-bottom:14px}
+  .dept-ico{font-size:22px;width:48px;height:48px;border-radius:12px;background:#fff;border:1px solid var(--line);display:grid;place-items:center;margin-bottom:14px}
   .dept h3{font-size:16.5px;margin-bottom:7px;letter-spacing:-.01em}
-  .dept p{font-size:14px;color:var(--muted)}
-  .dept .dept-kpi{display:inline-block;margin-top:12px;font-size:12px;font-weight:700;color:var(--accent-ink);background:var(--accent-soft);border-radius:999px;padding:4px 11px}
+  .dept p{font-size:14px;color:var(--muted);line-height:1.55}
+  .dept .dept-kpi{display:inline-block;margin-top:12px;font-size:11.5px;font-weight:800;color:var(--accent-ink);background:var(--accent-soft);border-radius:999px;padding:5px 12px}
 
-  /* security */
+  .modules-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
+  .module-card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:22px 24px;display:flex;gap:14px}
+  .module-card .m-ico{flex:none;width:40px;height:40px;border-radius:10px;background:var(--bg);border:1px solid var(--line);display:grid;place-items:center;font-size:18px}
+  .module-card h3{font-size:15.5px;margin-bottom:4px}
+  .module-card p{font-size:13.5px;color:var(--muted)}
+
   .sec-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
   .sec-item{display:flex;gap:14px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:20px 22px}
-  .sec-item .s-ico{flex:none;width:38px;height:38px;border-radius:10px;background:var(--green-soft);color:var(--green);display:grid;place-items:center;font-size:17px;font-weight:800}
+  .sec-item .s-ico{flex:none;width:38px;height:38px;border-radius:10px;background:var(--green-soft);color:var(--green);display:grid;place-items:center;font-size:17px;font-weight:900}
   .sec-item h3{font-size:15.5px;margin-bottom:4px}
   .sec-item p{font-size:13.8px;color:var(--muted)}
 
-  /* about + contact */
   .split{display:grid;grid-template-columns:1.1fr .9fr;gap:40px;align-items:start}
-  .about p{color:var(--muted);font-size:16px;margin-bottom:14px}
+  .about p{color:var(--muted);font-size:16.5px;margin-bottom:14px;line-height:1.65}
+  .about ul{margin:12px 0 0 18px;color:var(--muted);font-size:15px}
+  .about li{margin-bottom:6px}
   .contact-card{background:var(--ink);color:#fff;border-radius:18px;padding:34px 32px;box-shadow:var(--shadow)}
-  .contact-card h3{font-size:21px;margin-bottom:8px;letter-spacing:-.01em}
+  .contact-card h3{font-size:22px;margin-bottom:8px;letter-spacing:-.01em}
   .contact-card p{color:#b9c2cf;font-size:14.5px;margin-bottom:22px}
   .contact-row{display:flex;gap:12px;align-items:center;padding:12px 0;border-top:1px solid #26313f;font-size:14.5px}
   .contact-row:first-of-type{border-top:0}
   .contact-row .c-ico{width:34px;height:34px;border-radius:9px;background:#1d2836;display:grid;place-items:center;font-size:15px}
-  .contact-row b{display:block;font-size:12px;color:#8f9aa9;font-weight:600;text-transform:uppercase;letter-spacing:.08em}
+  .contact-row b{display:block;font-size:11px;color:#8f9aa9;font-weight:700;text-transform:uppercase;letter-spacing:.08em}
   .contact-row span{color:#e7ebf1}
 
-  footer{border-top:1px solid var(--line);background:#fff;padding:34px 0;font-size:13.5px;color:var(--soft)}
+  footer{border-top:1px solid var(--line);background:#fff;padding:36px 0;font-size:13.5px;color:var(--soft)}
   .foot{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
   .foot .sep{flex:1}
   .foot a:hover{color:var(--ink)}
 
-  /* reveal on scroll */
   .reveal{opacity:0;transform:translateY(14px);transition:.6s ease}
   .reveal.in{opacity:1;transform:none}
 
-  @media (max-width:920px){
+  @media (max-width:980px){
     .nav-links{display:none}
     .burger{display:block}
-    .nav-links.open{display:flex;position:absolute;top:64px;left:0;right:0;background:#fff;border-bottom:1px solid var(--line);flex-direction:column;padding:18px 24px;gap:16px}
+    .nav-links.open{display:flex;position:absolute;top:68px;left:0;right:0;background:#fff;border-bottom:1px solid var(--line);flex-direction:column;padding:18px 24px;gap:16px}
     .hero-grid,.split{grid-template-columns:1fr}
     .steps,.dept-grid{grid-template-columns:1fr 1fr}
-    .sec-grid{grid-template-columns:1fr}
+    .sec-grid,.modules-grid{grid-template-columns:1fr}
   }
-  @media (max-width:620px){
+  @media (max-width:640px){
     .steps,.dept-grid,.kpis{grid-template-columns:1fr}
-    section{padding:54px 0}
-    .hero{padding:52px 0 48px}
+    section{padding:56px 0}
+    .hero{padding:56px 0 52px}
   }
 </style>
 </head>
@@ -154,235 +155,267 @@
   <div class="wrap nav">
     <a class="logo" href="#top">
       <span class="logo-mark">V</span>
-      VEXIM&nbsp;Ops <small>for Amazon sellers</small>
+      VEXIM&nbsp;Ops <small>Nền tảng vận hành Amazon</small>
     </a>
     <nav class="nav-links" id="navLinks">
-      <a href="#platform">How it works</a>
-      <a href="#departments">Teams</a>
-      <a href="#security">Security</a>
-      <a href="#about">About</a>
-      <a href="#contact">Contact</a>
+      <a href="#platform">Nền tảng</a>
+      <a href="#departments">Phòng ban</a>
+      <a href="#modules">Module</a>
+      <a href="#security">Bảo mật</a>
+      <a href="#about">Về VEXIM</a>
+      <a href="#contact">Liên hệ</a>
     </nav>
-    <a class="btn btn-dark" href="#contact">Request a demo</a>
+    <a class="btn btn-dark" href="#contact">Yêu cầu demo</a>
     <button class="burger" id="burger" aria-label="Menu">☰</button>
   </div>
 </header>
 
 <main id="top">
 
-  <!-- ============ HERO ============ -->
+  <!-- HERO -->
   <section class="hero">
     <div class="wrap hero-grid">
       <div>
-        <span class="badge"><span class="b-dot"></span> Built on the official Amazon Selling Partner API</span>
-        <h1>Your Amazon operations.<br><em>One clean dashboard.</em></h1>
-        <p class="lead">VEXIM Ops connects securely to your Amazon seller account and turns live marketplace data into daily action for every team — inventory, pricing, advertising, orders, finance and account health.</p>
+        <span class="badge"><span class="b-dot"></span> Kết nối chính thức qua Amazon SP-API & Ads API • Không scraping</span>
+        <h1>Vận hành Amazon<br><em>tập trung & đo được.</em></h1>
+        <p class="lead">VEXIM Ops là nền tảng quản trị vận hành Amazon đa gian hàng cho agency và brand tăng trưởng. Kết nối shop qua OAuth chính thức, dữ liệu chảy về theo thời gian thực và được chuyển hoá thành hành động hằng ngày cho từng phòng ban — giảm thất thoát, giữ Buy Box, tối ưu biên lợi nhuận.</p>
         <div class="hero-ctas">
-          <a class="btn btn-dark" href="#contact">Request a demo</a>
-          <a class="btn btn-ghost" href="#platform">See how it works</a>
+          <a class="btn btn-dark" href="#contact">Yêu cầu demo live →</a>
+          <a class="btn btn-ghost" href="#platform">Xem cách vận hành</a>
         </div>
-        <p class="hero-note">Sellers authorize the app in one click via Amazon Login with Amazon (OAuth 2.0) and can revoke access at any time.</p>
+        <p class="hero-note">Chủ shop uỷ quyền 1 lần bằng Login with Amazon (OAuth 2.0), có thể thu hồi bất kỳ lúc nào trong Seller Central. Token LWA được mã hoá, tự động nhắc gia hạn trước 30 ngày.</p>
+        <div class="hero-bullets">
+          <span>✓ Multi-tenant: VEXIM → Doanh nghiệp → Shop</span>
+          <span>✓ RBAC 6 vai trò + phân quyền theo phòng ban</span>
+          <span>✓ 12 SOP chuẩn hoá</span>
+          <span>✓ Audit log & RLS cấp database</span>
+        </div>
       </div>
 
       <div class="mock" aria-hidden="true">
         <div class="mock-top">
           <span class="dots"><i></i><i></i><i></i></span>
-          Ops Dashboard — amazon.com (US)
+          Dashboard CEO — Toàn bộ gian hàng
           <span class="live"><i></i> Live</span>
         </div>
         <div class="mock-body">
-          <div class="mock-title">Yesterday · All stores</div>
+          <div class="mock-title">Hôm qua · Toàn hệ thống · 14 shop</div>
           <div class="kpis">
             <div class="kpi">
-              <div class="k-label">Revenue</div>
+              <div class="k-label">Doanh thu thuần</div>
               <div class="k-value">$12,480</div>
-              <div class="k-delta up">▲ 8.2% vs last week</div>
+              <div class="k-delta up">▲ 8.2% vs cùng kỳ tuần trước</div>
             </div>
             <div class="kpi">
-              <div class="k-label">Units ordered</div>
+              <div class="k-label">Đơn hàng</div>
               <div class="k-value">341</div>
-              <div class="k-delta up">▲ 4.7%</div>
+              <div class="k-delta up">▲ 4.7% · CR 4.2%</div>
             </div>
             <div class="kpi">
-              <div class="k-label">Ad spend · ACOS</div>
+              <div class="k-label">Chi phí QC · TACOS</div>
               <div class="k-value">$862</div>
-              <div class="k-delta flat">ACOS 18.2% · on target</div>
+              <div class="k-delta flat">TACOS 6.9% · Mục tiêu ≤ 8%</div>
             </div>
             <div class="kpi">
-              <div class="k-label">Buy Box won</div>
+              <div class="k-label">Tỷ lệ giữ Buy Box</div>
               <div class="k-value">93%</div>
-              <div class="k-delta down">▼ 1 SKU lost box</div>
+              <div class="k-delta down">▼ 1 SKU mất Buy Box</div>
             </div>
           </div>
           <div class="spark">
             <i style="height:38%"></i><i style="height:52%"></i><i style="height:44%"></i><i style="height:63%"></i><i style="height:57%"></i><i style="height:72%"></i><i style="height:88%"></i>
           </div>
           <div class="alerts">
-            <div class="alert red"><span class="a-icon"></span>2 SKUs will run out of stock in 5 days — restock plan needed today</div>
-            <div class="alert amber"><span class="a-icon"></span>1 campaign hit its daily budget before 6 PM yesterday</div>
-            <div class="alert green"><span class="a-icon"></span>All account health metrics are within Amazon's target range</div>
+            <div class="alert red"><span class="a-icon"></span>2 SKU sắp hết hàng (cover 5 ngày) — cần kế hoạch nhập hôm nay, ~$410/ngày nếu đứt</div>
+            <div class="alert amber"><span class="a-icon"></span>2 campaign cạn ngân sách trước 18h — đang bỏ lỡ hiển thị</div>
+            <div class="alert green"><span class="a-icon"></span>Sức khỏe tài khoản toàn hệ thống đạt chuẩn Amazon</div>
           </div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- ============ HOW IT WORKS ============ -->
+  <!-- HOW IT WORKS -->
   <section id="platform">
     <div class="wrap">
       <div class="sec-head">
-        <div class="kicker">How it works</div>
-        <h2>From authorization to action in minutes</h2>
-        <p>No spreadsheets, no manual exports. The platform works exclusively with Amazon's official APIs, so your data is accurate and always up to date.</p>
+        <div class="kicker">Nền tảng vận hành</div>
+        <h2>Từ kết nối đến hành động trong 30 phút</h2>
+        <p>Không file Excel rời rạc, không copy-paste thủ công. Toàn bộ dữ liệu lấy trực tiếp từ API chính thức của Amazon, chuẩn hoá về Supabase và phân phối theo quyền từng phòng ban — mỗi con số đều trả lời “hôm nay phải làm gì”.</p>
       </div>
       <div class="steps">
         <div class="step reveal">
           <div class="step-n">1</div>
-          <h3>Connect your store</h3>
-          <p>The account owner clicks "Connect Amazon" and authorizes the app on Seller Central using Amazon's secure OAuth flow. Nothing is shared without your consent.</p>
+          <h3>Kết nối gian hàng chính thức</h3>
+          <p>Chủ tài khoản bấm “Kết nối Amazon” trong Seller Central, uỷ quyền qua OAuth 2.0. Hệ thống nhận LWA refresh token, mã hoá bằng Supabase Vault, tự động đăng ký nhận thông báo <code>ORDER_CHANGE</code>, <code>ANY_OFFER_CHANGED</code>, <code>LISTINGS_ITEM_ISSUES_CHANGE</code>.</p>
         </div>
         <div class="step reveal">
           <div class="step-n">2</div>
-          <h3>Data syncs automatically</h3>
-          <p>Orders, inventory, listings, prices, settlements and advertising metrics flow in continuously — powered by the Selling Partner API and Amazon Advertising API.</p>
+          <h3>Đồng bộ 3 tầng — không bỏ sót tín hiệu</h3>
+          <p><b>Tầng 1 Realtime</b> (EventBridge/SQS), <b>Tầng 2 Incremental</b> (15–60 phút), <b>Tầng 3 Báo cáo đối soát</b> (hằng ngày). Backfill 30 ngày đơn hàng, tồn kho, listing và settlement ngay sau khi kết nối — dashboard có số thật trong &lt;30 phút.</p>
         </div>
         <div class="step reveal">
           <div class="step-n">3</div>
-          <h3>Teams act on what matters</h3>
-          <p>Every team opens a dashboard built for its job, with alerts that flag stockouts, lost Buy Box, wasted ad spend and account-health risks before they cost money.</p>
+          <h3>Phòng ban hành động theo cảnh báo</h3>
+          <p>Mỗi phòng ban mở dashboard riêng với 5–8 chỉ số cốt lõi và hàng đợi ưu tiên theo doanh thu/nguy cơ. Mọi thao tác ghi (đổi giá, sửa listing, duyệt campaign) đều ghi <code>iam.audit_logs</code> với before/after.</p>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- ============ DEPARTMENTS ============ -->
+  <!-- DEPARTMENTS -->
   <section id="departments" class="departments">
     <div class="wrap">
       <div class="sec-head">
-        <div class="kicker">One dashboard per team</div>
-        <h2>Built for how Amazon businesses actually run</h2>
-        <p>Role-based access means each department sees exactly the numbers it needs every morning — nothing more, nothing less.</p>
+        <div class="kicker">Vận hành theo phòng ban — đúng cách Amazon vận hành</div>
+        <h2>Một dashboard cho mỗi đội, một ngôn ngữ chung về tăng trưởng</h2>
+        <p>Cơ chế phân quyền RBAC 6 cấp (super_admin → client_viewer) kết hợp RLS cấp database đảm bảo mỗi người chỉ thấy shop và module được giao. Không còn tình trạng “ai cũng thấy hết, không ai chịu trách nhiệm”.</p>
       </div>
       <div class="dept-grid">
         <div class="dept reveal">
           <div class="dept-ico">🛡️</div>
-          <h3>Operations &amp; Account Health</h3>
-          <p>Account health rating, policy violations, suppressed listings and KYC deadlines across every store.</p>
-          <span class="dept-kpi">Daily: health status · open issues</span>
+          <h3>Vận hành & Sức khỏe tài khoản</h3>
+          <p>Theo dõi Account Health Rating, vi phạm chính sách, listing bị gỡ, KYC, khiếu nại — cảnh báo sớm trước khi Amazon hạn chế.</p>
+          <span class="dept-kpi">KPI hằng ngày: AHR · Vi phạm mở · Nhiệm vụ quá SLA</span>
         </div>
         <div class="dept reveal">
           <div class="dept-ico">🏷️</div>
-          <h3>Listings &amp; Content</h3>
-          <p>Active, inactive and stranded listings, listing quality issues, and a review-before-publish workflow.</p>
-          <span class="dept-kpi">Daily: fix-this-listing queue</span>
-        </div>
-        <div class="dept reveal">
-          <div class="dept-ico">📈</div>
-          <h3>Advertising (PPC)</h3>
-          <p>Spend, ACOS and TACOS by campaign and SKU, budget-exhausted alerts and negative-keyword suggestions.</p>
-          <span class="dept-kpi">Daily: campaigns needing attention</span>
-        </div>
-        <div class="dept reveal">
-          <div class="dept-ico">📦</div>
-          <h3>Inventory &amp; FBA</h3>
-          <p>Days-of-cover per SKU, restock alerts ranked by revenue, inbound shipments and aged inventory.</p>
-          <span class="dept-kpi">Daily: SKUs about to run out</span>
-        </div>
-        <div class="dept reveal">
-          <div class="dept-ico">💬</div>
-          <h3>Orders &amp; Customer Care</h3>
-          <p>FBM queues with shipping deadlines, buyer messages under the 24-hour SLA, returns and feedback.</p>
-          <span class="dept-kpi">Daily: unanswered messages</span>
+          <h3>Listing & Nội dung</h3>
+          <p>Quản lý vòng đời listing: active/inactive/stranded, lỗi chất lượng, hàng đợi duyệt nội dung, editor tuân thủ giới hạn Amazon.</p>
+          <span class="dept-kpi">KPI hằng ngày: Listing lỗi · Chờ duyệt · Doanh thu/ngày bị ảnh hưởng</span>
         </div>
         <div class="dept reveal">
           <div class="dept-ico">💰</div>
-          <h3>Finance &amp; Reconciliation</h3>
-          <p>Settlements, fee breakdowns, FBA reimbursement opportunities and estimated profit per SKU.</p>
-          <span class="dept-kpi">Daily: claims worth filing</span>
+          <h3>Định giá & Buy Box</h3>
+          <p>Giám sát đối thủ, giữ tỷ lệ thắng Buy Box, tính biên lợi nhuận sau phí FBA/referral, phê duyệt chiến lược giá theo SOP.</p>
+          <span class="dept-kpi">KPI hằng ngày: % Buy Box · SKU mất Buy Box · Biên lợi nhuận</span>
+        </div>
+        <div class="dept reveal">
+          <div class="dept-ico">📦</div>
+          <h3>Kho vận & FBA</h3>
+          <p>Dự báo days-of-cover, cảnh báo sắp hết hàng xếp theo doanh thu, theo dõi inbound shipment, tồn kho lâu ngày.</p>
+          <span class="dept-kpi">KPI hằng ngày: SKU sắp hết · Giá trị tồn kho · Nhập hàng đang vận chuyển</span>
+        </div>
+        <div class="dept reveal">
+          <div class="dept-ico">📈</div>
+          <h3>Quảng cáo PPC</h3>
+          <p>Quản lý Sponsored Products/SB/SD, ngân sách, bid, phân tích search term, đề xuất phủ định (Negative Exact/Phrase) theo SOP-04.</p>
+          <span class="dept-kpi">KPI hằng ngày: ACOS · TACOS · Campaign vượt ngân sách</span>
+        </div>
+        <div class="dept reveal">
+          <div class="dept-ico">💬</div>
+          <h3>Đơn hàng & CSKH</h3>
+          <p>Hàng đợi FBM với deadline giao hàng, tin nhắn buyer theo SLA 24h, xử lý return/refund, theo dõi feedback.</p>
+          <span class="dept-kpi">KPI hằng ngày: Tin nhắn chưa trả lời · Đơn FBM quá hạn · Tỷ lệ hoàn</span>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- ============ SECURITY ============ -->
+  <!-- MODULES -->
+  <section id="modules">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="kicker">Hệ thống module — khớp 100% luồng vận hành thực tế</div>
+        <h2>Không phải công cụ rời rạc, mà là hệ điều hành cho Amazon</h2>
+        <p>30+ route được thiết kế theo hành trình vận hành: từ CEO nhìn toàn cảnh → từng phòng ban xử lý chi tiết → đối soát tài chính → cổng khách hàng minh bạch.</p>
+      </div>
+      <div class="modules-grid">
+        <div class="module-card reveal">
+          <div class="m-ico">📊</div>
+          <div><h3>Dashboard CEO</h3><p>Doanh thu, đơn hàng, TACOS, shop cần xử lý gấp, biểu đồ 14 ngày, cảnh báo đỏ/vàng/xanh theo tác động doanh thu.</p></div>
+        </div>
+        <div class="module-card reveal">
+          <div class="m-ico">🛡️</div>
+          <div><h3>Sức khỏe tài khoản</h3><p>AHR, ODR, Late Shipment, vi phạm IP, nhiệm vụ KYC — đồng bộ qua Account Health API & notification.</p></div>
+        </div>
+        <div class="module-card reveal">
+          <div class="m-ico">🏷️</div>
+          <div><h3>Listing</h3><p>Listings Items API + Catalog, hàng đợi lỗi theo doanh thu, editor tuân thủ giới hạn ký tự, quy trình duyệt.</p></div>
+        </div>
+        <div class="module-card reveal">
+          <div class="m-ico">💲</div>
+          <div><h3>Định giá & Phê duyệt</h3><p>Product Pricing & Fees API, so sánh đối thủ, tính P&L theo SKU, luồng phê duyệt giá 2 cấp.</p></div>
+        </div>
+        <div class="module-card reveal">
+          <div class="m-ico">📦</div>
+          <div><h3>Tồn kho & Nhập hàng</h3><p>FBA Inventory API, dự báo tiêu thụ, cảnh báo hết hàng, tạo inbound shipment (2024-03-20), theo dõi FC allocation.</p></div>
+        </div>
+        <div class="module-card reveal">
+          <div class="m-ico">🎯</div>
+          <div><h3>PPC & Search Term</h3><p>Ads API v3, chi tiết campaign → ad group → keyword, báo cáo search term, hàng đợi duyệt Negative, ghi ngược lên Amazon có audit & revert 1 chạm.</p></div>
+        </div>
+        <div class="module-card reveal">
+          <div class="m-ico">🧾</div>
+          <div><h3>Đơn hàng FBM & Returns</h3><p>Orders API, countdown SLA giao hàng, tin nhắn buyer, xử lý hoàn hàng — không bỏ sót đơn quá hạn.</p></div>
+        </div>
+        <div class="module-card reveal">
+          <div class="m-ico">💰</div>
+          <div><h3>Tài chính & Đối soát</h3><p>Settlement, Financial Events, FBA reimbursements, profit theo SKU, chi phí quảng cáo — đối soát append-only.</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SECURITY -->
   <section id="security">
     <div class="wrap">
       <div class="sec-head">
-        <div class="kicker">Security &amp; data protection</div>
-        <h2>Your store's data, treated with care</h2>
-        <p>VEXIM Ops is designed to comply with the Amazon Data Protection Policy and applicable data protection laws.</p>
+        <div class="kicker">Bảo mật & Tuân thủ — chuẩn duyệt Amazon Developer</div>
+        <h2>Dữ liệu gian hàng được đối xử như tài sản</h2>
+        <p>Thiết kế tuân thủ Amazon Data Protection Policy và các quy định bảo vệ dữ liệu hiện hành. Không scraping, không nguồn dữ liệu bên thứ ba.</p>
       </div>
       <div class="sec-grid">
         <div class="sec-item reveal">
           <div class="s-ico">✓</div>
-          <div>
-            <h3>Official Amazon integration only</h3>
-            <p>All data comes from the official Amazon Selling Partner API and Amazon Advertising API over TLS. No scraping, no third-party data sources.</p>
-          </div>
+          <div><h3>Chỉ tích hợp API chính thức</h3><p>Toàn bộ dữ liệu lấy từ SP-API & Advertising API qua TLS. Không cào dữ liệu, không chia sẻ chéo giữa các seller (multi-tenant RLS).</p></div>
         </div>
         <div class="sec-item reveal">
           <div class="s-ico">🔑</div>
-          <div>
-            <h3>Seller-authorized access</h3>
-            <p>Sellers connect their accounts via Amazon's OAuth 2.0 flow and can revoke access at any time from Seller Central. Tokens are re-authorized annually.</p>
-          </div>
+          <div><h3>Uỷ quyền & thu hồi minh bạch</h3><p>Shop kết nối qua OAuth 2.0 của Amazon, có thể thu hồi trong Seller Central bất kỳ lúc nào. Token hết hạn 1 năm — hệ thống nhắc gia hạn trước 30 ngày.</p></div>
         </div>
         <div class="sec-item reveal">
           <div class="s-ico">🔒</div>
-          <div>
-            <h3>Encryption &amp; minimal PII</h3>
-            <p>Data is encrypted in transit and at rest. Buyer personal data is used only to fulfill and support orders — never sold, shared, or used for advertising.</p>
-          </div>
+          <div><h3>Mã hoá & tối thiểu hoá PII</h3><p>Mã hoá in-transit & at-rest, LWA token lưu trong Supabase Vault. Dữ liệu người mua chỉ dùng để thực hiện đơn hàng — không bán, không dùng cho quảng cáo.</p></div>
         </div>
         <div class="sec-item reveal">
           <div class="s-ico">🧑‍💻</div>
-          <div>
-            <h3>Role-based access &amp; audit logs</h3>
-            <p>Every user sees only the stores and modules they are assigned to. All write actions (prices, listings, campaigns) are logged with before/after values.</p>
-          </div>
+          <div><h3>RBAC & Nhật ký kiểm toán</h3><p>6 vai trò, phân quyền theo phòng ban & shop, mọi thao tác ghi (giá, listing, campaign) đều lưu before/after trong <code>iam.audit_logs</code> — không xoá được.</p></div>
         </div>
         <div class="sec-item reveal">
           <div class="s-ico">🗑️</div>
-          <div>
-            <h3>Deletion on deauthorization</h3>
-            <p>When a seller revokes authorization, tokens are deleted immediately and store data is purged in accordance with our retention policy.</p>
-          </div>
+          <div><h3>Xoá dữ liệu khi thu hồi</h3><p>Khi seller thu hồi uỷ quyền, token bị xoá ngay lập tức và dữ liệu gian hàng được thanh lọc theo chính sách lưu trữ — đúng cam kết với Amazon.</p></div>
         </div>
         <div class="sec-item reveal">
           <div class="s-ico">🛠️</div>
-          <div>
-            <h3>Operated by a accountable team</h3>
-            <p>Production access is limited to trained, background-checked VEXIM staff under multi-factor authentication and least-privilege permissions.</p>
-          </div>
+          <div><h3>Vận hành bởi đội ngũ chịu trách nhiệm</h3><p>Quyền production giới hạn cho nhân sự VEXIM đã đào tạo, xác thực đa yếu tố, nguyên tắc đặc quyền tối thiểu (least-privilege).</p></div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- ============ ABOUT + CONTACT ============ -->
+  <!-- ABOUT + CONTACT -->
   <section id="about">
     <div class="wrap split">
       <div class="about">
-        <div class="kicker">About VEXIM</div>
-        <h2>An operations partner, not just a tool</h2>
-        <p>VEXIM is a Vietnam-based marketplace operations agency that runs Amazon stores on behalf of growing businesses. Our teams handle listings, advertising, inventory planning, customer care and finance for dozens of selling partners.</p>
-        <p>VEXIM Ops is the platform we built for our own work — and that we use to run every client store with the same discipline: clear numbers, clear owners, clear daily actions.</p>
+        <div class="kicker">Về VEXIM</div>
+        <h2>Đối tác vận hành, không chỉ là công cụ</h2>
+        <p>VEXIM là agency vận hành marketplace có trụ sở tại Việt Nam, quản lý gian hàng Amazon cho các doanh nghiệp tăng trưởng. Chúng tôi vận hành listing, quảng cáo, tồn kho, đơn hàng và tài chính cho hàng chục đối tác bán hàng.</p>
+        <p><b>VEXIM Ops</b> là nền tảng chúng tôi xây cho chính mình — để mọi gian hàng được vận hành với cùng một kỷ luật: <b>số liệu rõ ràng, người chịu trách nhiệm rõ ràng, hành động hằng ngày rõ ràng</b>.</p>
+        <ul>
+          <li>✅ <b>Giảm thất thoát doanh thu:</b> chống hết hàng, mất Buy Box, đốt ngân sách QC, listing “tàng hình”.</li>
+          <li>✅ <b>Tăng biên lợi nhuận:</b> tính P&L theo SKU sau phí, tối ưu ACOS/TACOS, đòi bồi hoàn FBA.</li>
+          <li>✅ <b>Chuẩn hoá SOP:</b> 12 quy trình vận hành chuẩn, từ cảnh báo đến phê duyệt & revert 1 chạm.</li>
+          <li>✅ <b>Minh bạch cho khách hàng:</b> cổng client portal xem doanh thu, tồn kho, báo cáo — không cần hỏi qua chat.</li>
+        </ul>
       </div>
       <div class="contact-card" id="contact">
-        <h3>Talk to us</h3>
-        <p>See the platform running on live marketplace data and learn how your store could be managed with VEXIM Ops.</p>
-        <div class="contact-row">
-          <span class="c-ico">✉️</span>
-          <div><b>Email</b><span>ops@vexim.vn</span></div>
-        </div>
-        <div class="contact-row">
-          <span class="c-ico">📞</span>
-          <div><b>Phone</b><span>+84 28 1234 5678</span></div>
-        </div>
-        <div class="contact-row">
-          <span class="c-ico">📍</span>
-          <div><b>Office</b><span>Ho Chi Minh City, Vietnam</span></div>
-        </div>
+        <h3>Trò chuyện cùng chúng tôi</h3>
+        <p>Xem demo live trên dữ liệu marketplace thật và lộ trình để gian hàng của bạn được vận hành bằng VEXIM Ops.</p>
+        <div class="contact-row"><span class="c-ico">✉️</span><div><b>Email</b><span>ops@vexim.vn</span></div></div>
+        <div class="contact-row"><span class="c-ico">📞</span><div><b>Hotline</b><span>+84 28 1234 5678</span></div></div>
+        <div class="contact-row"><span class="c-ico">📍</span><div><b>Văn phòng</b><span>TP. Hồ Chí Minh, Việt Nam</span></div></div>
+        <div class="contact-row"><span class="c-ico">🔗</span><div><b>Nền tảng</b><span><a href="/login" style="color:#ffd9a0;text-decoration:underline">Đăng nhập VEXIM Ops →</a></span></div></div>
       </div>
     </div>
   </section>
@@ -390,24 +423,22 @@
 
 <footer>
   <div class="wrap foot">
-    <span>© <span id="year">2026</span> VEXIM Co., Ltd. All rights reserved.</span>
+    <span>© <span id="year">2026</span> VEXIM Co., Ltd. Bảo lưu mọi quyền.</span>
     <span class="sep"></span>
-    <a href="#security">Data protection</a>
-    <a href="#contact">Contact</a>
+    <a href="#security">Bảo vệ dữ liệu</a>
+    <a href="#contact">Liên hệ</a>
+    <a href="/login">Đăng nhập</a>
   </div>
-  <div class="wrap" style="margin-top:10px;font-size:12.5px">
-    VEXIM Ops is an independent product and is not endorsed by or affiliated with Amazon.com, Inc. "Amazon" and "Selling Partner API" are trademarks of Amazon.com, Inc.
+  <div class="wrap" style="margin-top:10px;font-size:12px;line-height:1.6">
+    VEXIM Ops là sản phẩm độc lập, không được chứng thực bởi hay liên kết với Amazon.com, Inc. “Amazon” và “Selling Partner API” là nhãn hiệu của Amazon.com, Inc. Nền tảng tuân thủ SP-API Acceptable Use Policy & Data Protection Policy.
   </div>
 </footer>
 
 <script>
-  // mobile nav
   const burger=document.getElementById('burger'),links=document.getElementById('navLinks');
   burger.addEventListener('click',()=>links.classList.toggle('open'));
   links.querySelectorAll('a').forEach(a=>a.addEventListener('click',()=>links.classList.remove('open')));
-  // year
   document.getElementById('year').textContent=new Date().getFullYear();
-  // reveal on scroll
   const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}}),{threshold:.12});
   document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
 </script>

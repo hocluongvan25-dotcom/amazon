@@ -18,13 +18,15 @@ import { NextResponse, type NextRequest } from "next/server";
  */
 /**
  * Đường dẫn công khai KHÔNG yêu cầu đăng nhập:
+ * - / : landing page tiếng Việt (gắn vào hệ thống, marketing) — nếu đã đăng nhập thì redirect /dashboard ở page.tsx
+ * - /landing : alias cho landing (để truy cập trực tiếp)
  * - /login: trang đăng nhập
  * - /invite: trang đặt mật khẩu cho người được mời — nhận #access_token (implicit grant)
  *   từ email. Nếu không mở công khai, request không cookie bị đá về /login và mất token.
  * - /auth/confirm: xử lý nhánh email template dùng {{ .TokenHash }} (verifyOtp + chặn open-redirect).
  *   Cũng phải mở công khai, nếu không token_hash bị mất khi redirect.
  */
-const PUBLIC_PATHS = ["/login", "/invite", "/auth/confirm"];
+const PUBLIC_PATHS = ["/", "/landing", "/login", "/invite", "/auth/confirm"];
 const BYPASS_AUTH_PATHS = [
   "/api/cron",
   "/api/webhooks",
