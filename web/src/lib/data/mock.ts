@@ -17,8 +17,7 @@ import type {
   SkuProfitRow,
   SkuStockRow,
   SyncJobRow,
-  UserRow,
-} from "@/lib/types";
+  } from "@/lib/types";
 
 export const dataMode = "mock" as const;
 
@@ -198,15 +197,13 @@ export const auditLogs: AuditRow[] = [
   { time: "10/09 16:03", actor: "Minh (Kho vận)", module: "pricing", action: "price.update", entity: "XMO-950-BLK", change: "$29.99 → $31.99 (+6.7%)", result: "error" },
 ];
 
-/* ---------- Module 0: users ---------- */
-export const users: UserRow[] = [
-  { name: "Nguyễn Hải Anh", email: "haianh@vexim.vn", role: "Dept Lead", department: "Vận hành & Health", shops: "14 shop", status: "active" },
-  { name: "Trần Mỹ Linh", email: "mylinh@vexim.vn", role: "Dept Lead", department: "Kho vận & FBA", shops: "9 shop", status: "active" },
-  { name: "Lê Tuấn", email: "tuan@vexim.vn", role: "Operator", department: "PPC", shops: "5 shop được gán", status: "active" },
-  { name: "Nguyễn Hà", email: "ha@vexim.vn", role: "Operator", department: "Đơn hàng & CSKH", shops: "6 shop", status: "active" },
-  { name: "Trịnh Lan", email: "lan@vexim.vn", role: "Operator", department: "Listing & Nội dung", shops: "14 shop", status: "active" },
-  { name: "Đại diện Doanh nghiệp A", email: "contact@khacha-a.vn", role: "Client Viewer", department: "—", shops: "2 shop (chỉ đọc)", status: "invited" },
-];
+/* ---------- Module 0: users ----------
+ * ĐÃ XOÁ 13/09/2026: mảng `users` 6 tài khoản viết cứng (haianh@vexim.vn, mylinh@…)
+ * KHÔNG hề tồn tại trong DB mà vẫn hiện trên màn Người dùng ⇒ người dùng thật
+ * tưởng đó là nhân viên đã mời. Màn `/module0/users` nay đọc
+ * `public.vexim_admin_users()` (migration 0022); chế độ demo dùng dữ liệu giả lập
+ * ghi rõ trong `(app)/module0/users/demo-users.ts`.
+ */
 
 /* ---------- Module 4: Đơn hàng (O1–O4) — mock ---------- */
 import type { FbmRow, OrderDetailMock, OrderRow, ReturnRow, ViolationRow } from "@/lib/types";

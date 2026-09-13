@@ -106,15 +106,6 @@ export type ApiUsageRow = {
   trend: string;
 };
 
-export type UserRow = {
-  name: string;
-  email: string;
-  role: string;
-  department: string;
-  shops: string;
-  status: "active" | "invited";
-};
-
 /* ---------- Module 4: Đơn hàng (O1–O4) ---------- */
 export type OrderRow = {
   id: string;

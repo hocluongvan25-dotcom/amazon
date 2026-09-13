@@ -2,6 +2,71 @@
 
 > Cập nhật: 13/09/2026 · Thứ tự build đã chốt: **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** (21 màn Đợt 1)
 
+## Cập nhật 13/09 — MODULE 0: NGƯỜI DÙNG & PHÂN QUYỀN LÀM THẬT (migration 0022)
+
+Anh Hồ Lương Văn mở `/module0/users` và thấy 6 tài khoản (`haianh@vexim.vn`, `mylinh@…`,
+`tuan@…`, `ha@…`, `lan@…`, `contact@khacha-a.vn`) cùng 3 nút **Sửa · Quyền · Khóa** bấm
+không được. Kiểm tra ra **2 sự thật khác nhau** — cả hai đều phải sửa:
+
+1. **6 tài khoản đó là DỮ LIỆU GIẢ** — chỉ tồn tại trong mảng viết cứng
+   `web/src/lib/data/mock.ts`, chưa từng được `insert` vào DB ⇒ **không có mật khẩu, không
+   đăng nhập được, không phải nhân viên**. Đã **xoá hẳn** khỏi `mock.ts` (kèm type
+   `UserRow`). Chế độ demo (chưa cấu hình Supabase) dùng danh sách giả lập mới
+   `(app)/module0/users/demo-users.ts` với email `@vexim.example` và một dải cảnh báo
+   "CHẾ ĐỘ DEMO" ngay trên bảng — không thể lẫn với người thật.
+2. **3 nút bị `disabled` vì là màn demo**, không phải lỗi phân quyền. Nay chúng gọi RPC
+   thật, và **luật quyền nằm ở DB**, không ở giao diện.
+
+### Migration 0022 làm gì
+
+| Phần | Nội dung |
+|---|---|
+| `iam.user_profiles.status` | `active` · `invited` · `suspended` (+ backfill người chưa từng đăng nhập & chưa có vai trò ⇒ `invited`) |
+| `iam.role_level()` · `iam.user_level()` · `iam.is_user_admin()` | cấp bậc vai trò + ai được quản trị người dùng (super_admin/org_admin; trưởng phòng chỉ trong phòng mình) |
+| **Khóa = mất quyền THẬT** | vá 4 hàm lõi `iam.has_role` · `iam.current_org_id` · `iam.can_read_seller_account` · `iam.can_write_seller_account`: tài khoản `suspended` ⇒ luôn `false`. Nhờ vậy **mọi** bảng/view/RPC đều chặn, không cần sửa từng policy — và chặn **ngay**, không đợi JWT hết hạn |
+| 6 RPC cho web | `vexim_admin_users` (danh sách thật, trả cả `shop_ids`) · `vexim_admin_update_user` (sửa hồ sơ + khóa/mở) · `vexim_admin_set_user_access` (vai trò + phòng + shop) · `vexim_admin_audit` (nhật ký) · `vexim_admin_grant_invited_user` (ghi hồ sơ cho tài khoản vừa mời) · `vexim_touch_login` (điểm danh `invited` → `active`) |
+
+**Luật chống leo thang (đều kiểm bằng SỐ, không so chuỗi):** không ai tự đổi vai trò / tự
+khóa mình · không đụng người có cấp cao hơn · chỉ gán được vai trò **thấp hơn** mình (khớp
+ma trận `canAssign` sẵn có) · org_admin không đụng super_admin · vai trò vận hành phải thuộc
+một phòng ban · tài khoản đang khóa thì không cấp lại quyền (phải mở khóa trước) · tài khoản
+đang khóa thì mời lại **không tự hồi sinh**.
+
+### Hai lỗi âm thầm phát hiện thêm khi làm (đã sửa trong cùng đợt)
+
+* **`/api/admin/invite-user` chết trong production.** Route cũ tự kiểm vai trò rồi
+  `insert` thẳng vào `iam.user_profiles` / `role_assignments` / `assignments` bằng phiên của
+  người dùng — nhưng role `authenticated` **chưa từng được GRANT insert/update** trên các
+  bảng đó (0001 chỉ grant `select`) ⇒ mời người dùng sẽ báo `permission denied`. Nay route
+  chỉ còn gọi GoTrue (cần `service_role`) rồi để DB ghi qua RPC; luật quyền có **một nguồn
+  sự thật**.
+* **Policy `rls_upd_user_profiles_self` (0004) là policy chết**: user tự sửa hồ sơ mình
+  nhưng thiếu grant cột ⇒ "Thông tin cá nhân" ở chế độ Supabase cũng `permission denied`.
+  0022 cấp `UPDATE (display_name, phone, avatar_url, mfa_enabled)` — đúng 4 cột, không cấp
+  cả bảng.
+
+Thêm một điểm phải nhớ khi đọc code: trong SUPABASE MODE, `session.persona` **luôn là
+`ceo`** (TODO Tier 1 ở `lib/auth/session.ts`) ⇒ **không được** dùng persona để chặn trang
+này. Trang gọi RPC và để DB từ chối; người không phải admin thấy màn "Không có quyền" kèm
+lý do từ database.
+
+### Kiểm chứng
+
+* `supabase` harness: **592 PASS / 0 FAIL** (BƯỚC 23 mới — 24 phép thử cho 0022, gồm cả
+  phép thử **tài khoản bị khóa mất quyền đọc/ghi ở tầng RLS**, leo thang, tự khóa mình,
+  mời lại người đang khóa, điểm danh đăng nhập, quyền của trưởng phòng).
+* `web`: **184 test** (+10 test `users-admin`: thứ bậc vai trò · luật ẩn/hiện 3 nút ·
+  trạng thái · nhãn audit · dữ liệu demo không dùng email thật) · `tsc` sạch · `next build`
+  qua · chạy thật ở chế độ demo: `/module0/users` hiện bảng giả lập có dải cảnh báo, đúng
+  **3 nút bị tắt kèm lý do** (tự đổi quyền mình · tự khóa mình · tài khoản đang khóa), 0
+  email thật còn sót.
+
+### Việc VEXIM cần làm
+
+* ☐ Chạy **`0022_user_admin.sql`** sau 0021 (không phụ thuộc dữ liệu cũ, có DO-block tự soát).
+* ☐ Mở `/module0/users` bằng `hocluongvan88@gmail.com` → sẽ thấy **1 dòng thật** (chính anh)
+  thay vì 6 tài khoản giả; từ đó "Thêm người dùng" tạo người thật và 3 nút hoạt động.
+
 ## Cập nhật 13/09 — VÁ UI MENU TRÁI trước khi bàn giao Ops (active 2 dòng · số mock)
 
 Hai lỗi Ops báo khi nhận Module 5:
@@ -1036,6 +1101,7 @@ nên không phụ thuộc bước này).
 - ☐ **Chạy `0006` rồi `0007` trong SQL Editor** (dọn fixture test + tạo super_admin/alerts)
 - ☐ Chạy `0008` → `0009` → **`0010`** (wrapper RPC · shop production · hạ tầng Module 4/6/7)
 - ☐ **Chạy `0020` rồi `0021`** (Amazon Ads đọc + phần 2/3: hàng đợi duyệt · audit · revert) — 0021 cần chạy SAU 0020
+- ☐ **Chạy `0022_user_admin.sql`** (Module 0: quản trị người dùng thật — Sửa · Quyền · Khóa, khóa = mất quyền ở tầng RLS) — chạy SAU 0021
 - ☐ ✅ `0011`/`0012`/`0013` đã chạy · ☐ **`0014`** (trình soạn listing L3) · ☐ **`0015`** (bồi hoàn FBA + lợi nhuận SKU) · ☐ **`0016`** (Đợt A: giá vốn + ghi listing + `vexim_pricing` dùng giá vốn) · ☐ **`0017`** (Đợt B: doanh số 30 ngày + người phụ trách + giá trị tồn kho) · ☐ **`0018`** (Module 3 nâng cao: phân bổ tồn theo FC + lịch sử nhận hàng)
 - ☐ **Thêm `CRON_SECRET` trên Vercel** (Production + Preview) → Redeploy
 - ☐ `AMAZON_LWA_CLIENT_ID` / `_CLIENT_SECRET` / `_REFRESH_TOKEN` khi Developer Profile được duyệt — thiếu 3 biến này thì worker chỉ chạy demo trong bộ nhớ (an toàn, không ghi DB thật)

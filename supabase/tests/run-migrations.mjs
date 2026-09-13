@@ -3834,6 +3834,372 @@ await cmp(
   3,
 );
 
+// ===========================================================================
+console.log("\n=== BƯỚC 23: 0022 — Module 0: quản trị người dùng & quyền (THẬT) ===");
+// ===========================================================================
+ok(
+  await ex(rd("migrations/0022_user_admin.sql"), "0022_user_admin.sql"),
+  "0022 chạy sạch (DO-block tự soát: status · hàm iam · 5 RPC · khóa-mất-quyền · thứ bậc)",
+);
+
+// ---- dữ liệu nền: super_admin thật + 2 người mới ------------------------------
+const adminId = (
+  await one(`select id from iam.user_profiles where lower(email) = 'hocluongvan88@gmail.com'`)
+).id;
+const otherId = "eeee0000-0000-4000-8000-000000000001";
+const outsiderId = "eeee0000-0000-4000-8000-000000000002";
+await ex(
+  `insert into auth.users (id, email, raw_user_meta_data) values
+     ('${otherId}',    'nhanvien@vexim.vn', '{"full_name":"Nhân viên mới"}'::jsonb),
+     ('${outsiderId}', 'nguoila@vexim.vn',  '{"full_name":"Người lạ"}'::jsonb)`,
+);
+await ex(
+  `insert into iam.user_profiles (id, display_name, email, vexim_employee, status)
+   values ('${otherId}', 'Nhân viên mới', 'nhanvien@vexim.vn', true, 'invited'),
+          ('${outsiderId}', 'Người lạ', 'nguoila@vexim.vn', true, 'active')`,
+);
+
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+await cmp(
+  "0022: hocluongvan88@gmail.com là super_admin ĐANG HOẠT ĐỘNG (is_user_admin)",
+  "select iam.is_user_admin() n",
+  1,
+);
+const profileCount = Number((await one("select count(*)::int n from iam.user_profiles")).n);
+await cmp(
+  "0022: danh sách người dùng đọc từ DB thật (không phải mảng mock 6 dòng)",
+  `select count(*) n from public.vexim_admin_users()`,
+  profileCount,
+);
+const svRow = await one(
+  `select role, role_level, shop_count, shop_ids, status from public.vexim_admin_users()
+    where email = 'hocluongvan88@gmail.com'`,
+);
+ok(
+  svRow.role === "super_admin" && Number(svRow.role_level) === 100 && svRow.status === "active",
+  `0022: dòng super_admin có vai trò + cấp + trạng thái THẬT — ${JSON.stringify(svRow)}`,
+);
+ok(
+  Number(svRow.shop_count) >= 1,
+  `0022: super_admin thấy số shop được gán thật = ${svRow.shop_count} (>= 1)`,
+);
+
+// ---- CHẶN: người thường không xem được danh sách ------------------------------
+await ex(`select set_config('request.jwt.claim.sub','${otherId}',false)`);
+const notAdmin = await ex(
+  "select * from public.vexim_admin_users()",
+  "người thường đọc danh sách (kỳ vọng FAIL)",
+);
+ok(!notAdmin, "0022 CHẶN: người thường KHÔNG đọc được danh sách người dùng");
+await cmp("0022 CHẶN: người thường không phải user admin", "select iam.is_user_admin() n", 0);
+
+// ---- CẤP QUYỀN ---------------------------------------------------------------
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+const shopIds = (
+  await db.query("select id from connections.seller_accounts order by display_name limit 2")
+).rows.map((r) => r.id);
+const granted = await one(
+  `select * from public.vexim_admin_set_user_access(
+     '${otherId}', 'operator', 'ppc', array['${shopIds[0]}','${shopIds[1]}']::uuid[])`,
+);
+ok(
+  granted.user_id === otherId && granted.role === "operator" && Number(granted.shop_count) === 2,
+  `0022: gán operator + phòng PPC + 2 shop — ${JSON.stringify(granted)}`,
+);
+await cmp(
+  "0022: nhân viên mới có quyền GHI ở mảng ads của đúng 2 shop đó",
+  `select count(*) n from iam.assignments a
+    where a.user_id = '${otherId}' and a.can_write and a.module = 'ads'
+      and a.seller_account_id = any (array['${shopIds[0]}','${shopIds[1]}']::uuid[])`,
+  2,
+);
+const scoped = await one(
+  `select shop_count, shop_ids from public.vexim_admin_users() where email = 'nhanvien@vexim.vn'`,
+);
+ok(
+  Array.isArray(scoped.shop_ids) && Number(scoped.shop_count) === 2 && scoped.shop_ids.length === 2,
+  `0022: RPC trả kèm shop_ids để hộp thoại Phân quyền chọn sẵn shop hiện có — ${JSON.stringify(scoped)}`,
+);
+await cmp(
+  "0022: audit ghi lại việc cấp quyền (module iam · action user.role_change)",
+  `select count(*) n from iam.audit_logs
+    where module = 'iam' and action = 'user.role_change' and entity = 'nhanvien@vexim.vn'`,
+  1,
+);
+await ex(`select set_config('request.jwt.claim.sub','${otherId}',false)`);
+await cmp(
+  "0022: sau khi gán, người đó ĐỌC được đúng shop của mình",
+  `select iam.can_read_seller_account('${shopIds[0]}') n`,
+  1,
+);
+await cmp(
+  "0022: người đó KHÔNG đọc được shop chưa gán",
+  `select coalesce(iam.can_read_seller_account(
+     (select id from connections.seller_accounts
+       where id <> all (array['${shopIds[0]}','${shopIds[1]}']::uuid[]) limit 1)), false) n`,
+  0,
+);
+
+// ---- KHÓA = MẤT QUYỀN THẬT ---------------------------------------------------
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+const locked = await one(
+  `select * from public.vexim_admin_update_user('${otherId}', null, null, 'suspended')`,
+);
+ok(
+  locked.status === "suspended" && /mất quyền/.test(locked.message),
+  `0022: khóa tài khoản — ${JSON.stringify(locked)}`,
+);
+await ex(`select set_config('request.jwt.claim.sub','${otherId}',false)`);
+await cmp(
+  "0022 KHÓA: tài khoản bị khóa MẤT quyền ĐỌC shop (RLS thật, không phải ẩn UI)",
+  `select coalesce(iam.can_read_seller_account('${shopIds[0]}'), false) n`,
+  0,
+);
+await cmp(
+  "0022 KHÓA: tài khoản bị khóa MẤT quyền GHI shop",
+  `select coalesce(iam.can_write_seller_account('${shopIds[0]}'), false) n`,
+  0,
+);
+await cmp(
+  "0022 KHÓA: tài khoản bị khóa không còn vai trò nào (has_role = false)",
+  `select iam.has_role(array['operator','dept_lead','super_admin']) n`,
+  0,
+);
+await cmp(
+  "0022 KHÓA: nhật ký ghi rõ có người bị khóa",
+  `select count(*) n from iam.audit_logs where module = 'iam' and action = 'user.suspend'`,
+  1,
+);
+
+// ---- MỞ KHÓA -----------------------------------------------------------------
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+await one(`select * from public.vexim_admin_update_user('${otherId}', null, null, 'active')`);
+await ex(`select set_config('request.jwt.claim.sub','${otherId}',false)`);
+await cmp(
+  "0022: mở khóa ⇒ quyền theo vai trò được phục hồi",
+  `select iam.can_read_seller_account('${shopIds[0]}') n`,
+  1,
+);
+
+// ---- CHẶN LEO THANG ----------------------------------------------------------
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+ok(
+  !(await ex(
+    `select * from public.vexim_admin_set_user_access('${adminId}', 'operator', 'ppc', null)`,
+    "tự đổi vai trò mình (kỳ vọng FAIL)",
+  )),
+  "0022 CHẶN: KHÔNG ai tự đổi vai trò của chính mình",
+);
+ok(
+  !(await ex(
+    `select * from public.vexim_admin_update_user('${adminId}', null, null, 'suspended')`,
+    "tự khóa mình (kỳ vọng FAIL)",
+  )),
+  "0022 CHẶN: KHÔNG ai tự khóa tài khoản của chính mình",
+);
+ok(
+  !(await ex(
+    `select * from public.vexim_admin_set_user_access('${otherId}', 'operator', null, null)`,
+    "operator thiếu phòng ban (kỳ vọng FAIL)",
+  )),
+  "0022 CHẶN: vai trò vận hành phải thuộc một phòng ban",
+);
+
+await ex(
+  `insert into iam.role_assignments (user_id, role, department_id)
+   values ('${outsiderId}', 'org_admin', null)`,
+);
+await ex(`select set_config('request.jwt.claim.sub','${outsiderId}',false)`);
+await cmp("0022: org_admin cũng là user admin", "select iam.is_user_admin() n", 1);
+ok(
+  !(await ex(
+    `select * from public.vexim_admin_update_user('${adminId}', null, null, 'suspended')`,
+    "org_admin khóa super_admin (kỳ vọng FAIL)",
+  )),
+  "0022 CHẶN: org_admin KHÔNG khóa được super_admin (so cấp bằng SỐ)",
+);
+ok(
+  !(await ex(
+    `select * from public.vexim_admin_set_user_access('${otherId}', 'super_admin', null, null)`,
+    "org_admin gán super_admin (kỳ vọng FAIL)",
+  )),
+  "0022 CHẶN: org_admin KHÔNG gán được vai trò ngang/cao hơn mình",
+);
+const orgGrantLead = await one(
+  `select * from public.vexim_admin_set_user_access(
+     '${otherId}', 'dept_lead', 'ppc', array['${shopIds[0]}']::uuid[])`,
+);
+ok(
+  orgGrantLead.role === "dept_lead" && Number(orgGrantLead.shop_count) === 1,
+  `0022: org_admin GÁN ĐƯỢC dept_lead (thấp hơn mình) — ${JSON.stringify(orgGrantLead)}`,
+);
+await ex(`select set_config('request.jwt.claim.sub','${otherId}',false)`);
+await cmp(
+  "0022: trưởng phòng PPC vừa được gán DUYỆT được thay đổi quảng cáo (quyền thật)",
+  `select iam.is_ads_approver() n`,
+  1,
+);
+
+// ---- NHẬT KÝ QUẢN TRỊ --------------------------------------------------------
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+const auditRows = (
+  await db.query(
+    `select action, entity, actor_name from public.vexim_admin_audit(20, 'nhanvien@vexim.vn')`,
+  )
+).rows;
+ok(
+  auditRows.length >= 3 && auditRows.some((r) => r.action === "user.role_change"),
+  `0022: nhật ký quản trị trả về đúng thao tác trên người đó (${auditRows.length} dòng)`,
+);
+await ex(`select set_config('request.jwt.claim.sub','${otherId}',false)`);
+ok(
+  !(await ex("select * from public.vexim_admin_audit(20)", "người thường đọc nhật ký (kỳ vọng FAIL)")),
+  "0022 CHẶN: người thường KHÔNG đọc được nhật ký quản trị",
+);
+
+// ---- LUỒNG MỜI (đi cùng /api/admin/invite-user) -------------------------------
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+const thirdId = "eeee0000-0000-4000-8000-000000000003";
+await ex(
+  `insert into auth.users (id, email, raw_user_meta_data)
+   values ('${thirdId}', 'ketoan@vexim.vn', '{"full_name":"Kế toán"}'::jsonb)`,
+);
+const invited = await one(
+  `select * from public.vexim_admin_grant_invited_user(
+     '${thirdId}', 'ketoan@vexim.vn', 'Kế toán', '+84 900 000 000', 'operator', 'finance',
+     array['${shopIds[0]}']::uuid[])`,
+);
+ok(
+  invited.status === "invited" && invited.role === "operator",
+  `0022: mời người mới ⇒ hồ sơ status='invited' + vai trò đã gán — ${JSON.stringify(invited)}`,
+);
+await one(`select * from public.vexim_admin_update_user('${otherId}', null, null, 'suspended')`);
+ok(
+  !(await ex(
+    `select * from public.vexim_admin_grant_invited_user(
+       '${otherId}', 'nhanvien@vexim.vn', 'Nhân viên mới', null, 'operator', 'ppc',
+       array['${shopIds[0]}']::uuid[])`,
+    "mời lại người đang bị khóa (kỳ vọng FAIL)",
+  )),
+  "0022 CHẶN: mời lại KHÔNG tự mở khóa tài khoản đang bị khóa",
+);
+await cmp(
+  "0022: người đang bị khóa vẫn giữ nguyên trạng thái suspended",
+  `select count(*) n from iam.user_profiles where id = '${otherId}' and status = 'suspended'`,
+  1,
+);
+await one(`select * from public.vexim_admin_update_user('${otherId}', null, null, 'active')`);
+
+const reInvite = await one(
+  `select count(*)::int as n from public.vexim_admin_grant_invited_user(
+     '${thirdId}', 'ketoan@vexim.vn', 'Kế toán 2', null, 'operator', 'finance', null)`,
+);
+ok(
+  Number(reInvite.n) === 1 &&
+    Number((await one(`select count(*)::int n from iam.user_profiles where id = '${thirdId}'`)).n) === 1,
+  `0022: mời lần 2 KHÔNG tạo hồ sơ trùng (cập nhật tại chỗ) — ${JSON.stringify(reInvite)}`,
+);
+
+// ---- ĐIỂM DANH ĐĂNG NHẬP (invited → active) ----------------------------------
+await ex(`select set_config('request.jwt.claim.sub','${thirdId}',false)`);
+const touch = await one("select * from public.vexim_touch_login()");
+ok(
+  touch.status === "active" && touch.last_login_at != null && touch.changed === true,
+  `0022: đăng nhập lần đầu ⇒ hồ sơ invited → active + ghi last_login_at — ${JSON.stringify(touch)}`,
+);
+await cmp(
+  "0022: điểm danh lần 2 trong 5 phút KHÔNG ghi lại (tránh UPDATE mỗi lần tải trang)",
+  "select (select changed from public.vexim_touch_login())::int n",
+  0,
+);
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+
+// ---- TRƯỞNG PHÒNG MỜI NGƯỜI: chỉ trong phòng mình, chỉ vai trò thấp hơn ----------
+const leadId = `${otherId}`;                       // đang là dept_lead phòng ppc
+const fourthId = "eeee0000-0000-4000-8000-000000000004";
+await ex(
+  `insert into auth.users (id, email, raw_user_meta_data)
+   values ('${fourthId}', 'ppcmoi@vexim.vn', '{"full_name":"PPC mới"}'::jsonb)`,
+);
+await ex(`select set_config('request.jwt.claim.sub','${leadId}',false)`);
+const leadInviteOk = await one(
+  `select * from public.vexim_admin_grant_invited_user(
+     '${fourthId}', 'ppcmoi@vexim.vn', 'PPC mới', null, 'operator', 'ppc',
+     array['${shopIds[0]}']::uuid[])`,
+);
+ok(
+  leadInviteOk.role === "operator",
+  `0022: trưởng phòng PPC MỜI ĐƯỢC operator cho phòng mình — ${JSON.stringify(leadInviteOk)}`,
+);
+const fifthId = "eeee0000-0000-4000-8000-000000000005";
+await ex(
+  `insert into auth.users (id, email, raw_user_meta_data)
+   values ('${fifthId}', 'ketoan2@vexim.vn', '{"full_name":"KT 2"}'::jsonb)`,
+);
+ok(
+  !(await ex(
+    `select * from public.vexim_admin_grant_invited_user(
+       '${fifthId}', 'ketoan2@vexim.vn', 'KT 2', null, 'operator', 'finance', null)`,
+    "trưởng phòng mời người phòng khác (kỳ vọng FAIL)",
+  )),
+  "0022 CHẶN: trưởng phòng KHÔNG mời được người cho phòng khác",
+);
+ok(
+  !(await ex(
+    `select * from public.vexim_admin_grant_invited_user(
+       '${fifthId}', 'ketoan2@vexim.vn', 'KT 2', null, 'dept_lead', 'ppc', null)`,
+    "trưởng phòng mời ngang cấp (kỳ vọng FAIL)",
+  )),
+  "0022 CHẶN: trưởng phòng KHÔNG gán được vai trò ngang/cao hơn mình",
+);
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+await cmp(
+  "0022: 2 lời mời bị chặn KHÔNG để lại hồ sơ rác",
+  `select count(*) n from iam.user_profiles where id = '${fifthId}'`,
+  0,
+);
+
+// ---- TỰ SỬA HỒ SƠ MÌNH (grant cột của 0022 làm policy 0004 sống lại) -------------
+await ex("begin");
+await ex(`set local role authenticated; select set_config('request.jwt.claim.sub','${otherId}',true);`);
+const selfEdit = await ex(
+  `do $do$
+   declare n int;
+   begin
+     update iam.user_profiles set phone = '+84 912 000 111' where id = '${otherId}';
+     get diagnostics n = row_count;
+     if n <> 1 then
+       raise exception '[test] tự sửa hồ sơ mình phải chạm đúng 1 dòng, nhận %', n;
+     end if;
+   end
+   $do$;`,
+  "tự sửa số điện thoại của mình (phải chạm 1 dòng)",
+);
+ok(selfEdit, "0022: người dùng TỰ SỬA được hồ sơ mình (grant cột + RLS self)");
+await ex("rollback");
+// ---- RLS: người thường vẫn không ghi được hồ sơ ------------------------------
+// LƯU Ý: PGlite chỉ đổi vai trò thật khi `set local role` nằm TRONG transaction
+// đang mở (`db.exec("set local role x")` rời rạc không có tác dụng) ⇒ phải bọc
+// begin/…/rollback, và đếm số dòng UPDATE thật sự chạm được.
+await ex("begin");
+await ex(`set local role authenticated; select set_config('request.jwt.claim.sub','${otherId}',true);`);
+const tamper = await ex(
+  `do $do$
+   declare n int;
+   begin
+     update iam.user_profiles set display_name = 'Đổi trộm' where id = '${adminId}';
+     get diagnostics n = row_count;
+     if n <> 0 then
+       raise exception '[test] RLS hở: sửa được % hồ sơ người khác', n;
+     end if;
+   end
+   $do$;`,
+  "người thường sửa hồ sơ người khác (phải chạm 0 dòng)",
+);
+ok(tamper, "0022 CHẶN: người thường KHÔNG sửa được hồ sơ người khác (RLS chặn ở tầng dòng)");
+await ex("rollback");
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+
 console.log(`\n${"=".repeat(70)}`);
 console.log(fails === 0 ? "TẤT CẢ PASS" : `${fails} MỤC FAIL`);
 console.log("=".repeat(70));
