@@ -33,6 +33,7 @@ const BYPASS_AUTH_PATHS = [
   "/api/whoami",
   "/api/amazon/whoami",
   "/api/oauth",
+  "/api/version",
 ];
 
 const MW_HEADER = "x-vexim-middleware";
