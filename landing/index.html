@@ -12,6 +12,10 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap&subset=vietnamese" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = { corePlugins: { preflight: false } }
+</script>
 <style>
   html{ -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; text-rendering:optimizeLegibility; font-feature-settings:"rlig" 1,"calt" 1,"ss01" 1; }
   :root{
@@ -43,7 +47,12 @@
   .btn-ghost:hover{border-color:#c9cfda}
   .burger{display:none;margin-left:auto;background:none;border:0;font-size:22px;cursor:pointer;color:var(--ink)}
   .hero{padding:84px 0 72px;background:radial-gradient(1000px 400px at 85% -10%, #fff4e5 0%, transparent 60%),radial-gradient(700px 380px at -10% 10%, #eaf1ff 0%, transparent 55%), var(--bg)}
-  .hero-grid{display:grid;grid-template-columns:1.08fr .92fr;gap:52px;align-items:center}
+  /* FIX: dùng grid 12 cột chuẩn Tailwind để không ép chữ - left 7 / right 5 */
+  .hero-grid{display:grid;grid-template-columns:1fr;gap:32px;align-items:center;max-width:1280px;margin:0 auto;padding:0 16px}
+  @media(min-width:1024px){ .hero-grid{grid-template-columns:repeat(12,minmax(0,1fr))} }
+  .hero-left{grid-column:span 1 / span 1;min-width:0}
+  .hero-right{grid-column:span 1 / span 1;min-width:0}
+  @media(min-width:1024px){ .hero-left{grid-column:span 7 / span 7} .hero-right{grid-column:span 5 / span 5} }
   .badge{display:inline-flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line);color:var(--muted);font-size:12.5px;font-weight:700;padding:7px 14px;border-radius:999px;box-shadow:var(--shadow)}
   .badge .b-dot{width:7px;height:7px;border-radius:50%;background:var(--green)}
   h1{font-size:clamp(34px,4.8vw,54px);line-height:1.05;letter-spacing:-.035em;font-weight:900;margin:20px 0 18px}
@@ -53,7 +62,7 @@
   .hero-note{margin-top:18px;font-size:12.5px;color:var(--soft);line-height:1.6}
   .hero-bullets{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
   .hero-bullets span{font-size:11.5px;font-weight:700;color:var(--muted);background:#fff;border:1px solid var(--line);padding:5px 11px;border-radius:999px}
-  .mock{background:var(--card);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);overflow:hidden}
+  .mock{background:var(--card);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);overflow:hidden;width:100%;height:auto;object-fit:contain;min-width:0}
   .mock-top{display:flex;align-items:center;gap:10px;padding:13px 18px;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--muted);font-weight:600}
   .dots{display:flex;gap:5px}
   .dots i{width:9px;height:9px;border-radius:50%;background:#e3e7ee}
@@ -162,8 +171,9 @@
 <main id="top">
 
   <section class="hero">
-    <div class="wrap hero-grid">
-      <div>
+    <!-- FIXED: Tailwind grid chuẩn - max-w-7xl mx-auto px-4, left col-span-7, right col-span-5, mock w-full h-auto object-contain -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center max-w-7xl mx-auto px-4">
+      <div class="lg:col-span-7 min-w-0">
         <span class="badge"><span class="b-dot"></span> Kết nối chính thức với Amazon</span>
         <h1>Bán Amazon<br><em>bớt cực, rõ lời hơn.</em></h1>
         <p class="lead">Làm Amazon ai cũng từng trải qua cảnh này: sáng mở Seller Central, trưa ngó Ads Console, tối lại ngồi cộng trừ trên Excel. Mỗi nơi một ít số, lúc cần quyết định thì lại thiếu. VEXIM Ops gom hết về một chỗ — đơn hàng, tồn kho FBA, giá và Buy Box, listing, quảng cáo, phí và tiền Amazon trả về — để mỗi sáng bạn chỉ cần nhìn vào là biết hôm nay phải làm gì.</p>
@@ -180,7 +190,8 @@
         </div>
       </div>
 
-      <div class="mock" aria-hidden="true">
+      <div class="lg:col-span-5 min-w-0">
+        <div class="mock w-full h-auto object-contain" aria-hidden="true">
         <div class="mock-top">
           <span class="dots"><i></i><i></i><i></i></span>
           Tổng quan gian hàng Amazon
@@ -220,6 +231,7 @@
           </div>
         </div>
       </div>
+    </div>
     </div>
   </section>
 

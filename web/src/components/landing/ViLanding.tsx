@@ -52,7 +52,9 @@ export default function ViLanding() {
         .landing-btn-ghost:hover{border-color:#c9cfda}
         .landing-burger{display:none;margin-left:auto;background:none;border:0;font-size:22px;cursor:pointer;color:var(--ink)}
         .landing-hero{padding:84px 0 72px;background:radial-gradient(1000px 400px at 85% -10%, #fff4e5 0%, transparent 60%),radial-gradient(700px 380px at -10% 10%, #eaf1ff 0%, transparent 55%), var(--bg)}
-        .landing-hero-grid{display:grid;grid-template-columns:1.08fr .92fr;gap:52px;align-items:center}
+        /* hero grid now uses Tailwind: grid grid-cols-1 lg:grid-cols-12 gap-8 items-center max-w-7xl mx-auto px-4 */
+        .landing-hero-grid{max-width:1280px;margin:0 auto;padding:0 16px;display:grid;grid-template-columns:1fr;gap:32px;align-items:center}
+        @media(min-width:1024px){ .landing-hero-grid{grid-template-columns:repeat(12,minmax(0,1fr))} }
         .landing-badge{display:inline-flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line);color:var(--muted);font-size:12.5px;font-weight:700;padding:7px 14px;border-radius:999px;box-shadow:var(--shadow)}
         .landing-badge .b-dot{width:7px;height:7px;border-radius:50%;background:var(--green)}
         .landing-hero h1{font-size:clamp(34px,4.8vw,54px);line-height:1.05;letter-spacing:-.035em;font-weight:900;margin:20px 0 18px;color:var(--ink)}
@@ -62,7 +64,7 @@ export default function ViLanding() {
         .landing-note{margin-top:18px;font-size:12.5px;color:var(--soft);line-height:1.6}
         .landing-bullets{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
         .landing-bullets span{font-size:11.5px;font-weight:700;color:var(--muted);background:#fff;border:1px solid var(--line);padding:5px 11px;border-radius:999px}
-        .landing-mock{background:var(--card);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);overflow:hidden}
+        .landing-mock{background:var(--card);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);overflow:hidden;width:100%;height:auto;object-fit:contain;min-width:0}
         .landing-mock-top{display:flex;align-items:center;gap:10px;padding:13px 18px;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--muted);font-weight:600}
         .landing-dots{display:flex;gap:5px}
         .landing-dots i{width:9px;height:9px;border-radius:50%;background:#e3e7ee;display:inline-block}
@@ -168,8 +170,8 @@ export default function ViLanding() {
 
       <main id="top">
         <section className="landing-hero">
-          <div className="landing-wrap landing-hero-grid">
-            <div>
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center max-w-7xl mx-auto px-4">
+            <div className="lg:col-span-7 min-w-0">
               <span className="landing-badge"><span className="b-dot"></span> Kết nối chính thức với Amazon</span>
               <h1>Bán Amazon<br/><em>bớt cực, rõ lời hơn.</em></h1>
               <p className="landing-lead">Làm Amazon ai cũng từng trải qua cảnh này: sáng mở Seller Central, trưa ngó Ads Console, tối lại ngồi cộng trừ trên Excel. Mỗi nơi một ít số, lúc cần quyết định thì lại thiếu. VEXIM Ops gom hết về một chỗ — đơn hàng, tồn kho FBA, giá và Buy Box, listing, quảng cáo, phí và tiền Amazon trả về — để mỗi sáng bạn chỉ cần nhìn vào là biết hôm nay phải làm gì.</p>
@@ -186,7 +188,8 @@ export default function ViLanding() {
               </div>
             </div>
 
-            <div className="landing-mock" aria-hidden="true">
+            <div className="lg:col-span-5 min-w-0">
+              <div className="landing-mock w-full h-auto object-contain" aria-hidden="true">
               <div className="landing-mock-top">
                 <span className="landing-dots"><i></i><i></i><i></i></span>
                 Tổng quan gian hàng Amazon
@@ -226,6 +229,7 @@ export default function ViLanding() {
                 </div>
               </div>
             </div>
+          </div>
           </div>
         </section>
 
