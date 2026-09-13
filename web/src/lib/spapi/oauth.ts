@@ -12,6 +12,11 @@
  *   2. `state` dùng MỘT LẦN (chống CSRF) — sinh ở DB, tiêu thụ ở callback.
  *   3. Refresh token chỉ trả về MỘT LẦN duy nhất (lúc đổi code). Không lưu được
  *      nghĩa là phải authorize lại từ đầu.
+ *
+ * FIX MD1000 09/2026:
+ *   - Lỗi MD1000 khi bấm [Kết nối] P1·US/P2·CA: App ID amzn1.sp.solution.ee3dce31... published
+ *   - Nguyên nhân: thiếu ?version=beta trong authorize URL, và redirect_uri không khớp 100% Allowed Return URLs
+ *   - Fix: thêm version=beta, và log/validate redirect_uri khớp
  */
 
 export type SpApiRegion = "NA" | "EU" | "FE";
@@ -40,12 +45,49 @@ export function buildAuthorizeUrl(opts: {
   region?: SpApiRegion;
 }): string {
   const host = sellerCentralHost(opts.region ?? "NA");
+  // FIX 1: Thêm version=beta — Amazon yêu cầu, thiếu sẽ báo MD1000
+  // Docs: https://developer-docs.amazon.com/sp-api/docs/authorizing-selling-partner-api-applications
+  // URL phải là: /apps/authorize/consent?application_id=...&state=...&redirect_uri=...&version=beta
   const q = new URLSearchParams({
     application_id: opts.appId,
     state: opts.state,
     redirect_uri: opts.redirectUri,
+    version: "beta",
   });
   return `https://${host}/apps/authorize/consent?${q.toString()}`;
+}
+
+/**
+ * FIX 2: Đối soát redirect_uri với Allowed Return URLs
+ * Amazon yêu cầu redirect_uri truyền trong authorize PHẢI khớp 100% (từng ký tự, kể cả trailing slash)
+ * với URL đã khai báo trong LWA Credentials → Allowed Return URLs
+ * Lỗi MD1000 thường do lệch: https://example.com/callback vs https://example.com/callback/
+ */
+export function validateRedirectUri(redirectUri: string, allowedUrls?: string[]): { ok: boolean; hint: string } {
+  const uri = (redirectUri ?? "").trim();
+  if (uri === "") {
+    return { ok: false, hint: "redirect_uri rỗng — phải set AMAZON_SP_API_REDIRECT_URI" };
+  }
+  try {
+    const u = new URL(uri);
+    if (u.protocol !== "https:" && !u.hostname.includes("localhost")) {
+      return { ok: false, hint: `redirect_uri phải https (đang là ${u.protocol}) — Amazon từ chối http trừ localhost` };
+    }
+  } catch {
+    return { ok: false, hint: `redirect_uri không phải URL hợp lệ: ${uri}` };
+  }
+
+  if (allowedUrls && allowedUrls.length > 0) {
+    const exactMatch = allowedUrls.some((a) => a.trim() === uri);
+    if (!exactMatch) {
+      return {
+        ok: false,
+        hint: `redirect_uri [${uri}] không khớp 100% với Allowed Return URLs đã khai báo: ${allowedUrls.join(" | ")} — lệch 1 ký tự (kể cả / cuối) là MD1000`,
+      };
+    }
+  }
+
+  return { ok: true, hint: "redirect_uri khớp" };
 }
 
 export type CodeExchangeResult =

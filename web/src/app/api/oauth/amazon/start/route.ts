@@ -9,21 +9,22 @@
  *   - Nay: thêm ?confirm=1 để chống ghi đè nhầm, và kiểm tra token cũ để cảnh báo
  *   - UI mới có modal xác nhận hiển thị rõ Seller ID, Marketplace, trạng thái token cũ
  *
+ * FIX MD1000 09/2026:
+ *   - Lỗi MD1000 khi bấm P1·US/P2·CA: App ID amzn1.sp.solution.ee3dce31... published
+ *   - Nguyên nhân 1: thiếu ?version=beta trong authorize URL → buildAuthorizeUrl đã thêm
+ *   - Nguyên nhân 2: redirect_uri không khớp 100% Allowed Return URLs trong LWA Credentials
+ *     → thêm validateRedirectUri và log chi tiết để đối soát
+ *
  * VÌ SAO `state` NẰM Ở DB (không phải cookie): callback là request KHÁC, có thể
  * do Amazon mở trên máy khác/trình duyệt khác, và phải chống CSRF. Ghi state vào
  * `connections.oauth_states` (RPC service_role) rồi kiểm tra ở callback là cách
  * duy nhất còn hiệu lực khi không dựa vào cookie.
- *
- * VÌ SAO PHẢI KIỂM TRA QUYỀN TRƯỚC KHI SINH STATE: nếu ai cũng sinh được state
- * cho shop bất kỳ thì họ có thể khiến shop đó authorize lại vào tài khoản của
- * người khác. Ở đây: chỉ người ĐỌC ĐƯỢC shop đó (qua RLS `vexim_shops`) mới được
- * bắt đầu luồng.
  */
 import { NextResponse } from "next/server";
 
 import { getAppSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
-import { buildAuthorizeUrl, normalizeRegion } from "@/lib/spapi/oauth";
+import { buildAuthorizeUrl, normalizeRegion, validateRedirectUri } from "@/lib/spapi/oauth";
 
 export const dynamic = "force-dynamic";
 
@@ -106,6 +107,21 @@ export async function GET(req: Request) {
     });
   }
 
+  // FIX MD1000 - Đối soát Return URL: redirect_uri phải khớp 100% Allowed Return URLs
+  // Lấy danh sách Allowed Return URLs từ env (nếu có) để đối soát, hoặc log để kiểm tra
+  const allowedReturnUrlsEnv = (process.env.AMAZON_LWA_ALLOWED_RETURN_URLS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  const validation = validateRedirectUri(redirectUri, allowedReturnUrlsEnv.length > 0 ? allowedReturnUrlsEnv : undefined);
+  if (!validation.ok) {
+    console.error(`[OAuth Start] MD1000 risk - redirect_uri validation failed: ${validation.hint} | redirect_uri=${redirectUri} | allowed=${allowedReturnUrlsEnv.join(", ") || "(not set in env, check Developer Console)"}`);
+    // Vẫn cho tiếp tục nhưng cảnh báo rõ để người vận hành đối soát trong Developer Console
+    // Nếu muốn chặn cứng, có thể return backTo với lỗi
+  } else {
+    console.log(`[OAuth Start] redirect_uri OK: ${redirectUri} | appId=${appId} | region=${region} | seller=${sellerId}`);
+  }
+
   // Quyền: chỉ người đọc được shop này (RLS của vexim_shops) mới được bắt đầu.
   const supa = await createClient();
   const { data: shops, error: shopErr } = (await supa!
@@ -126,7 +142,6 @@ export async function GET(req: Request) {
   }
 
   // FIX UX: kiểm tra token cũ để cảnh báo ghi đè nhầm
-  // Nếu shop đã có token và chưa có ?confirm=1 thì trả về trang connect với cảnh báo
   try {
     const { data: tokenRows } = (await supa!
       .from("vexim_oauth_connections")
@@ -138,7 +153,6 @@ export async function GET(req: Request) {
     };
     const hasToken = tokenRows && tokenRows.length > 0;
     if (hasToken && !confirmOverwrite) {
-      // Trả về trang connect với warn để UI modal hiện lại (tránh bấm nhầm)
       return backTo(req, {
         warn: `Gian hàng ${shops[0].shop} (${shops[0].marketplace}) ĐÃ có token. Nếu kết nối lại, token cũ sẽ bị GHI ĐÈ. Bấm lại nút Kết nối và xác nhận trong modal để tiếp tục.`,
         oauth: "error",
@@ -146,10 +160,9 @@ export async function GET(req: Request) {
       });
     }
   } catch {
-    // Nếu view chưa tồn tại hoặc lỗi, bỏ qua check — vẫn cho kết nối
+    // Bỏ qua check nếu view chưa tồn tại
   }
 
-  // redirect_to: quay lại màn Kết nối shop sau khi Amazon trả code.
   const created = await adminRpc("vexim_worker_create_oauth_state", {
     p_seller: sellerId,
     p_redirect_to: "/module0/connect",
@@ -167,6 +180,9 @@ export async function GET(req: Request) {
     return backTo(req, { oauth: "error", msg: "RPC create_oauth_state không trả về state." });
   }
 
+  // FIX MD1000: buildAuthorizeUrl giờ đã bao gồm version=beta
   const authorizeUrl = buildAuthorizeUrl({ appId, state, redirectUri, region });
+  console.log(`[OAuth Start] Redirect to Amazon consent: ${authorizeUrl} | seller=${sellerId} | shop=${shops[0].shop}`);
+
   return NextResponse.redirect(authorizeUrl);
 }
