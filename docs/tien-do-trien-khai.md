@@ -2,6 +2,85 @@
 
 > Cập nhật: 13/09/2026 · Thứ tự build đã chốt: **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** (21 màn Đợt 1)
 
+## Cập nhật 13/09 (đợt 2) — MODULE 5 PHẦN 2 & 3 (PPC chiều GHI): migration 0021 · hàng đợi đề xuất + guardrail + audit · cron ads-apply · /ppc có khối duyệt thay đổi
+
+Phần 1 trả lời “campaign nào đang đốt tiền”. Phần 2 & 3 cho phép **sửa nó trên Amazon** — nên nguyên tắc
+thiết kế là *không có đường nào ghi lên Amazon mà không đi qua một người ký và một lần đối chiếu*:
+
+1. **`0021_module5_ppc_write.sql`** — 3 bảng mới (`ads.ppc_policies` guardrail, `ads.change_requests`
+   hàng đợi có máy trạng thái, `ads.negative_keywords` bảng gương từ khoá phủ định), **4 view cho UI**
+   (`vexim_ppc_policies`, `vexim_ppc_change_requests`, `vexim_ppc_suggestions`, `vexim_ads_negative_keywords`),
+   **4 RPC cho người dùng** (`vexim_ppc_propose_changes`, `decide_change`, `decide_bulk`, `set_policy`) và
+   **3 RPC cho worker** (`vexim_worker_ppc_pending_changes` giành lô + quét TTL + đòi lô kẹt,
+   `vexim_worker_ppc_set_result`, `vexim_ppc_raise_alerts`). `before_value`/`after_value` **BẤT BIẾN** sau
+   khi tạo (trigger chặn) — người duyệt duyệt đúng cái đã đề xuất, không ai sửa ngầm được. Mọi chuyển
+   trạng thái ghi `iam.audit_logs`; 2 alert rule mới: `ppc_pending_approval` (chờ duyệt quá 24h) và
+   `ppc_change_failed` (áp dụng thất bại).
+2. **`web/src/lib/ads/write.ts`** — hợp đồng ghi **Sponsored Products v3** đóng băng thành bảng
+   `ADS_WRITE_OPS` (5 operation: `PUT /sp/campaigns`, `PUT /sp/keywords`, `PUT /sp/adGroups`,
+   `POST /sp/negativeKeywords`, `POST /sp/campaignNegativeKeywords`; media type
+   `application/vnd.sp<Entity>.v3+json`; body bọc `{campaigns|keywords|adGroups|negativeKeywords|campaignNegativeKeywords: […]}`;
+   `budget` là OBJECT lồng `{budget, budgetType}`; state viết HOA; `matchType` là
+   `NEGATIVE_EXACT`/`NEGATIVE_PHRASE`; mỗi lô ≤ 100). Đọc phản hồi **207 Multi-Status** theo `index`,
+   dòng nào Amazon không trả kết quả thì coi là FAILED chứ không đoán.
+3. **Verify-before-write**: trước khi ghi, cron ĐỌC LẠI Amazon (`POST /sp/campaigns/list`,
+   `/sp/keywords/list`, `/sp/negativeKeywords/list`, `/sp/campaignNegativeKeywords/list` — filter bị từ
+   chối thì lùi về đọc không filter + phân trang, và nói rõ độ phủ). Amazon đang khác `before_value` →
+   **SKIP** (ai đó đổi tay trong Ads console thì hệ thống không ghi đè); campaign `ARCHIVED` → skip;
+   từ khoá đã bị phủ định rồi → skip.
+4. **Cron `/api/cron/ads-apply`** (`vercel.json` lúc **04:20 UTC**, chạy SAU `ads-sync` 04:00 để verify
+   bằng số liệu vừa nhập): lấy lô đã duyệt theo `daily_change_cap` của từng shop, đổi token theo shop,
+   chốt `profileId` (từ hàng đợi hoặc `GET /v2/profiles`), gửi từng lô, ghi kết quả từng dòng, nổ/đóng
+   alert. `?dryRun=1` đọc hàng đợi + đọc Amazon + in payload mà **không gửi, không giành lô**.
+5. **UI `/ppc`** thêm khối “Thay đổi PPC”: gợi ý sinh từ số liệu (5 loại: phủ định search term đốt tiền,
+   tắt keyword/campaign không ra đơn, hạ bid ACOS cao, tăng ngân sách campaign cạn mà ACOS đạt) → chọn
+   dòng → tạo đề xuất; hàng đợi duyệt (duyệt/từ chối từng dòng hoặc cả lô, kèm ghi chú lưu vào audit);
+   form guardrail (chỉ approver); form thêm từ khoá phủ định; kết quả áp dụng kèm **nguyên văn lỗi Amazon**.
+   Quyền do DB tính (`can_propose`, `can_decide`, `can_edit_policy`) nên nút chỉ hiện với người được phép.
+
+**Năm chốt an toàn (mỗi chốt đều có test):**
+
+| Chốt | Hành vi |
+|---|---|
+| `ADS_WRITE_ENABLED` chưa bật | Cron trả `ok` + hint, **không gọi Amazon và không giành lô** — đề xuất đã duyệt vẫn nằm chờ |
+| Chỉ áp dụng cái đã DUYỆT | Không có đường nào tự sinh thay đổi rồi gửi; `pendingChanges` chỉ lấy dòng `approved` |
+| Đối chiếu trước khi ghi | Lệch `before_value` → `skipped` + lý do; không có token/profile → `failed` + alert (không treo im lặng) |
+| 429/5xx/lỗi mạng | Giữ trạng thái `applying` để **reclaim** lượt sau (`ADS_WRITE_STALE_MINUTES`, mặc định 30) — không retry dồn |
+| Audit | Kết quả ghi qua RPC → trigger ghi `iam.audit_logs`; negative keyword áp dụng thành công thì upsert `ads.negative_keywords` với **id Amazon thật** |
+
+### Việc VEXIM cần làm để chiều ghi chạy thật
+
+1. Chạy **`0021`** trong SQL Editor (sau `0020`). Migration tự soát hợp đồng ở cuối nên sai là fail ngay.
+2. Supabase → Settings → API → Exposed schemas: đã có `ads` + `connections` từ đợt 0020 (không cần thêm).
+3. Biến môi trường mới trên Vercel:
+
+| Biến | Dùng làm gì | Bắt buộc |
+|---|---|---|
+| `ADS_WRITE_ENABLED` | `1`/`true`/`yes`/`on` → cron ads-apply MỚI được gọi Amazon. **Mặc định TẮT** | ✅ để ghi thật |
+| `ADS_WRITE_BATCH_LIMIT` | Số đề xuất tối đa mỗi shop mỗi lượt (mặc định 100, trần 500) | ⬜ |
+| `ADS_WRITE_STALE_MINUTES` | Phút một lô `applying` bị coi là kẹt và được đòi lại (mặc định 30) | ⬜ |
+
+4. Cấp quyền duyệt: `iam.role_assignments` cho trưởng phòng PPC (`dept_lead` module `ppc`) hoặc
+   `super_admin` — `iam.is_ppc_approver()` quyết định ai thấy nút Duyệt và ai sửa được guardrail.
+5. Chạy thử theo thứ tự: `curl -H "Authorization: Bearer $CRON_SECRET" "$APP/api/cron/ads-apply?dryRun=1"`
+   (xem payload sẽ gửi) → đặt `ADS_WRITE_ENABLED=1` + Redeploy → chạy tay
+   `?shop=<uuid>&limit=1` cho MỘT shop, kiểm tra trong Ads console → mới để cron tự chạy.
+
+### Verify nhanh (không cần Amazon)
+
+- `cd supabase && npm test` → **675 PASS** (125 mục cho 0021: máy trạng thái, guardrail chặn ở đâu, RPC
+  worker giành lô/đòi lô kẹt/trần ngày, RLS, audit, và **9 mục chốt hợp đồng cột web ↔ DB** cho 4 view mới).
+- `cd web && npm test` → **411 PASS** (thêm 55 test luồng ghi + 37 test model UI), `npx tsc --noEmit` sạch,
+  `npm run build` OK, không có secret nào lọt vào bundle client.
+
+### Cố ý CHƯA mở (không đoán hợp đồng)
+
+- `PUT /sp/targets` (đổi bid của target ASIN/category): không nguồn nào xác nhận tên khoá của body ghi
+  (`{targets}` hay `{targetingClauses}`) → worker tự `skipped` kèm lý do thay vì gửi bậy.
+- Sponsored Brands / Sponsored Display: endpoint + body khác; RPC đã tự skip đề xuất không thuộc SP, và
+  `write.ts` có lớp chắn thứ hai (`isSponsoredProducts`).
+- Đổi `defaultBid` của ad group, đổi bid của placement, và **bảng quyết định tuần (A4)**.
+
 ## Cập nhật 13/09 — MODULE 0 (OAuth & multi-tenant) + MODULE 5 PHẦN 1 (PPC đọc/phân tích): migration 0020 · luồng authorize thật · cron ads-sync · /ppc số liệu thật · F4 có ads_spend + TACOS
 
 Hai module đi cùng nhau vì **refresh token là nền của cả SP-API lẫn Ads API**: không có luồng authorize
@@ -51,7 +130,9 @@ TACOS tính trên một phần shop).
 | `AMAZON_ADS_ATTRIBUTION_DAYS` | `7` (seller) hay `14` (vendor/author) — sai là ACOS lệch hẳn | ⬜ mặc định 7 |
 | `AMAZON_ADS_PROFILE_TYPE` | `seller` (mặc định) — vendor bị loại khi chọn profile | ⬜ |
 | `AMAZON_ADS_ACCOUNT_ID` | Header `Amazon-Ads-AccountId` (chỉ gửi khi đặt) | ⬜ |
-| `CRON_SECRET` | Bảo vệ 4 cron: inventory-sync, report-pull, oauth-reauth, **ads-sync** | ✅ |
+| `CRON_SECRET` | Bảo vệ 5 cron: inventory-sync, report-pull, oauth-reauth, **ads-sync**, **ads-apply** | ✅ |
+| `ADS_WRITE_ENABLED` | Chiều GHI PPC (đợt 2): `1` thì cron `ads-apply` mới gọi Amazon — **mặc định TẮT** | ⬜ bật khi sẵn sàng |
+| `ADS_WRITE_BATCH_LIMIT` / `ADS_WRITE_STALE_MINUTES` | Trần đề xuất mỗi lượt (100) / phút coi một lô là kẹt (30) | ⬜ |
 
 4. **Authorize Ads cho từng shop**: `/module0/connect` → nút Authorize (hoặc gửi link `/start` cho chủ
    shop) → nếu đã có refresh token thì dùng ô Import. Shop có NHIỀU tài khoản Ads thì điền luôn ô
@@ -62,10 +143,10 @@ TACOS tính trên một phần shop).
 
 ### Verify nhanh (không cần Amazon)
 
-- `cd supabase && npm test` → **550 PASS**, gồm **15 mục chốt hợp đồng cột web ↔ DB**: mọi cột trong
+- `cd supabase && npm test` → **550 PASS** (đợt 1; đợt 2 nâng lên 675), gồm **15 mục chốt hợp đồng cột web ↔ DB**: mọi cột trong
   `ADS_*_SELECT` và mọi cột web dùng để sắp xếp/lọc phải tồn tại trong view (sai một tên cột là
   PostgREST trả 400 lúc chạy thật, nên bắt ngay trong test).
-- `cd web && npm test` → **319 PASS** (thêm 76 test Ads API + 37 test model UI/F4/Dashboard),
+- `cd web && npm test` → **319 PASS** (đợt 1; đợt 2 nâng lên 411 — thêm 76 test Ads API + 37 test model UI/F4/Dashboard),
   `npx tsc --noEmit` sạch, `npm run build` OK.
 - Trên app: `/module0/connect` (kết nối + đếm ngược 365 ngày) → `/ppc` (KPI, campaign, search term,
   tiến trình report) → `/finance/profit` (cột Ads + TACOS) → `/dashboard` (card Ads + card PPC).
@@ -73,8 +154,9 @@ TACOS tính trên một phần shop).
 
 ### Còn thiếu (đã chốt làm sau)
 
-- **Module 5 Phần 2 & 3**: chiều ghi (bật/tắt campaign, đổi bid/budget, negative keyword), luồng duyệt
-  theo ngưỡng + audit log, bảng quyết định tuần (A4). `/ppc` hiện ghi rõ “trang này chỉ ĐỌC”.
+- **Module 5 Phần 2 & 3**: ✅ đã làm ở đợt 2 ngay bên trên (migration 0021 + cron `ads-apply` + khối
+  duyệt thay đổi trên `/ppc`). Còn lại: bid của **target** (ASIN/category), SB/SD, và bảng quyết định
+  tuần (A4).
 - TACOS cần **Module 4** đồng bộ `sales.order_daily` (tổng doanh thu mọi kênh): thiếu thì `tacos_unknown`
   và UI hiện “—” + nói rõ bao nhiêu shop đang thiếu.
 - SB/SD reports (v3 đang preview) và intraday metrics theo giờ.

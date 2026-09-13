@@ -13,6 +13,9 @@ import Link from "next/link";
 
 import { AlertList, Bars, Chip, Grid2, KpiCard, KpiGrid, PageHeader, Panel, tableCls } from "@/components/ui";
 import { readPpcPageData } from "@/lib/data/ads";
+import { readPpcWritePageData } from "@/lib/data/ppc-write";
+import { PpcActions } from "@/components/ppc/PpcActions";
+import { ADS_APPLY_CRON } from "@/lib/ads/config.ts";
 import {
   UNKNOWN_CURRENCY,
   agoText,
@@ -73,7 +76,9 @@ function CcyFilter({ currencies, active }: { currencies: string[]; active: strin
 }
 
 export async function LivePpc({ ccy, shopId }: { ccy?: string; shopId?: string }) {
-  const data = await readPpcPageData(shopId);
+  // Đọc song song phần ĐỌC (0020) và phần GHI (0021): hai nguồn độc lập, một bên
+  // lỗi thì bên kia vẫn hiện (mỗi bên tự gom partialErrors).
+  const [data, write] = await Promise.all([readPpcPageData(shopId), readPpcWritePageData(shopId)]);
   const allTotals = totalsByCurrency(data.kpis);
   const totals = allTotals.filter((t) => (ccy ? t.currency === ccy : true));
   const primary = primaryTotals(totals.length > 0 ? totals : allTotals);
@@ -196,6 +201,24 @@ export async function LivePpc({ ccy, shopId }: { ccy?: string; shopId?: string }
           ) : null}
         </Panel>
       </Grid2>
+
+      {/* ---------------- Chiều GHI (Module 5 Phần 2&3) ---------------- */}
+      <PpcActions
+        mode={write.mode}
+        policies={write.policies}
+        requests={write.requests}
+        suggestions={write.suggestions}
+        negatives={write.negatives}
+        writeEnabled={write.writeEnabled}
+        partialErrors={write.partialErrors}
+        cronSchedule={ADS_APPLY_CRON}
+        campaignOptions={data.campaigns.map((c) => ({
+          id: c.campaignId,
+          name: c.name,
+          shopId: c.shopId,
+          type: c.type,
+        }))}
+      />
 
       {bars.length > 0 ? (
         <Panel
@@ -543,7 +566,14 @@ export async function LivePpc({ ccy, shopId }: { ccy?: string; shopId?: string }
             và không thể negative bằng từ khoá.
           </li>
           <li>
-            • <b>Trang này chỉ ĐỌC</b>. Chưa có nút sửa bid/ngân sách: chiều ghi + audit log thuộc PPC Phần 2 &amp; 3.
+            • <b>Chiều ghi đi qua hàng đợi</b>: trang này tạo <i>đề xuất</i> (<code>ads.change_requests</code>), người có
+            quyền duyệt, rồi cron <code>/api/cron/ads-apply</code> đọc lại Amazon để đối chiếu <code>before_value</code> trước
+            khi PUT/POST. Ai đổi tay trong Ads console giữa chừng thì cron <b>bỏ qua</b> dòng đó (không ghi đè), lý do nằm ở
+            cột kết quả. Mọi chuyển trạng thái đều ghi <code>iam.audit_logs</code>.
+          </li>
+          <li>
+            • <b>Chưa bật <code>ADS_WRITE_ENABLED</code> thì không có gì được gửi lên Amazon</b> — đề xuất đã duyệt vẫn nằm
+            chờ. Đây là chốt an toàn mặc định khi mới triển khai.
           </li>
         </ul>
       </Panel>

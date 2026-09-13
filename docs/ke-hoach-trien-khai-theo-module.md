@@ -209,9 +209,9 @@ Nguồn log tin nhắn (email shared mailbox? nhập tay?) — **cần VEXIM ch�
 
 | # | Màn hình | Nội dung chính | Cấp |
 |---|---|---|---|
-| A1 | **Campaigns** | Bảng: loại (SP/SB/SD), trạng thái, ngân sách/ngày, spend hôm qua + 7 ngày, ACOS 7/14 ngày, đơn từ ads, **đã cạn budget lúc mấy giờ hôm qua**. Hành động: bật/tắt, đổi budget/bid (ghi audit, duyệt theo ngưỡng) | 🟡 |
+| A1 | **Campaigns** ✅ *đọc 13/09 (0020) · hành động ghi 13/09 (0021, qua hàng đợi duyệt)* | Bảng: loại (SP/SB/SD), trạng thái, ngân sách/ngày, spend hôm qua + 7 ngày, ACOS 7/14 ngày, đơn từ ads, **đã cạn budget lúc mấy giờ hôm qua**. Hành động: bật/tắt, đổi budget/bid (ghi audit, duyệt theo ngưỡng) — hiện đi qua hàng đợi `ads.change_requests` + cron `ads-apply`, không ghi tức thời | 🟡 |
 | A2 | **Chi tiết campaign** | Ad groups, keywords/targets (match type, bid, impressions, CTR, CPC, ACOS từng từ), placements | 🟡 |
-| A3 | **Search terms** | Thuật ngữ người dùng gõ: clicks, spend, sales, đơn — **gợi ý negative keyword** (mức tin cậy kèm theo, người duyệt) | 🟡 |
+| A3 | **Search terms** ✅ *13/09 (0020 đọc · 0021 gợi ý negative + duyệt)* | Thuật ngữ người dùng gõ: clicks, spend, sales, đơn — **gợi ý negative keyword** (kèm lý do bằng số: click/spend/đơn, người duyệt trước khi cron tạo trên Amazon) | 🟡 |
 | A4 | **Bảng quyết định tuần** | Tổng hợp đề xuất tuần: tăng/giảm budget, giảm bid, negative — duyệt hàng loạt 1 click | 🔵 |
 
 ### Ánh xạ API (Amazon Ads API — đăng ký riêng, không thuộc SP-API)
@@ -226,8 +226,8 @@ Nguồn log tin nhắn (email shared mailbox? nhập tay?) — **cần VEXIM ch�
 ### Đầu ra cho dashboard
 KPI: spend, ACOS, TACOS, đơn từ ads. Alert: `acos_over_target`, `budget_exhausted` → SOP-04, SOP-05.
 
-> **TRẠNG THÁI 13/09 — PHẦN 1 (ĐỌC/PHÂN TÍCH) ĐÃ XONG**; Phần 2 & 3 (chiều ghi: bật/tắt, đổi
-> bid/budget, negative keyword, bảng quyết định tuần A4 + audit/duyệt) CHƯA build.
+> **TRẠNG THÁI 13/09 — PHẦN 1 (ĐỌC/PHÂN TÍCH) VÀ PHẦN 2 & 3 (CHIỀU GHI) ĐÃ XONG**; còn lại: bid của
+> **target** (ASIN/category), SB/SD, và **bảng quyết định tuần A4**.
 > - **DB (`0020`)**: 4 bảng ads mới (`targeting_metrics_daily`, `advertised_product_daily`,
 >   `budget_usage`, `report_requests`) + cột mới cho `ad_profiles`/`campaigns`/`ad_metrics_daily`/
 >   `search_terms`; **16 RPC** `vexim_worker_upsert_ads_*` / `set_ads_report_request` /
@@ -246,6 +246,30 @@ KPI: spend, ACOS, TACOS, đơn từ ads. Alert: `acos_over_target`, `budget_exha
 > - **SP không có endpoint Budget Usage như SB** → `% ngân sách` là số THẬT khi có, còn không thì
 >   ƯỚC LƯỢNG từ spend/ngân sách ngày và đánh dấu `source` rõ ràng; giờ cạn là suy ra từ lần chụp
 >   đầu tiên thấy ≥100% (UI ghi nhãn “ước lượng”, không trình bày như số Amazon đưa).
+>
+> **PHẦN 2 & 3 — CHIỀU GHI (migration `0021` + cron `/api/cron/ads-apply` 04:20 UTC + khối “Thay đổi PPC” trên `/ppc`):**
+> - **DB**: `ads.ppc_policies` (guardrail: sàn/trần bid & budget, % thay đổi tối đa, trần thay đổi/ngày,
+>   TTL đề xuất, auto_apply), `ads.change_requests` (hàng đợi có máy trạng thái
+>   `proposed → approved → applying → applied/failed/skipped`, `before_value`/`after_value` **bất biến**,
+>   trigger audit mọi chuyển trạng thái), `ads.negative_keywords` (bảng gương, lưu **id Amazon thật** sau
+>   khi áp dụng). 4 view UI: `vexim_ppc_policies`, `vexim_ppc_change_requests`, `vexim_ppc_suggestions`
+>   (5 loại gợi ý sinh từ số liệu, trả sẵn before/after/reason), `vexim_ads_negative_keywords`.
+> - **Quyền**: `iam.is_ppc_approver()` (admin hoặc `dept_lead` phòng ppc) mới duyệt/sửa guardrail;
+>   `can_propose`/`can_decide`/`can_edit_policy` do **DB tính** và trả trong view nên UI không tự suy quyền.
+>   Người dùng ghi qua RPC bằng phiên đăng nhập; **chỉ cron** được gọi Amazon (service_role).
+> - **Hợp đồng ghi SP v3** (`ADS_WRITE_OPS`): `PUT /sp/campaigns` (`budget` là object lồng
+>   `{budget, budgetType}`), `PUT /sp/keywords` (`bid`), `PUT /sp/adGroups` (`state`),
+>   `POST /sp/negativeKeywords`, `POST /sp/campaignNegativeKeywords`; media type
+>   `application/vnd.sp<Entity>.v3+json`; state viết HOA; `matchType` = `NEGATIVE_EXACT`/`NEGATIVE_PHRASE`;
+>   lô ≤ 100; phản hồi **207 Multi-Status** tách theo `index` — dòng Amazon không trả kết quả = FAILED.
+> - **Verify-before-write**: cron đọc lại Amazon (`/sp/campaigns/list`, `/sp/keywords/list`,
+>   `/sp/negativeKeywords/list`, `/sp/campaignNegativeKeywords/list`) và so `before_value`; lệch (có người
+>   đổi tay trong Ads console), campaign `ARCHIVED`, hoặc từ đã bị phủ định → **skip có lý do**, không ghi đè.
+> - **Chốt an toàn**: `ADS_WRITE_ENABLED` mặc định **TẮT** (cron chỉ báo cáo, không giành lô);
+>   429/5xx/mạng → giữ `applying` cho lượt sau **reclaim** (`ADS_WRITE_STALE_MINUTES`), không retry dồn;
+>   thiếu token/profile → `failed` + alert `ppc_change_failed` (không treo im lặng); `?dryRun=1` để xem
+>   payload mà không gửi. Alert `ppc_pending_approval` nổ khi đề xuất chờ duyệt quá 24 giờ (quá TTL thì tự
+>   `expired` — số liệu cũ không được phép áp dụng).
 
 **Effort:** A1–A3: 4 người-tuần (🟡) · A4: 1.5 người-tuần (🔵)
 
