@@ -147,7 +147,11 @@ export async function LiveListingDraftList() {
         </form>
         {shops.length === 0 ? (
           <div className="mt-2 text-[12px] text-[#8a5602]">
-            Chưa có shop nào trong dữ liệu đồng bộ — chạy đồng bộ listing trước khi soạn.
+            Bạn chưa có quyền với shop nào (hoặc chưa có shop trong hệ thống) — kiểm tra trang{" "}
+            <Link className="font-bold underline" href="/module0/connect">
+              Kết nối shop
+            </Link>{" "}
+            hoặc nhờ Admin gán quyền shop cho bạn.
           </div>
         ) : null}
       </Panel>

@@ -443,17 +443,42 @@ export async function readEditorActor(sellerAccountId: string): Promise<EditorAc
 }
 
 /** Shop có thể chọn để soạn listing (lấy từ listing đã đồng bộ về). */
+/**
+ * Danh sách shop cho bộ chọn ở màn soạn listing.
+ *
+ * FIX 09/2026: trước đây đọc từ view `vexim_listings` (distinct theo
+ * seller_account_id) → shop VỪA KẾT NỐI OAuth nhưng CHƯA đồng bộ listing
+ * không xuất hiện, dropdown trống dù kết nối thành công. Nguyên tắc đúng
+ * (đã áp dụng ở cost-inputs): bộ chọn shop KHÔNG được phụ thuộc dữ liệu đã
+ * sync — đọc thẳng view `vexim_shops` (nguồn connections.seller_accounts,
+ * RLS lọc theo quyền), shop mới tinh vẫn chọn được ngay.
+ * Fallback `vexim_listings` giữ cho môi trường chưa chạy migration 0024
+ * (vexim_shops được tạo lại ở 0024 với cột mới).
+ */
 export async function readShopOptions(): Promise<{ sellerAccountId: string; shop: string }[]> {
   const client = await createClient();
   if (!client) throw new Error("Supabase unavailable");
+
   const { data, error } = await client
+    .from("vexim_shops")
+    .select("seller_account_id,shop,status,data_source")
+    .order("shop");
+  if (!error && data) {
+    return (data as { seller_account_id: string; shop: string; status?: string | null }[])
+      .filter((r) => r.status !== "revoked")
+      .map((r) => ({ sellerAccountId: r.seller_account_id, shop: r.shop }));
+  }
+
+  // Fallback: DB chưa có view vexim_shops (chưa chạy 0024) — cách cũ,
+  // chỉ thấy shop đã có listing đồng bộ.
+  const legacy = await client
     .from("vexim_listings")
     .select("seller_account_id,shop")
     .order("shop")
     .limit(1000);
-  if (error) throw new Error(`Không đọc được danh sách shop: ${error.message}`);
+  if (legacy.error) throw new Error(`Không đọc được danh sách shop: ${legacy.error.message}`);
   const seen = new Map<string, string>();
-  for (const row of (data ?? []) as { seller_account_id: string; shop: string }[]) {
+  for (const row of (legacy.data ?? []) as { seller_account_id: string; shop: string }[]) {
     if (!seen.has(row.seller_account_id)) seen.set(row.seller_account_id, row.shop);
   }
   return [...seen.entries()].map(([sellerAccountId, shop]) => ({ sellerAccountId, shop }));
