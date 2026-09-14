@@ -63,6 +63,15 @@ export class AdsApiRequestError extends Error {
   }
 
   /**
+   * Lỗi CẤU HÌNH credential (không phải token shop): refresh token không thuộc
+   * về cặp client id/secret đang dùng, hoặc Security Profile chưa được duyệt
+   * Ads API. Re-authorize shop KHÔNG sửa được — phải sửa biến AMAZON_ADS_* env.
+   */
+  get isConfigError(): boolean {
+    return /unauthorized_client|invalid_client/i.test(`${this.code} ${this.details ?? ""}`);
+  }
+
+  /**
    * Token không còn dùng được (hết hạn 365 ngày, bị thu hồi, hoặc role mới của
    * Ads chưa được cấp quyền) ⇒ shop phải RE-AUTHORIZE ở Module 0 → Kết nối shop.
    */
@@ -114,10 +123,22 @@ export class AdsLwaTokenManager {
     });
     const text = await res.text();
     if (!res.ok) {
+      const code = extractCode(text) ?? "LWA_TOKEN_FAILED";
+      // Dịch 2 mã LWA hay gặp thành chẩn đoán hành động được — thiếu phần này
+      // thì màn Sync health chỉ thấy "400 unauthorized_client: {...}" và người
+      // vận hành không biết phải sửa Ở ĐÂU.
+      const hint =
+        code === "unauthorized_client"
+          ? " ⇒ AMAZON_ADS_REFRESH_TOKEN không thuộc về cặp AMAZON_ADS_CLIENT_ID/_SECRET này " +
+            "(refresh token được cấp cho client khác, hoặc Security Profile chưa được duyệt Ads API). " +
+            "Kiểm tra 3 biến AMAZON_ADS_* trên Vercel — re-authorize shop KHÔNG sửa được lỗi này."
+          : code === "invalid_grant"
+            ? " ⇒ refresh token Ads hết hạn/bị thu hồi — cần lấy refresh token Ads mới."
+            : "";
       throw new AdsApiRequestError({
         status: res.status,
-        code: extractCode(text) ?? "LWA_TOKEN_FAILED",
-        message: text.slice(0, 300) || res.statusText,
+        code,
+        message: (text.slice(0, 300) || res.statusText) + hint,
       });
     }
     const json = JSON.parse(text) as { access_token?: string; expires_in?: number };

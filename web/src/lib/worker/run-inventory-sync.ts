@@ -21,7 +21,7 @@
 import { loadConfig } from "./config.ts";
 import { LwaTokenManager } from "./amazon/lwa.ts";
 import { FbaInventoryClient } from "./amazon/fba-inventory.ts";
-import { MockDbAdapter, type DbAdapter, type ActiveShop } from "./db/adapter.ts";
+import { MockDbAdapter, type DbAdapter, type ActiveShop, type SyncJobRecord } from "./db/adapter.ts";
 import { SupabaseDbAdapter } from "./db/supabase.ts";
 import { runInventorySync } from "./jobs/inventory-sync.job.ts";
 
@@ -178,14 +178,19 @@ export async function runInventorySyncAll(
 
   for (const shop of shops) {
     const startedAt = new Date();
-    await db.recordSyncJob({
+    // MỘT object job dùng xuyên suốt: recordSyncJob lần đầu POST và gán job.id,
+    // các lần sau PATCH đúng dòng đó. Trước đây mỗi lần gọi là một object literal
+    // mới (không id) → INSERT thêm dòng "done" riêng, còn dòng "running" mồ côi
+    // vĩnh viễn trên màn Sync health.
+    const job: SyncJobRecord = {
       sellerAccountId: shop.id,
       jobType: "inventory.pull",
       status: "running",
       attempts: 1,
       startedAt,
       payload: { marketplace: shop.marketplace, lead_days: shop.leadDays },
-    });
+    };
+    await db.recordSyncJob(job);
 
     try {
       let client: InstanceType<typeof FbaInventoryClient>;
@@ -239,12 +244,9 @@ export async function runInventorySyncAll(
         result.totalAlerts++;
       }
 
-      await db.recordSyncJob({
-        sellerAccountId: shop.id,
-        jobType: "inventory.pull",
-        status: "done",
-        finishedAt: new Date(),
-      });
+      job.status = "done";
+      job.finishedAt = new Date();
+      await db.recordSyncJob(job);
 
       result.shopsProcessed++;
       result.totalSkus += report.skusProcessed;
@@ -254,13 +256,10 @@ export async function runInventorySyncAll(
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       result.errors.push({ shopId: shop.id, error: message });
-      await db.recordSyncJob({
-        sellerAccountId: shop.id,
-        jobType: "inventory.pull",
-        status: "failed",
-        lastError: message,
-        finishedAt: new Date(),
-      });
+      job.status = "failed";
+      job.lastError = message;
+      job.finishedAt = new Date();
+      await db.recordSyncJob(job);
       log(`  ✗ ${shop.displayName}: ${message}\n`);
     }
   }

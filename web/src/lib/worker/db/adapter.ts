@@ -1358,7 +1358,17 @@ export class MockDbAdapter implements DbAdapter {
   }
 
   async recordSyncJob(job: SyncJobRecord): Promise<void> {
-    this.jobs.push(job);
+    // Mô phỏng đúng SupabaseDbAdapter: có id → UPDATE dòng cũ; chưa có id →
+    // INSERT và GÁN id vào object. Trước đây mock chỉ push() nên test không
+    // bắt được bug "dòng running mồ côi" (caller quên dùng lại object job).
+    if (job.id) {
+      const i = this.jobs.findIndex((j) => j.id === job.id);
+      if (i >= 0) this.jobs[i] = { ...job };
+      else this.jobs.push({ ...job });
+      return;
+    }
+    job.id = `mock-sync-job-${this.jobs.length + 1}`;
+    this.jobs.push({ ...job });
   }
 
   async upsertAlert(alert: AlertRowInput): Promise<void> {

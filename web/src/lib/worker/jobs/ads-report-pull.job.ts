@@ -144,6 +144,14 @@ const DEFAULT_POLL_DELAY_MS = 20_000;
 
 const RESUMABLE: readonly ReportRequestStatus[] = ["requested", "in_queue", "in_progress", "done"];
 
+/**
+ * Giống report-pull FBA: report Ads của KỲ CŨ vẫn treo requested/in_queue/
+ * in_progress quá số giờ này thì đóng lại (cancelled) — kỳ Ads trượt theo
+ * `now` mỗi ngày nên dòng hôm qua không bao giờ được poll lại, thành "CHỜ QUÁ
+ * LÂU" vĩnh viễn trên màn Sync health.
+ */
+const STALE_PENDING_HOURS = 24;
+
 const pad2 = (n: number) => String(n).padStart(2, "0");
 const isoDay = (d: Date) => `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
 
@@ -537,15 +545,20 @@ export async function runAdsReportPull(opts: AdsPullOptions): Promise<AdsPullRes
     out.reportId = ctx.reportId;
     const msg = e instanceof Error ? e.message.split("\n")[0] : String(e);
     const throttled = e instanceof AdsApiRequestError && e.isThrottled;
-    const auth = e instanceof AdsApiRequestError && e.isAuthError;
+    const config = e instanceof AdsApiRequestError && e.isConfigError;
+    // unauthorized_client/invalid_client = credential env sai — re-authorize
+    // shop KHÔNG sửa được, nên KHÔNG được gắn needsReauth (tránh chỉ sai hướng).
+    const auth = !config && e instanceof AdsApiRequestError && e.isAuthError;
     out.needsReauth = auth;
     out.action = throttled ? "throttled" : "failed";
     out.status = "failed";
-    out.message = auth
-      ? `token Ads không dùng được (${msg}) ⇒ PHẢI re-authorize ở Module 0 → Kết nối shop (SOP-11).`
-      : throttled
-        ? `Amazon chặn vì trần tốc độ/hạn mức — không phải lỗi cấu hình, lần chạy sau thử lại. (${msg})`
-        : `gọi Ads Reporting API thất bại: ${msg}`;
+    out.message = config
+      ? `credential Ads trên env SAI (${msg}) ⇒ kiểm tra AMAZON_ADS_CLIENT_ID / _SECRET / _REFRESH_TOKEN — 3 biến phải cùng một Security Profile đã được duyệt Ads API.`
+      : auth
+        ? `token Ads không dùng được (${msg}) ⇒ PHẢI re-authorize ở Module 0 → Kết nối shop (SOP-11).`
+        : throttled
+          ? `Amazon chặn vì trần tốc độ/hạn mức — không phải lỗi cấu hình, lần chạy sau thử lại. (${msg})`
+          : `gọi Ads Reporting API thất bại: ${msg}`;
     await recordState(shop, kind, period, "failed", {
       reportId: ctx.reportId,
       requestedAt: ctx.requestedAt,
@@ -605,6 +618,33 @@ export async function runAdsReportPull(opts: AdsPullOptions): Promise<AdsPullRes
             const h = hoursSince(r.requestedAt, now);
             return h !== null && h >= 0 && h < spec.cooldownHours;
           }) ?? null;
+
+        // Quét dọn dòng kỳ cũ bị bỏ rơi (xem STALE_PENDING_HOURS).
+        for (const r of list) {
+          if (samePeriod(period, r)) continue;
+          if (!["requested", "in_queue", "in_progress"].includes(r.status)) continue;
+          const h = hoursSince(r.requestedAt, now);
+          if (h === null || h < STALE_PENDING_HOURS) continue;
+          if (!dryRun) {
+            await recordState(
+              shop,
+              kind,
+              { start: r.dataStart ?? null, end: r.dataEnd ?? null },
+              "cancelled",
+              {
+                reportId: r.reportId ?? null,
+                requestedAt: r.requestedAt ?? null,
+                lastError:
+                  `bỏ cuộc sau ${h.toFixed(0)} giờ chờ Amazon (status=${r.status}) — ` +
+                  `kỳ dữ liệu đã trôi qua, lần chạy sau dùng kỳ mới.`,
+              },
+            );
+            log(
+              `[ads-pull] 🧹 đóng report kỳ cũ treo ${h.toFixed(0)}h: ${spec.reportTypeId} ` +
+                `${r.dataStart ?? "?"} → ${r.dataEnd ?? "?"} (${shop.displayName})\n`,
+            );
+          }
+        }
       } catch (e) {
         log(
           `[ads-pull] ⚠ không đọc được trạng thái report cũ (${(e as Error).message.split("\n")[0]}) — ` +

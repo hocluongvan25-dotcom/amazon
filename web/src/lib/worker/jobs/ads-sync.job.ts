@@ -231,12 +231,15 @@ export async function runAdsEntitySync(opts: AdsSyncOptions): Promise<AdsSyncRes
       results.push(out);
     } catch (e) {
       const msg = e instanceof Error ? e.message.split("\n")[0] : String(e);
-      const auth = e instanceof AdsApiRequestError && e.isAuthError;
+      const config = e instanceof AdsApiRequestError && e.isConfigError;
+      const auth = !config && e instanceof AdsApiRequestError && e.isAuthError;
       out.action = "failed";
       out.needsReauth = auth;
-      out.message = auth
-        ? `token Ads không dùng được (${msg}) ⇒ PHẢI re-authorize ở Module 0 → Kết nối shop (SOP-11).`
-        : `đồng bộ cấu trúc Ads thất bại: ${msg}`;
+      out.message = config
+        ? `credential Ads trên env SAI (${msg}) ⇒ kiểm tra AMAZON_ADS_CLIENT_ID / _SECRET / _REFRESH_TOKEN — 3 biến phải cùng một Security Profile đã được duyệt Ads API.`
+        : auth
+          ? `token Ads không dùng được (${msg}) ⇒ PHẢI re-authorize ở Module 0 → Kết nối shop (SOP-11).`
+          : `đồng bộ cấu trúc Ads thất bại: ${msg}`;
       out.errors.push(msg);
       errors.push({ shopId: shop.id, error: msg });
       results.push(out);

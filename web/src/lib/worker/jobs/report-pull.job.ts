@@ -131,6 +131,16 @@ export type ReportPullOptions = {
 const DEFAULT_POLL_ATTEMPTS = 3;
 const DEFAULT_POLL_DELAY_MS = 20_000;
 
+/**
+ * Report chờ quá số giờ này mà vẫn IN_QUEUE/IN_PROGRESS thì coi như Amazon bỏ
+ * rơi — ĐÓNG lại (cancelled) để lần chạy sau xin kỳ mới. Không có bước này thì
+ * report của kỳ hôm qua bị MỒ CÔI vĩnh viễn: cron hôm nay tính kỳ mới (khoảng
+ * ngày trượt theo now) nên samePeriodRow không khớp, còn `existing` chỉ nhìn
+ * trong cửa sổ cooldown vài giờ → không ai poll/đóng dòng cũ nữa, màn Sync
+ * health treo "CHỜ QUÁ LÂU" mãi mãi.
+ */
+const STALE_PENDING_HOURS = 24;
+
 /** Trạng thái "còn phải quay lại" — lần chạy sau poll tiếp, không xin report mới. */
 const RESUMABLE: readonly ReportRequestStatus[] = [
   "requested", "in_queue", "in_progress", "done",
@@ -412,6 +422,37 @@ export async function runReportPull(opts: ReportPullOptions): Promise<ReportPull
             const h = hoursSince(r.requestedAt, now);
             return h !== null && h >= 0 && h < spec.cooldownHours;
           }) ?? null;
+
+        // Quét dọn: dòng của KỲ CŨ vẫn treo requested/in_queue/in_progress quá
+        // STALE_PENDING_HOURS → đóng lại (cancelled) để màn Sync health không
+        // báo "CHỜ QUÁ LÂU" vĩnh viễn. Kỳ hiện tại không đụng — nó còn được
+        // poll ở các nhánh dưới.
+        for (const r of list) {
+          if (samePeriod(period, r)) continue;
+          if (!["requested", "in_queue", "in_progress"].includes(r.status)) continue;
+          const h = hoursSince(r.requestedAt, now);
+          if (h === null || h < STALE_PENDING_HOURS) continue;
+          if (!dryRun) {
+            await recordState(
+              shop,
+              kind,
+              { start: r.dataStart ?? null, end: r.dataEnd ?? null, startIso: null, endIso: null },
+              "cancelled",
+              {
+                reportId: r.reportId ?? null,
+                marketplaceId: r.marketplaceId ?? shop.marketplace,
+                requestedAt: r.requestedAt ?? null,
+                lastError:
+                  `bỏ cuộc sau ${h.toFixed(0)} giờ chờ Amazon (status=${r.status}) — ` +
+                  `kỳ dữ liệu đã trôi qua, lần chạy sau dùng kỳ mới.`,
+              },
+            );
+            log(
+              `[report-pull] 🧹 đóng report kỳ cũ treo ${h.toFixed(0)}h: ${spec.reportType} ` +
+                `${r.dataStart ?? "?"} → ${r.dataEnd ?? "?"} (${shop.displayName})\n`,
+            );
+          }
+        }
       } catch (e) {
         const out = base(shop, kind, period);
         out.warnings.push(

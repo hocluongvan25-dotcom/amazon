@@ -56,3 +56,64 @@ test("registry: các groupBy còn lại khớp docs (campaign/targeting/searchTe
   assert.deepEqual(ADS_REPORT_SPECS["search-terms"].groupBy, ["searchTerm"]);
   assert.deepEqual(ADS_REPORT_SPECS["advertised-products"].groupBy, ["advertiser"]);
 });
+
+/* ============================================================================
+ * Chẩn đoán lỗi LWA — unauthorized_client là lỗi CẤU HÌNH env, không phải
+ * token shop. Re-authorize không sửa được; message phải chỉ đúng chỗ sửa.
+ * ==========================================================================*/
+import { AdsApiRequestError, AdsLwaTokenManager } from "../src/lib/worker/amazon/ads.ts";
+
+test("AdsApiRequestError: unauthorized_client → isConfigError (KHÔNG khuyên re-authorize)", () => {
+  const e = new AdsApiRequestError({
+    status: 400,
+    code: "unauthorized_client",
+    message: '{"error_index":"xxx"}',
+  });
+  assert.equal(e.isConfigError, true);
+  // isAuthError cũng match (regex 'unauthorized') — nhưng job phải ưu tiên
+  // isConfigError trước, nên chỉ cần isConfigError đúng là đủ.
+});
+
+test("AdsApiRequestError: invalid_grant → KHÔNG phải config error (là token hết hạn)", () => {
+  const e = new AdsApiRequestError({ status: 400, code: "invalid_grant", message: "expired" });
+  assert.equal(e.isConfigError, false);
+  assert.equal(e.isAuthError, true);
+});
+
+test("AdsLwaTokenManager: LWA 400 unauthorized_client → message kèm hướng dẫn sửa env AMAZON_ADS_*", async () => {
+  const fakeFetch = (async () =>
+    new Response('{"error":"unauthorized_client","error_description":"Client not authorized"}', {
+      status: 400,
+    })) as unknown as typeof fetch;
+  const mgr = new AdsLwaTokenManager(
+    { clientId: "cid", clientSecret: "sec", refreshToken: "rt" },
+    fakeFetch,
+  );
+  await assert.rejects(
+    () => mgr.getAccessToken(),
+    (e: unknown) => {
+      assert.ok(e instanceof AdsApiRequestError);
+      assert.equal(e.code, "unauthorized_client");
+      assert.match(e.message, /AMAZON_ADS_REFRESH_TOKEN không thuộc về cặp/);
+      assert.match(e.message, /re-authorize shop KHÔNG sửa được/i);
+      return true;
+    },
+  );
+});
+
+test("AdsLwaTokenManager: LWA 400 invalid_grant → message khuyên lấy refresh token mới", async () => {
+  const fakeFetch = (async () =>
+    new Response('{"error":"invalid_grant","error_description":"expired"}', { status: 400 })) as unknown as typeof fetch;
+  const mgr = new AdsLwaTokenManager(
+    { clientId: "cid", clientSecret: "sec", refreshToken: "rt" },
+    fakeFetch,
+  );
+  await assert.rejects(
+    () => mgr.getAccessToken(),
+    (e: unknown) => {
+      assert.ok(e instanceof AdsApiRequestError);
+      assert.match(e.message, /refresh token Ads hết hạn|bị thu hồi/);
+      return true;
+    },
+  );
+});
