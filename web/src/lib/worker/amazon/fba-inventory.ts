@@ -120,8 +120,9 @@ export class FbaInventoryClient {
       url.searchParams.set("startDateTime", params.startDateTime);
     }
     if (params.nextToken) url.searchParams.set("nextToken", params.nextToken);
-    // Amazon recommends page size 50
-    url.searchParams.set("pageSize", "50");
+    // LƯU Ý (so khớp model chính thức amzn/selling-partner-api-models):
+    // getInventorySummaries KHÔNG có tham số pageSize — trước đây gửi thừa
+    // pageSize=50 (Amazon bỏ qua nhưng sai spec). Phân trang chỉ bằng nextToken.
 
     let lastWait = 1000;
     for (let attempt = 0; attempt < 4; attempt++) {
