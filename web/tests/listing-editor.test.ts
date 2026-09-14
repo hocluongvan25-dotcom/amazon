@@ -21,6 +21,7 @@ import {
   availableActions,
   buildFeedDocument,
   buildPatchBody,
+  deriveCanWrite,
   buildPutBody,
   canTransition,
   checkPublishGate,
@@ -550,4 +551,31 @@ test("helper truy cập payload + tổng hợp bản nháp", () => {
   assert.equal(counts.draft, 2);
   assert.equal(counts.published, 1);
   assert.equal(counts.approved, 0);
+});
+
+/* ============================================================================
+ * FIX 09/2026 — form soạn listing bị khoá với super admin.
+ * deriveCanWrite phải KHỚP iam.can_write_seller_account (nguồn sự thật RLS):
+ * super_admin ghi được MỌI shop mà KHÔNG cần dòng iam.assignments.
+ * ==========================================================================*/
+
+test("deriveCanWrite: super_admin KHÔNG cần assignment vẫn ghi được (bug form khoá)", () => {
+  // Đúng tình huống bug: super admin, không có assignment per-shop
+  assert.equal(deriveCanWrite([{ role: "super_admin" }], []), true);
+  // super_admin + assignment can_write=false vẫn ghi được (role thắng)
+  assert.equal(deriveCanWrite([{ role: "super_admin" }], [{ can_write: false }]), true);
+});
+
+test("deriveCanWrite: người thường cần assignment can_write=true", () => {
+  assert.equal(deriveCanWrite([{ role: "staff" }], [{ can_write: true }]), true);
+  assert.equal(deriveCanWrite([{ role: "staff" }], [{ can_write: false }]), false);
+  assert.equal(deriveCanWrite([{ role: "staff" }], []), false);
+  assert.equal(deriveCanWrite([], []), false);
+});
+
+test("deriveCanWrite: org_admin/dept_lead KHÔNG tự có quyền ghi (khớp iam.can_write_seller_account)", () => {
+  // Chỉ super_admin được đặc cách trong hàm DB — org_admin muốn ghi vẫn cần assignment
+  assert.equal(deriveCanWrite([{ role: "org_admin" }], []), false);
+  assert.equal(deriveCanWrite([{ role: "dept_lead" }], []), false);
+  assert.equal(deriveCanWrite([{ role: "org_admin" }], [{ can_write: true }]), true);
 });

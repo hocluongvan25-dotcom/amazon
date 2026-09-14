@@ -15,6 +15,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import {
+  deriveCanWrite,
   diffPayload,
   validateListingDraft,
   type DraftStatus,
@@ -430,8 +431,11 @@ export async function readEditorActor(sellerAccountId: string): Promise<EditorAc
     client.schema("iam").from("role_assignments").select("role,department_id").eq("user_id", user.id),
   ]);
 
-  const canWrite = (assignments ?? []).some((row) => (row as { can_write?: boolean }).can_write === true);
   const roleRows = (roles ?? []) as { role: string; department_id: string | null }[];
+  const canWrite = deriveCanWrite(
+    roleRows,
+    (assignments ?? []) as { can_write?: boolean }[],
+  );
   let isApprover = roleRows.some((r) => r.role === "super_admin" || r.role === "org_admin");
   if (!isApprover && roleRows.some((r) => r.role === "dept_lead")) {
     const { data: dept } = await client.schema("iam").from("departments").select("id").eq("code", "listing").maybeSingle();

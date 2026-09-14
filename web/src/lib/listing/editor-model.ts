@@ -992,6 +992,25 @@ export type ActorContext = {
   isApprover: boolean;
 };
 
+/**
+ * FIX 09/2026 (form soạn listing bị khoá với super admin): canWrite của UI
+ * phải KHỚP định nghĩa `iam.can_write_seller_account` — nguồn sự thật của
+ * RLS + trigger 0014:
+ *
+ *   super_admin  →  ghi được MỌI shop, KHÔNG cần dòng iam.assignments
+ *   người khác   →  cần assignment (user, shop) có can_write = true
+ *
+ * Trước đây UI chỉ đọc assignments.can_write → super admin (thường không có
+ * assignment per-shop) thấy toàn bộ form bị disable dù DB cho ghi.
+ */
+export function deriveCanWrite(
+  roleRows: { role: string }[],
+  assignments: { can_write?: boolean }[],
+): boolean {
+  if (roleRows.some((r) => r.role === "super_admin")) return true;
+  return assignments.some((row) => row.can_write === true);
+}
+
 export type DraftLike = {
   status: DraftStatus;
   createdBy?: string | null;
