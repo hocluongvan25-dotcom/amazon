@@ -66,7 +66,7 @@ export function createDemoEditorDraft(input: {
     sellerAccountId: input.sellerAccountId ?? "demo-shop",
     sku: input.sku ?? "XMO-950-BLK",
     asin: input.asin ?? "B0C7T31F",
-    shop: input.shop ?? "VEXIM US (demo)",
+    shop: input.shop ?? "Shop Demo US",
     productType: input.productType ?? "LUGGAGE",
     requirements: "LISTING",
     marketplaceId,

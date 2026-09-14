@@ -25,7 +25,7 @@ type Props = {
 function groupTitle(g: { sellerId: string | null; shops: ConnectShopRow[] }): string {
   const names = g.shops.map((s) => friendlyShopName(s));
   if (names.length === 1) return names[0];
-  // Tìm tiền tố chung có nghĩa (vd "VEXIM US - Chính" + "VEXIM CA - Canada" → "VEXIM")
+  // Tìm tiền tố chung có nghĩa (vd "Cửa hàng ABC US" + "Cửa hàng ABC CA" → "Cửa"…lấy prefix chung)
   const first = names[0].split(/[\s·-]+/)[0];
   if (first.length >= 3 && names.every((n) => n.startsWith(first))) return first;
   return names[0];

@@ -51,7 +51,7 @@ import {
 
 const feeRaw = (over: Partial<StorageFeeRaw> = {}): StorageFeeRaw => ({
   seller_account_id: "shop-1",
-  shop: "VEXIM · US",
+  shop: "Shop Demo US",
   month_of_charge: "2026-08",
   fnsku: "X001A1",
   asin: "B0DEMOA1",
@@ -80,7 +80,7 @@ const feeRaw = (over: Partial<StorageFeeRaw> = {}): StorageFeeRaw => ({
 
 const byFcRaw = (over: Partial<StorageFeeByFcRaw> = {}): StorageFeeByFcRaw => ({
   seller_account_id: "shop-1",
-  shop: "VEXIM · US",
+  shop: "Shop Demo US",
   month_of_charge: "2026-08",
   fc: "ONT8",
   currency: "USD",
@@ -99,7 +99,7 @@ const byFcRaw = (over: Partial<StorageFeeByFcRaw> = {}): StorageFeeByFcRaw => ({
 
 const issueRaw = (over: Partial<InboundIssueRaw> = {}): InboundIssueRaw => ({
   seller_account_id: "shop-1",
-  shop: "VEXIM · US",
+  shop: "Shop Demo US",
   issue_reported_date: "2026-09-08",
   days_ago: "4",
   shipment_creation_date: "2026-09-01",
@@ -128,7 +128,7 @@ const issueRaw = (over: Partial<InboundIssueRaw> = {}): InboundIssueRaw => ({
 
 const issueShipRaw = (over: Partial<InboundIssueShipmentRaw> = {}): InboundIssueShipmentRaw => ({
   seller_account_id: "shop-1",
-  shop: "VEXIM · US",
+  shop: "Shop Demo US",
   shipment_id: "FBA15DG9WJKR",
   fc: "ONT8",
   shipment_creation_date: "2026-09-01",
@@ -150,7 +150,7 @@ const issueShipRaw = (over: Partial<InboundIssueShipmentRaw> = {}): InboundIssue
 const requestRaw = (over: Partial<ReportRequestRaw> = {}): ReportRequestRaw => ({
   id: "rr-1",
   seller_account_id: "shop-1",
-  shop: "VEXIM · US",
+  shop: "Shop Demo US",
   report_type: "GET_FBA_STORAGE_FEE_CHARGES_DATA",
   marketplace_id: "ATVPDKIKX0DER",
   data_start: "2026-06-09",

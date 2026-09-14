@@ -28,7 +28,7 @@ const AG = "AG-DEMO-01";
 export const demoAdGroups: AdsAdGroupRaw[] = [
   {
     seller_account_id: SHOP,
-    shop: "VEXIM US",
+    shop: "Shop Demo US",
     ads_profile_id: PROFILE,
     campaign_id: CAMPAIGN,
     campaign_name: "Vali 20 inch",
@@ -54,7 +54,7 @@ export const demoAdGroups: AdsAdGroupRaw[] = [
   },
   {
     seller_account_id: SHOP,
-    shop: "VEXIM US",
+    shop: "Shop Demo US",
     ads_profile_id: PROFILE,
     campaign_id: CAMPAIGN,
     campaign_name: "Vali 20 inch",
@@ -80,7 +80,7 @@ export const demoAdGroups: AdsAdGroupRaw[] = [
   },
   {
     seller_account_id: SHOP,
-    shop: "VEXIM US",
+    shop: "Shop Demo US",
     ads_profile_id: PROFILE,
     campaign_id: "C-DEMO-02",
     campaign_name: "Túi chống nước",
@@ -109,7 +109,7 @@ export const demoAdGroups: AdsAdGroupRaw[] = [
 export const demoTargets: AdsTargetRaw[] = [
   {
     seller_account_id: SHOP,
-    shop: "VEXIM US",
+    shop: "Shop Demo US",
     ads_profile_id: PROFILE,
     campaign_id: CAMPAIGN,
     campaign_name: "Vali 20 inch",
@@ -139,7 +139,7 @@ export const demoTargets: AdsTargetRaw[] = [
   },
   {
     seller_account_id: SHOP,
-    shop: "VEXIM US",
+    shop: "Shop Demo US",
     ads_profile_id: PROFILE,
     campaign_id: CAMPAIGN,
     campaign_name: "Vali 20 inch",
@@ -169,7 +169,7 @@ export const demoTargets: AdsTargetRaw[] = [
   },
   {
     seller_account_id: SHOP,
-    shop: "VEXIM US",
+    shop: "Shop Demo US",
     ads_profile_id: PROFILE,
     campaign_id: CAMPAIGN,
     campaign_name: "Vali 20 inch",
@@ -202,7 +202,7 @@ export const demoTargets: AdsTargetRaw[] = [
 export const demoSearchTerms: AdsSearchTermRaw[] = [
   {
     seller_account_id: SHOP,
-    shop: "VEXIM US",
+    shop: "Shop Demo US",
     campaign_id: CAMPAIGN,
     campaign_name: "Vali 20 inch",
     campaign_state: "ENABLED",
@@ -244,7 +244,7 @@ export const demoSearchTerms: AdsSearchTermRaw[] = [
   },
   {
     seller_account_id: SHOP,
-    shop: "VEXIM US",
+    shop: "Shop Demo US",
     campaign_id: CAMPAIGN,
     campaign_name: "Vali 20 inch",
     campaign_state: "ENABLED",
@@ -285,7 +285,7 @@ export const demoSearchTerms: AdsSearchTermRaw[] = [
   },
   {
     seller_account_id: SHOP,
-    shop: "VEXIM US",
+    shop: "Shop Demo US",
     campaign_id: CAMPAIGN,
     campaign_name: "Vali 20 inch",
     campaign_state: "ENABLED",
@@ -324,7 +324,7 @@ export const demoSearchTerms: AdsSearchTermRaw[] = [
   },
   {
     seller_account_id: SHOP,
-    shop: "VEXIM US",
+    shop: "Shop Demo US",
     campaign_id: CAMPAIGN,
     campaign_name: "Vali 20 inch",
     campaign_state: "ENABLED",
@@ -366,7 +366,7 @@ export const demoNegativeKeywords: AdsNegativeKeywordRaw[] = [
   {
     id: "demo-neg-1",
     seller_account_id: SHOP,
-    shop: "VEXIM US",
+    shop: "Shop Demo US",
     campaign_id: CAMPAIGN,
     campaign_name: "Vali 20 inch",
     ad_group_id: "AG-DEMO-02",
@@ -386,7 +386,7 @@ export const demoChanges: AdsChangeRaw[] = [
   {
     id: "demo-change-1",
     seller_account_id: SHOP,
-    shop: "VEXIM US",
+    shop: "Shop Demo US",
     ads_profile_id: PROFILE,
     entity_type: "campaign",
     entity_key: CAMPAIGN,
@@ -426,7 +426,7 @@ export const demoChanges: AdsChangeRaw[] = [
   {
     id: "demo-change-2",
     seller_account_id: SHOP,
-    shop: "VEXIM US",
+    shop: "Shop Demo US",
     ads_profile_id: PROFILE,
     entity_type: "keyword",
     entity_key: "KW-DEMO-02",
@@ -466,7 +466,7 @@ export const demoChanges: AdsChangeRaw[] = [
   {
     id: "demo-change-3",
     seller_account_id: SHOP,
-    shop: "VEXIM US",
+    shop: "Shop Demo US",
     ads_profile_id: PROFILE,
     entity_type: "search_term",
     entity_key: "vali size 20 hàng hiệu",
@@ -506,7 +506,7 @@ export const demoChanges: AdsChangeRaw[] = [
   {
     id: "demo-change-4",
     seller_account_id: SHOP,
-    shop: "VEXIM US",
+    shop: "Shop Demo US",
     ads_profile_id: PROFILE,
     entity_type: "campaign",
     entity_key: CAMPAIGN,
@@ -551,7 +551,7 @@ export const demoAudit: AdsAuditRaw[] = [
     id: "demo-audit-1",
     created_at: "2026-09-13T02:12:00Z",
     seller_account_id: SHOP,
-    shop: "VEXIM US",
+    shop: "Shop Demo US",
     module: "ads",
     action: "ads.bid_change_request",
     entity: "vali kéo size 20",
@@ -567,7 +567,7 @@ export const demoAudit: AdsAuditRaw[] = [
     id: "demo-audit-2",
     created_at: "2026-09-13T02:10:00Z",
     seller_account_id: SHOP,
-    shop: "VEXIM US",
+    shop: "Shop Demo US",
     module: "ads",
     action: "ads.budget_change_request",
     entity: "Vali 20 inch",
@@ -583,7 +583,7 @@ export const demoAudit: AdsAuditRaw[] = [
     id: "demo-audit-3",
     created_at: "2026-09-11T04:05:00Z",
     seller_account_id: SHOP,
-    shop: "VEXIM US",
+    shop: "Shop Demo US",
     module: "ads",
     action: "ads.suggestion_approve",
     entity: "vali size 20 hàng hiệu",
@@ -604,7 +604,7 @@ export const DEMO_DECIDER_PERSONAS = ["ceo"] as const;
 const demoCampaigns: AdsCampaignRaw[] = [
   {
     seller_account_id: SHOP,
-    shop: "VEXIM US",
+    shop: "Shop Demo US",
     ads_profile_id: PROFILE,
     campaign_id: CAMPAIGN,
     campaign_type: "SPONSORED_PRODUCTS",
@@ -638,7 +638,7 @@ const demoCampaigns: AdsCampaignRaw[] = [
   },
   {
     seller_account_id: SHOP,
-    shop: "VEXIM US",
+    shop: "Shop Demo US",
     ads_profile_id: PROFILE,
     campaign_id: "C-DEMO-02",
     campaign_type: "SPONSORED_PRODUCTS",

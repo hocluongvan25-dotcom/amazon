@@ -4393,6 +4393,36 @@ ok(await mustBlock(`select * from public.vexim_worker_set_shop_name('ab280000-00
 await ex("select set_config('request.jwt.claim.sub','',false)");
 await ex(`delete from connections.seller_accounts where id='ab280000-0000-4000-8000-000000000001'`, "dọn fixture 0028");
 
+// ===========================================================================
+console.log("\n=== BƯỚC 28: 0029 — gỡ tên shop hardcode VEXIM khỏi dữ liệu ===");
+// ===========================================================================
+// 0024/0026 từng hardcode 'VEXIM US - Chính'/'VEXIM CA - Canada'. 0029 reset
+// các dòng đó về tên generic (trừ name_source='manual' — người vận hành cố
+// tình đặt thì tôn trọng). Kết nối lại → callback lấy tên thật từ Amazon.
+await ex("select set_config('request.jwt.claim.sub','',false)");
+// Fixture 1: tên hardcode + name_source='default' → phải bị reset
+await ex(`insert into connections.seller_accounts (id, org_id, seller_id, marketplace, display_name, status, data_source, name_source)
+  select 'ab290000-0000-4000-8000-000000000001', org_id, 'A9HARDCODE01', 'ATVPDKIKX0DER', 'VEXIM US - Chính', 'active', 'production', 'default'
+  from connections.seller_accounts limit 1`, "fixture 0029: tên hardcode, source=default");
+// Fixture 2: cùng tên hardcode nhưng name_source='manual' → phải GIỮ NGUYÊN
+await ex(`insert into connections.seller_accounts (id, org_id, seller_id, marketplace, display_name, status, data_source, name_source)
+  select 'ab290000-0000-4000-8000-000000000002', org_id, 'A9HARDCODE01', 'A2EUQ1WTGCTBG2', 'VEXIM CA - Canada', 'active', 'production', 'manual'
+  from connections.seller_accounts limit 1`, "fixture 0029: tên hardcode, source=manual");
+
+ok(
+  await ex(rd("migrations/0029_remove_vexim_hardcoded_names.sql"), "0029_remove_vexim_hardcoded_names.sql"),
+  "0029 chạy sạch (DO-block tự soát: hết tên hardcode ngoài manual)",
+);
+ok(await ex(rd("migrations/0029_remove_vexim_hardcoded_names.sql"), "0029 lần 2"), "0029 idempotent");
+
+const hc29a = await one(`select display_name, name_source from connections.seller_accounts where id='ab290000-0000-4000-8000-000000000001'`);
+ok(hc29a.display_name === "Shop US · A9HA" && hc29a.name_source === "default",
+  `0029: tên hardcode (source=default) reset về generic 'Shop US · A9HA' — got: ${hc29a.display_name}`);
+const hc29b = await one(`select display_name from connections.seller_accounts where id='ab290000-0000-4000-8000-000000000002'`);
+ok(hc29b.display_name === "VEXIM CA - Canada",
+  `0029: tên manual GIỮ NGUYÊN dù trùng chuỗi hardcode — got: ${hc29b.display_name}`);
+await ex(`delete from connections.seller_accounts where id in ('ab290000-0000-4000-8000-000000000001','ab290000-0000-4000-8000-000000000002')`, "dọn fixture 0029");
+
 console.log(`\n${"=".repeat(70)}`);
 console.log(fails === 0 ? "TẤT CẢ PASS" : `${fails} MỤC FAIL`);
 console.log("=".repeat(70));

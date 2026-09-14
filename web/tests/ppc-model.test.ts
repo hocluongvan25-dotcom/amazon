@@ -56,7 +56,7 @@ import {
 
 const campaign = (over: Partial<AdsCampaignRaw> = {}): AdsCampaignRaw => ({
   seller_account_id: "shop-1",
-  shop: "VEXIM US",
+  shop: "Shop Demo US",
   ads_profile_id: "P-1",
   campaign_id: "C-1",
   campaign_type: "SPONSORED_PRODUCTS",
@@ -92,7 +92,7 @@ const campaign = (over: Partial<AdsCampaignRaw> = {}): AdsCampaignRaw => ({
 
 const kpi = (over: Partial<AdsKpiRaw> = {}): AdsKpiRaw => ({
   seller_account_id: "shop-1",
-  shop: "VEXIM US",
+  shop: "Shop Demo US",
   currency: "USD",
   last_day: "2026-09-12",
   spend_7d: 100,
@@ -237,7 +237,7 @@ test("ppc: cảnh báo dựng từ số thật — không có gì bất thườn
       {
         id: "e1",
         seller_account_id: "shop-1",
-        shop: "VEXIM US",
+        shop: "Shop Demo US",
         day: "2026-09-12",
         campaign_id: "C-1",
         campaign_name: "Vali 20 inch",
@@ -275,7 +275,7 @@ test("ppc: cảnh báo dựng từ số thật — không có gì bất thườn
 
 const term = (over: Partial<AdsSearchTermRaw> = {}): AdsSearchTermRaw => ({
   seller_account_id: "shop-1",
-  shop: "VEXIM US",
+  shop: "Shop Demo US",
   campaign_id: "C-1",
   campaign_name: "Vali 20 inch",
   campaign_state: "ENABLED",
@@ -316,7 +316,7 @@ const term = (over: Partial<AdsSearchTermRaw> = {}): AdsSearchTermRaw => ({
 const change = (over: Partial<AdsChangeRaw> = {}): AdsChangeRaw => ({
   id: "ch-1",
   seller_account_id: "shop-1",
-  shop: "VEXIM US",
+  shop: "Shop Demo US",
   ads_profile_id: "P-1",
   entity_type: "campaign",
   entity_key: "C-1",

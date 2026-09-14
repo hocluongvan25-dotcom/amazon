@@ -49,7 +49,7 @@ export default async function ListingEditorPage({
           <ListingEditor
             mode="demo"
             sellerAccountId="demo-shop"
-            shop="VEXIM US (demo)"
+            shop="Shop Demo US"
             sku="XMO-950-BLK"
             productType="LUGGAGE"
             requirements={"LISTING" as never}

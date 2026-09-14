@@ -738,7 +738,7 @@ export const pricingDetails: Record<string, PricingDetailMock> = {
       { date: "13/08", myPrice: 139.99, buyBoxPrice: 139.99, lowestCompetitor: 144.99 },
     ],
     offers: [
-      { sellerId: "ME", sellerLabel: "VEXIM (chúng tôi)", isMe: true, fulfillment: "FBA", price: 129.99, shipping: 0, landedPrice: 129.99, rating: null, feedbackCount: null, isFeatured: false, condition: "New" },
+      { sellerId: "ME", sellerLabel: "Shop của bạn", isMe: true, fulfillment: "FBA", price: 129.99, shipping: 0, landedPrice: 129.99, rating: null, feedbackCount: null, isFeatured: false, condition: "New" },
       { sellerId: "AMZ", sellerLabel: "Amazon.com", isMe: false, fulfillment: "AMZ", price: 127.49, shipping: 0, landedPrice: 127.49, rating: null, feedbackCount: null, isFeatured: true, condition: "New" },
       { sellerId: "S1", sellerLabel: "TravelHouse Direct", isMe: false, fulfillment: "FBA", price: 125.99, shipping: 0, landedPrice: 125.99, rating: 4.6, feedbackCount: 8420, isFeatured: false, condition: "New" },
       { sellerId: "S2", sellerLabel: "LuggageWorld", isMe: false, fulfillment: "FBM", price: 124.00, shipping: 4.95, landedPrice: 128.95, rating: 4.2, feedbackCount: 1203, isFeatured: false, condition: "New" },
@@ -772,7 +772,7 @@ export const pricingDetails: Record<string, PricingDetailMock> = {
       { date: "05/09", myPrice: 89.00, buyBoxPrice: 89.00, lowestCompetitor: 89.99 },
     ],
     offers: [
-      { sellerId: "ME", sellerLabel: "VEXIM (chúng tôi)", isMe: true, fulfillment: "FBA", price: 89.00, shipping: 0, landedPrice: 89.00, rating: null, feedbackCount: null, isFeatured: false, condition: "New" },
+      { sellerId: "ME", sellerLabel: "Shop của bạn", isMe: true, fulfillment: "FBA", price: 89.00, shipping: 0, landedPrice: 89.00, rating: null, feedbackCount: null, isFeatured: false, condition: "New" },
       { sellerId: "S1", sellerLabel: "KitchenPro Deals", isMe: false, fulfillment: "FBA", price: 84.99, shipping: 0, landedPrice: 84.99, rating: 4.8, feedbackCount: 15204, isFeatured: true, condition: "New" },
       { sellerId: "S2", sellerLabel: "HomeGoods US", isMe: false, fulfillment: "FBA", price: 86.95, shipping: 0, landedPrice: 86.95, rating: 4.5, feedbackCount: 3200, isFeatured: false, condition: "New" },
     ],

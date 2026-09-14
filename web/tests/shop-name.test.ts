@@ -18,7 +18,7 @@ const base = (over: Partial<ConnectShopRow>): Pick<ConnectShopRow, "displayName"
 });
 
 test("tên thân thiện do người dùng đặt → giữ nguyên", () => {
-  assert.equal(friendlyShopName(base({ displayName: "VEXIM US - Chính" })), "VEXIM US - Chính");
+  assert.equal(friendlyShopName(base({ displayName: "Cửa hàng ABC US" })), "Cửa hàng ABC US");
   assert.equal(friendlyShopName(base({ displayName: "P1 · US" })), "P1 · US"); // kỹ thuật nhưng vẫn đọc được
 });
 
@@ -81,8 +81,8 @@ test("groupBySeller: cùng seller_id → chung 1 nhóm (P1·US + P2·CA không t
     ...over,
   });
   const groups = groupBySeller([
-    mk({ displayName: "VEXIM US - Chính" }),
-    mk({ displayName: "VEXIM CA - Canada", marketplace: "A2EUQ1WTGCTBG2", marketplaceId: "A2EUQ1WTGCTBG2" }),
+    mk({ displayName: "Cửa hàng ABC US" }),
+    mk({ displayName: "Cửa hàng ABC CA", marketplace: "A2EUQ1WTGCTBG2", marketplaceId: "A2EUQ1WTGCTBG2" }),
   ]);
   assert.equal(groups.length, 1);
   assert.equal(groups[0].shops.length, 2);
