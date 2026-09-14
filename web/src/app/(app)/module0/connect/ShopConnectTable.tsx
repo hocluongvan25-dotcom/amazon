@@ -8,6 +8,7 @@ import {
   connectStatusOf,
   friendlyShopName,
   groupBySeller,
+  MARKETPLACE_META,
   marketplaceLabel,
   type ConnectShopRow,
 } from "@/lib/data/oauth-shared";
@@ -183,6 +184,120 @@ function RenameModal({
   );
 }
 
+/**
+ * Nút "+ Thêm shop / thị trường" (yêu cầu vận hành 09/2026): kết nối shop
+ * thứ 2 hay mở thị trường mới thì TỰ THÊM khi cần — không seed sẵn hàng loạt
+ * dòng "chưa kết nối" gây rối. Chọn marketplace (+ tên tuỳ chọn) → RPC
+ * vexim_add_shop (0030, chỉ admin) tạo dòng production chờ kết nối → bấm
+ * Kết nối để authorize; seller_id + tên thật từ Amazon tự điền sau OAuth.
+ */
+function AddShopModal({
+  open,
+  existingMarketplaces,
+  onClose,
+  onAdded,
+}: {
+  open: boolean;
+  /** marketplace đã có shop production — để gợi ý, không cấm (seller khác vẫn thêm được sau khi kết nối) */
+  existingMarketplaces: Set<string>;
+  onClose: () => void;
+  onAdded: (message: string) => void;
+}) {
+  const [marketplaceId, setMarketplaceId] = useState("ATVPDKIKX0DER");
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!open) return null;
+
+  const submit = async () => {
+    const supabase = createClient();
+    if (!supabase) {
+      setError("Chưa cấu hình Supabase (chế độ demo) — không thêm shop được.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    const { data, error: rpcError } = await supabase.rpc("vexim_add_shop", {
+      p_marketplace: marketplaceId,
+      p_name: name.trim() === "" ? null : name.trim(),
+    });
+    setBusy(false);
+    if (rpcError) {
+      setError(
+        rpcError.code === "PGRST202"
+          ? "Chức năng thêm shop chưa được bật trên database (cần chạy migration 0030)."
+          : rpcError.message.replace(/^\[M0\]\s*/, ""),
+      );
+      return;
+    }
+    const row = (Array.isArray(data) ? data[0] : data) as { message?: string } | undefined;
+    setName("");
+    onAdded(row?.message ?? "Đã thêm shop — bấm Kết nối để authorize với Amazon.");
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-[460px] rounded-[14px] border border-line bg-card p-5 shadow-xl">
+        <div className="text-[16px] font-extrabold">Thêm shop / thị trường</div>
+        <div className="mt-2 text-[12.5px] leading-snug text-soft">
+          Tạo một gian hàng mới để kết nối với Amazon. Sau khi bấm <b>Kết nối</b> và authorize xong,
+          Seller ID và tên cửa hàng thật sẽ được tự động lấy về từ Amazon.
+        </div>
+
+        <label className="mt-3 block text-[12px] font-bold text-soft">
+          Thị trường (marketplace)
+          <select
+            value={marketplaceId}
+            onChange={(e) => setMarketplaceId(e.target.value)}
+            className="mt-1 w-full rounded-[9px] border border-line px-3 py-2 text-[13.5px]"
+          >
+            {Object.entries(MARKETPLACE_META).map(([id, m]) => (
+              <option key={id} value={id}>
+                {m.flag} {m.code} · {m.name}
+                {existingMarketplaces.has(id) ? " — đã có shop ở thị trường này" : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="mt-3 block text-[12px] font-bold text-soft">
+          Tên gian hàng (tuỳ chọn)
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !busy) void submit();
+            }}
+            placeholder='Để trống → tự đặt "Shop US", kết nối xong lấy tên thật từ Amazon'
+            className="mt-1 w-full rounded-[9px] border border-line px-3 py-2 text-[13.5px]"
+            maxLength={80}
+          />
+        </label>
+
+        {error ? <div className="mt-2 text-[12.5px] font-bold text-[#8c1d1d]">{error}</div> : null}
+
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            onClick={onClose}
+            disabled={busy}
+            className="rounded-[8px] border border-line px-4 py-2 text-[13px] font-bold hover:bg-[#f6f7f9]"
+          >
+            Hủy
+          </button>
+          <button
+            onClick={() => void submit()}
+            disabled={busy}
+            className="rounded-[8px] bg-accent px-4 py-2 text-[13px] font-extrabold text-white hover:opacity-90 disabled:opacity-50"
+          >
+            {busy ? "Đang thêm…" : "Thêm shop"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ShopRow({
   s,
   onConnect,
@@ -249,6 +364,8 @@ export function ShopConnectTable({ shops }: Props) {
   const [confirmShop, setConfirmShop] = useState<ConnectShopRow | null>(null);
   const [renameShop, setRenameShop] = useState<ConnectShopRow | null>(null);
   const [showMock, setShowMock] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+  const [addedMessage, setAddedMessage] = useState<string | null>(null);
 
   // Tách production vs mock để tránh rối mắt
   const prodShops = shops.filter((s) => (s.dataSource ?? "mock") !== "mock");
@@ -269,9 +386,37 @@ export function ShopConnectTable({ shops }: Props) {
 
   if (shops.length === 0) {
     return (
-      <div className="rounded-[10px] border border-dashed border-line px-3 py-6 text-center text-[13px] text-soft">
-        Bạn chưa được gán shop nào. Nhờ quản trị viên gán shop ở màn Người dùng & phân quyền.
-      </div>
+      <>
+        <div className="rounded-[10px] border border-dashed border-line px-3 py-6 text-center text-[13px] text-soft">
+          Chưa có gian hàng nào trong hệ thống.
+          <div className="mt-3">
+            <button
+              onClick={() => setAddOpen(true)}
+              className="rounded-[9px] bg-accent px-4 py-2 text-[13px] font-extrabold text-white hover:opacity-90"
+            >
+              + Thêm shop / thị trường
+            </button>
+          </div>
+          <div className="mt-2 text-[11.5px]">
+            (Cần quyền quản trị viên. Nhân viên thường: nhờ Admin gán shop ở màn Người dùng &amp; phân quyền.)
+          </div>
+        </div>
+        <AddShopModal
+          open={addOpen}
+          existingMarketplaces={new Set<string>()}
+          onClose={() => setAddOpen(false)}
+          onAdded={(message) => {
+            setAddOpen(false);
+            setAddedMessage(message);
+            router.refresh();
+          }}
+        />
+        {addedMessage ? (
+          <div className="mt-3 rounded-[10px] border border-line bg-green-soft px-3 py-2.5 text-[12.5px] font-bold text-[#0b7a55]">
+            ✓ {addedMessage}
+          </div>
+        ) : null}
+      </>
     );
   }
 
@@ -294,7 +439,19 @@ export function ShopConnectTable({ shops }: Props) {
         <span className="rounded-full bg-[#eef1f5] px-2.5 py-1 text-soft">
           {prodGroups.length} seller · {prodShops.length} marketplace
         </span>
+        <button
+          onClick={() => setAddOpen(true)}
+          className="ml-auto rounded-[9px] bg-accent px-3.5 py-1.5 text-[12.5px] font-extrabold text-white hover:opacity-90"
+        >
+          + Thêm shop / thị trường
+        </button>
       </div>
+
+      {addedMessage ? (
+        <div className="mb-3 rounded-[10px] border border-line bg-green-soft px-3 py-2.5 text-[12.5px] font-bold text-[#0b7a55]">
+          ✓ {addedMessage}
+        </div>
+      ) : null}
 
       {/* Production shops - grouped by seller */}
       {prodGroups.map((g) => (
@@ -374,6 +531,17 @@ export function ShopConnectTable({ shops }: Props) {
       ) : null}
 
       <ConfirmModal shop={confirmShop} onClose={() => setConfirmShop(null)} onConfirm={handleConfirm} />
+
+      <AddShopModal
+        open={addOpen}
+        existingMarketplaces={new Set(prodShops.map((s) => s.marketplaceId))}
+        onClose={() => setAddOpen(false)}
+        onAdded={(message) => {
+          setAddOpen(false);
+          setAddedMessage(message);
+          router.refresh();
+        }}
+      />
 
       <RenameModal
         shop={renameShop}

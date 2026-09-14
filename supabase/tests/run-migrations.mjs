@@ -4423,6 +4423,51 @@ ok(hc29b.display_name === "VEXIM CA - Canada",
   `0029: tên manual GIỮ NGUYÊN dù trùng chuỗi hardcode — got: ${hc29b.display_name}`);
 await ex(`delete from connections.seller_accounts where id in ('ab290000-0000-4000-8000-000000000001','ab290000-0000-4000-8000-000000000002')`, "dọn fixture 0029");
 
+// ===========================================================================
+console.log("\n=== BƯỚC 29: 0030 — nút '+ Thêm shop / thị trường' trên UI ===");
+// ===========================================================================
+// Yêu cầu vận hành: kết nối shop thứ 2 thì bấm thêm khi cần, không seed sẵn
+// hàng loạt dòng 'chưa kết nối'. RPC vexim_add_shop: chỉ admin, seller_id
+// rỗng chờ OAuth điền, audit shop.add.
+ok(
+  await ex(rd("migrations/0030_add_shop_from_ui.sql"), "0030_add_shop_from_ui.sql"),
+  "0030 chạy sạch (DO-block tự soát: RPC + chặn anon)",
+);
+ok(await ex(rd("migrations/0030_add_shop_from_ui.sql"), "0030 lần 2"), "0030 idempotent");
+
+// Admin thêm shop UK với tên tự đặt → name_source=manual
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+const add30 = await at(`select * from public.vexim_add_shop('A1F83G8C2ARO7P', 'Cửa hàng Mới - UK')`);
+const row30 = await one(`select display_name, seller_id, marketplace, data_source, name_source
+  from connections.seller_accounts where id='${add30.id}'`);
+ok(row30.display_name === "Cửa hàng Mới - UK" && row30.seller_id === "" && row30.data_source === "production" && row30.name_source === "manual",
+  `0030 add_shop (tên tự đặt): production, seller_id rỗng chờ OAuth, manual — got: ${J(row30)} | rpc: ${J(add30)}`);
+await cmp(
+  "0030 add_shop: ghi audit_logs action=shop.add",
+  `select count(*) n from iam.audit_logs where action='shop.add' and seller_account_id='${add30.id}'`,
+  1,
+);
+
+// Không tên → tên mặc định generic 'Shop JP' + name_source=default
+const add30b = await at(`select * from public.vexim_add_shop('A1VC38T7YXB528', null)`);
+const row30b = await one(`select display_name, name_source from connections.seller_accounts where id='${add30b.id}'`);
+ok(row30b.display_name === "Shop JP" && row30b.name_source === "default",
+  `0030 add_shop (không tên): mặc định 'Shop JP' + default — got: ${J(row30b)}`);
+
+// Trùng marketplace đang chờ kết nối (seller_id='') → lỗi thân thiện
+ok(await mustBlock(`select * from public.vexim_add_shop('A1F83G8C2ARO7P', 'Shop UK Thứ Hai')`),
+  "0030 CHẶN: đã có shop UK chờ kết nối — không cho thêm trùng");
+// Tên mã thô + marketplace sai → chặn
+ok(await mustBlock(`select * from public.vexim_add_shop('A1AM78C64UM0Y8', 'ATVPDKIKX0DER')`),
+  "0030 CHẶN: tên shop là mã kỹ thuật thô");
+ok(await mustBlock(`select * from public.vexim_add_shop('không-phải-mã', null)`),
+  "0030 CHẶN: marketplace id không hợp lệ");
+// Anon → chặn
+await ex("select set_config('request.jwt.claim.sub','',false)");
+ok(await mustBlock(`select * from public.vexim_add_shop('A1AM78C64UM0Y8', null)`),
+  "0030 CHẶN: chưa đăng nhập không thêm shop được");
+await ex(`delete from connections.seller_accounts where id in ('${add30.id}','${add30b.id}')`, "dọn fixture 0030");
+
 console.log(`\n${"=".repeat(70)}`);
 console.log(fails === 0 ? "TẤT CẢ PASS" : `${fails} MỤC FAIL`);
 console.log("=".repeat(70));
