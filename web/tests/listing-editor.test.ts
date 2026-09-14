@@ -22,6 +22,7 @@ import {
   buildFeedDocument,
   buildPatchBody,
   deriveCanWrite,
+  filterConnectedShops,
   buildPutBody,
   canTransition,
   checkPublishGate,
@@ -578,4 +579,38 @@ test("deriveCanWrite: org_admin/dept_lead KHÔNG tự có quyền ghi (khớp ia
   assert.equal(deriveCanWrite([{ role: "org_admin" }], []), false);
   assert.equal(deriveCanWrite([{ role: "dept_lead" }], []), false);
   assert.equal(deriveCanWrite([{ role: "org_admin" }], [{ can_write: true }]), true);
+});
+
+/* ============================================================================
+ * FIX 09/2026 — bộ chọn shop chỉ hiện shop ĐÃ KẾT NỐI Amazon (is_active=true).
+ * Shop chưa kết nối soạn xong cũng không publish được → ẩn đi tránh chọn nhầm.
+ * ==========================================================================*/
+
+test("filterConnectedShops: chỉ giữ shop có token is_active=true", () => {
+  const shops = [
+    { sellerAccountId: "s1", shop: "Shop US (đã kết nối)" },
+    { sellerAccountId: "s2", shop: "Shop CA (chưa kết nối)" },
+    { sellerAccountId: "s3", shop: "Shop UK (token hết hạn)" },
+  ];
+  const tokens = [
+    { seller_account_id: "s1", is_active: true },
+    { seller_account_id: "s3", is_active: false }, // hết hạn/thu hồi → ẩn
+    // s2 không có dòng token → chưa từng kết nối → ẩn
+  ];
+  assert.deepEqual(filterConnectedShops(shops, tokens), [
+    { sellerAccountId: "s1", shop: "Shop US (đã kết nối)" },
+  ]);
+});
+
+test("filterConnectedShops: KHÔNG có dòng token nào → giữ nguyên (DB cũ chưa chạy 0020, không chặn oan)", () => {
+  const shops = [{ sellerAccountId: "s1", shop: "Shop US" }];
+  assert.deepEqual(filterConnectedShops(shops, []), shops);
+});
+
+test("filterConnectedShops: mọi token đều inactive → danh sách rỗng (buộc đi kết nối lại)", () => {
+  const shops = [{ sellerAccountId: "s1", shop: "Shop US" }];
+  assert.deepEqual(
+    filterConnectedShops(shops, [{ seller_account_id: "s1", is_active: false }]),
+    [],
+  );
 });

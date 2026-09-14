@@ -17,6 +17,7 @@ import { createClient } from "@/lib/supabase/server";
 import {
   deriveCanWrite,
   diffPayload,
+  filterConnectedShops,
   validateListingDraft,
   type DraftStatus,
   type ListingDraftPayload,
@@ -468,9 +469,28 @@ export async function readShopOptions(): Promise<{ sellerAccountId: string; shop
     .select("seller_account_id,shop,status,data_source")
     .order("shop");
   if (!error && data) {
-    return (data as { seller_account_id: string; shop: string; status?: string | null }[])
+    const shops = (data as { seller_account_id: string; shop: string; status?: string | null }[])
       .filter((r) => r.status !== "revoked")
       .map((r) => ({ sellerAccountId: r.seller_account_id, shop: r.shop }));
+
+    // FIX 09/2026: CHỈ hiện shop ĐÃ KẾT NỐI Amazon (token OAuth còn hiệu lực).
+    // Publish đi qua SP-API bằng refresh token per-shop — shop chưa kết nối
+    // thì soạn xong cũng không đăng được; hiện ra chỉ gây chọn nhầm.
+    // Đọc view vexim_oauth_connections (0020) — cùng nguồn với trang Kết nối shop.
+    try {
+      const tokens = await client
+        .from("vexim_oauth_connections")
+        .select("seller_account_id,is_active");
+      if (!tokens.error && tokens.data) {
+        return filterConnectedShops(
+          shops,
+          tokens.data as { seller_account_id: string; is_active?: boolean | null }[],
+        );
+      }
+    } catch {
+      // View chưa có (DB cũ chưa chạy 0020) — giữ nguyên danh sách, không chặn oan.
+    }
+    return shops;
   }
 
   // Fallback: DB chưa có view vexim_shops (chưa chạy 0024) — cách cũ,

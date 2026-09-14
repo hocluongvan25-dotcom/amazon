@@ -147,13 +147,18 @@ export async function LiveListingDraftList() {
         </form>
         {shops.length === 0 ? (
           <div className="mt-2 text-[12px] text-[#8a5602]">
-            Bạn chưa có quyền với shop nào (hoặc chưa có shop trong hệ thống) — kiểm tra trang{" "}
+            Chưa có shop nào sẵn sàng để soạn listing. Bộ chọn này chỉ hiện shop <b>đã kết nối Amazon</b>{" "}
+            (có token còn hiệu lực) — vì publish cần gọi SP-API bằng token của chính shop đó. Vào trang{" "}
             <Link className="font-bold underline" href="/module0/connect">
               Kết nối shop
             </Link>{" "}
-            hoặc nhờ Admin gán quyền shop cho bạn.
+            để kết nối, hoặc nhờ Admin gán quyền shop cho bạn.
           </div>
-        ) : null}
+        ) : (
+          <div className="mt-2 text-[11.5px] text-soft">
+            Chỉ hiện shop đã kết nối Amazon (token còn hiệu lực) — shop chưa kết nối không soạn/publish được.
+          </div>
+        )}
       </Panel>
 
       <Panel title="Bản nháp listing" hint={`${drafts.length} bản nháp`}>

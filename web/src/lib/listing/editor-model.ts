@@ -1011,6 +1011,28 @@ export function deriveCanWrite(
   return assignments.some((row) => row.can_write === true);
 }
 
+/**
+ * FIX 09/2026: bộ chọn shop ở màn soạn listing CHỈ hiện shop đã kết nối
+ * Amazon (có refresh token còn hiệu lực — is_active=true trong view
+ * vexim_oauth_connections). Lý do: publish đi qua SP-API bằng token
+ * per-shop; shop chưa kết nối thì soạn xong cũng không đăng được — hiện
+ * ra chỉ gây chọn nhầm.
+ *
+ * An toàn dữ liệu cũ: nếu KHÔNG có dòng token nào (DB chưa chạy 0020 /
+ * chưa từng kết nối shop nào) → trả nguyên danh sách kèm nhãn, không chặn
+ * oan toàn bộ (người vận hành còn thấy đường vào trang Kết nối shop).
+ */
+export function filterConnectedShops(
+  shops: { sellerAccountId: string; shop: string }[],
+  tokens: { seller_account_id: string; is_active?: boolean | null }[],
+): { sellerAccountId: string; shop: string }[] {
+  if (tokens.length === 0) return shops;
+  const active = new Set(
+    tokens.filter((t) => t.is_active === true).map((t) => String(t.seller_account_id)),
+  );
+  return shops.filter((s) => active.has(s.sellerAccountId));
+}
+
 export type DraftLike = {
   status: DraftStatus;
   createdBy?: string | null;

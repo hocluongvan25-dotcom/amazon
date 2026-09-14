@@ -97,7 +97,23 @@ async function LiveListingEditorNew({
     readShopOptions(),
     readProductTypeSchema({ marketplaceId, productType, requirements: "LISTING" }),
   ]);
-  const shop = shops.find((s) => s.sellerAccountId === sellerAccountId)?.shop ?? sellerAccountId;
+  const found = shops.find((s) => s.sellerAccountId === sellerAccountId);
+  const shop = found?.shop ?? sellerAccountId;
+
+  // readShopOptions chỉ trả shop ĐÃ KẾT NỐI — vào thẳng URL với shop chưa
+  // kết nối (không qua dropdown) thì chặn ở đây, tránh soạn xong không publish được.
+  if (!found) {
+    return (
+      <Panel title="Shop chưa sẵn sàng để soạn listing" hint="cần kết nối Amazon trước">
+        <div className="text-[13px] text-soft">
+          Shop này chưa kết nối Amazon (chưa có token OAuth còn hiệu lực) hoặc bạn không có quyền xem.
+          Publish listing cần gọi SP-API bằng token của chính shop đó — hãy vào trang{" "}
+          <a className="font-bold underline" href="/module0/connect">Kết nối shop</a> để kết nối trước,
+          rồi quay lại đây soạn nội dung.
+        </div>
+      </Panel>
+    );
+  }
 
   return (
     <ListingEditor
