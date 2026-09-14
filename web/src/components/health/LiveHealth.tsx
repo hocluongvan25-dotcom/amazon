@@ -9,7 +9,15 @@ export async function LiveHealth({ violations = false }: { violations?: boolean 
       sub="SUPABASE · dữ liệu trong phạm vi RLS của bạn"
       desc="Sức khỏe tài khoản bán hàng: điểm vi phạm và chỉ số hiệu suất so với ngưỡng Amazon yêu cầu — phát hiện rủi ro trước khi tài khoản bị ảnh hưởng." />
     <div className="mb-4 flex gap-4 text-sm text-accent-ink"><a href="/health">Sức khỏe theo shop</a><a href="/health/violations">Vấn đề đang mở</a></div>
-    {!result.ok ? <Panel title="Không tải được dữ liệu"><p role="alert">Không thể đọc Account Health từ Supabase. Hãy kiểm tra migration 0010/0011, quyền SELECT và RLS hoặc tải lại trang. Không sử dụng dữ liệu demo thay thế.</p></Panel> : <>
+    {!result.ok ? <Panel title="Không tải được dữ liệu">
+      <p role="alert">Không thể đọc Account Health từ Supabase. Không sử dụng dữ liệu demo thay thế.</p>
+      <div className="mt-2 rounded-[8px] border border-line bg-[#fafbfc] px-3 py-2 text-[12px]">
+        <div className="font-bold text-soft">Lỗi từ Supabase:</div>
+        <div className="mt-0.5 break-all font-mono text-[11.5px]">{result.error}</div>
+        <div className="mt-2 font-bold text-soft">Hướng xử lý:</div>
+        <div className="mt-0.5">{result.hint}</div>
+      </div>
+    </Panel> : <>
       <KpiGrid>
         <KpiCard label="Shop có snapshot" value={String(new Set(result.snapshots.map(s => s.seller_account_id)).size)} sub="Trong phạm vi được phép đọc" />
         <KpiCard label="Shop / marketplace xanh" value={String(result.snapshots.filter(s => s.tone === "green").length)} sub="Snapshot mới nhất mỗi marketplace" />

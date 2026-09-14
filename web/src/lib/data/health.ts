@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { readAll, sortIssues, type HealthSnapshot, type HealthIssue } from "./health-model";
+import { healthErrorHint, readAll, sortIssues, type HealthSnapshot, type HealthIssue } from "./health-model";
 
 /** Session-scoped anon client only; underlying table RLS remains authoritative. */
 export async function getLiveHealth() {
@@ -15,8 +15,11 @@ export async function getLiveHealth() {
         .order("id").range(from, to)),
     ]);
     return { ok: true as const, snapshots, issues: sortIssues(issues) };
-  } catch {
-    // Never expose raw database errors or fall back to demo data.
-    return { ok: false as const };
+  } catch (e) {
+    // KHÔNG fallback demo. Nhưng phải trả CHẨN ĐOÁN được: nuốt lỗi trắng thì
+    // màn hình chỉ nói "không tải được" và không ai biết sửa ở đâu (PGRST205 =
+    // thiếu view/migration; 42501 = thiếu quyền; JWT = phiên đăng nhập hỏng).
+    const raw = e instanceof Error ? e.message : String(e);
+    return { ok: false as const, error: raw, hint: healthErrorHint(raw) };
   }
 }

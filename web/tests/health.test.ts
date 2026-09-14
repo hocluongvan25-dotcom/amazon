@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { rateText, healthTone, sortIssues, readAll, type HealthIssue } from "../src/lib/data/health-model.ts";
+import { rateText, healthTone, sortIssues, readAll, healthErrorHint, type HealthIssue } from "../src/lib/data/health-model.ts";
 
 test("missing rates stay unknown; zero is a real observation", () => {
   for (const input of [null, {}, [], [{ key: "odr", rate: null }], [{ key: "odr", rate: "0" }]]) assert.equal(rateText(input, "odr"), "—");
@@ -28,4 +28,23 @@ test("pagination includes records beyond PostgREST default cap", async () => {
   const source = Array.from({ length: 1201 }, (_, id) => ({ id }));
   const rows = await readAll(async (from, to) => ({ data: source.slice(from, to + 1), error: null }));
   assert.deepEqual(rows, source);
+});
+test("readAll: giữ mã lỗi Supabase trong message (PGRST205, 42501) để chẩn đoán được", async () => {
+  await assert.rejects(
+    readAll(async () => ({ data: null, error: { code: "PGRST205", message: "Could not find the table" } })),
+    /PGRST205.*Could not find the table/,
+  );
+  await assert.rejects(
+    readAll(async () => ({ data: null, error: { code: "42501", message: "permission denied for view vexim_shop_health" } })),
+    /42501.*permission denied/,
+  );
+});
+test("healthErrorHint: PGRST205 → thiếu migration; 42501 → nêu cả khả năng phiên anon; lỗi lạ → hướng dẫn chung", () => {
+  assert.match(healthErrorHint("PGRST205 · Could not find the table"), /supabase db push|migration 0010/);
+  assert.match(healthErrorHint("42501 · permission denied for view"), /đăng xuất\/đăng nhập lại/);
+  assert.match(healthErrorHint("42501 · permission denied for view"), /GRANT/);
+  assert.match(healthErrorHint("JWT expired"), /đăng nhập lại/);
+  assert.match(healthErrorHint("Supabase not configured"), /NEXT_PUBLIC_SUPABASE_URL/);
+  assert.match(healthErrorHint("fetch failed"), /Không kết nối được/);
+  assert.match(healthErrorHint("something weird"), /RLS\/GRANT/);
 });
