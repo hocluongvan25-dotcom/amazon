@@ -123,3 +123,23 @@ test("badge: NAV KHÔNG còn số mock, và badge chỉ hiện khi có số TH�
   assert.equal(badgeOf({ "/ppc": Number.NaN }, "/ppc"), null);
   assert.equal(badgeOf({ "/ppc": 2.7 }, "/ppc"), 2);
 });
+
+/* ============================================================================
+ * Topbar SUPABASE MODE: vai trò thật từ iam.role_assignments — không hiện
+ * nhãn persona demo ("Ban điều hành VEXIM") hay "Shop: Tất cả (14)" mock.
+ * ==========================================================================*/
+import { pickTopRole, ROLE_LABELS } from "../src/lib/roles.ts";
+
+test("pickTopRole: chọn vai trò CAO NHẤT khi user có nhiều role", () => {
+  assert.equal(pickTopRole(["operator", "super_admin"]), ROLE_LABELS.super_admin);
+  assert.equal(pickTopRole(["analyst", "dept_lead"]), ROLE_LABELS.dept_lead);
+  assert.equal(pickTopRole(["client_viewer"]), ROLE_LABELS.client_viewer);
+});
+
+test("pickTopRole: không role → null (Topbar ẩn nhãn, không bịa 'Ban điều hành')", () => {
+  assert.equal(pickTopRole([]), null);
+});
+
+test("pickTopRole: role lạ ngoài enum → trả nguyên văn (không map bậy)", () => {
+  assert.equal(pickTopRole(["future_role"]), "future_role");
+});

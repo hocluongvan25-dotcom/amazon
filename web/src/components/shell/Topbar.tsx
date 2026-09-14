@@ -3,15 +3,28 @@
 import Link from "next/link";
 import { PERSONAS, type PersonaKey } from "@/lib/roles";
 import type { Session } from "@/lib/auth/session";
+import type { TopbarScope } from "@/lib/data/topbar-scope";
 
 export default function Topbar({
   session,
   bellSlot,
+  scope,
 }: {
   session: Session;
   bellSlot: React.ReactNode;
+  /** Số shop thật đếm từ DB (SUPABASE MODE). Thiếu ⇒ ẩn số, không hiện mock. */
+  scope?: TopbarScope | null;
 }) {
   const persona = PERSONAS[session.persona];
+  const isDemo = session.mode === "demo";
+
+  // SUPABASE MODE: chỉ hiện số ĐẾM ĐƯỢC từ DB qua RLS — tuyệt đối không dùng
+  // chuỗi mock của persona ("Tất cả (14)" là dữ liệu wireframe DEMO).
+  const shopLabel = isDemo
+    ? persona.shop
+    : scope?.shopCount == null
+      ? "Shop: —"
+      : `Shop: ${scope.shopCount}${scope.productionCount != null ? ` (${scope.productionCount} production)` : ""}`;
 
   function switchPersona(next: string) {
     // Chỉ dùng ở DEMO MODE — kiểm chứng phân quyền theo phòng
@@ -41,17 +54,30 @@ export default function Topbar({
             ))}
           </select>
         ) : (
-          <span className="shrink-0 rounded-[9px] border border-accent bg-accent-soft px-2.5 py-[7px] text-[12.5px] font-extrabold text-accent-ink">
-            {persona.label}
-          </span>
+          // Vai trò THẬT từ iam.role_assignments — không hiện nhãn persona demo
+          // ("Ban điều hành VEXIM" là mock wireframe). Không đọc được ⇒ ẩn hẳn.
+          scope?.roleLabel ? (
+            <span className="shrink-0 rounded-[9px] border border-accent bg-accent-soft px-2.5 py-[7px] text-[12.5px] font-extrabold text-accent-ink">
+              {scope.roleLabel}
+            </span>
+          ) : null
         )}
 
-        <select className="shrink-0 rounded-[9px] border border-line bg-card px-2.5 py-[7px] text-[12.5px] font-semibold text-muted">
-          <option>{persona.org}</option>
-        </select>
-        <select className="shrink-0 rounded-[9px] border border-line bg-card px-2.5 py-[7px] text-[12.5px] font-semibold text-muted">
-          <option>{persona.shop}</option>
-        </select>
+        {isDemo ? (
+          // Bộ lọc khách hàng chỉ có nghĩa ở DEMO (multi-tenant mô phỏng).
+          // SUPABASE MODE: RLS đã lọc sẵn theo người đăng nhập — không hiện
+          // dropdown giả tạo cảm giác "chọn được".
+          <select className="shrink-0 rounded-[9px] border border-line bg-card px-2.5 py-[7px] text-[12.5px] font-semibold text-muted">
+            <option>{persona.org}</option>
+          </select>
+        ) : null}
+        <Link
+          href="/module0/connect"
+          title="Danh sách shop bạn được phép đọc (RLS) — bấm để mở Kết nối shop"
+          className="shrink-0 rounded-[9px] border border-line bg-card px-2.5 py-[7px] text-[12.5px] font-semibold text-muted hover:border-accent"
+        >
+          {shopLabel}
+        </Link>
         <select className="hidden shrink-0 rounded-[9px] border border-line bg-card px-2.5 py-[7px] text-[12.5px] font-semibold text-muted md:block">
           <option>Hôm qua</option>
           <option>7 ngày</option>
@@ -65,7 +91,7 @@ export default function Topbar({
             title="Trang cá nhân"
             className="grid h-[34px] w-[34px] place-items-center rounded-full bg-[#dfe6f3] text-[12px] font-extrabold text-[#3c4a63] transition hover:ring-2 hover:ring-accent"
           >
-            {persona.avatar}
+            {isDemo ? persona.avatar : (session.email ?? "?").slice(0, 2).toUpperCase()}
           </Link>
         </div>
       </div>
@@ -78,8 +104,9 @@ export default function Topbar({
           </>
         ) : (
           <>
-            🔒 Đăng nhập: <b className="text-blue">{session.email ?? persona.label}</b> ·{" "}
-            <span className="text-soft">SUPABASE MODE</span>
+            🔒 Đăng nhập: <b className="text-blue">{session.email ?? "?"}</b>
+            {scope?.roleLabel ? <> · vai trò <b className="text-blue">{scope.roleLabel}</b></> : null} ·{" "}
+            <span className="text-soft">SUPABASE MODE · phạm vi dữ liệu theo RLS</span>
           </>
         )}
       </div>

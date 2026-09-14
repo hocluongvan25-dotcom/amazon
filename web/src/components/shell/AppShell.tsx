@@ -3,22 +3,26 @@ import Sidebar from "@/components/shell/Sidebar";
 import Topbar from "@/components/shell/Topbar";
 import type { Session } from "@/lib/auth/session";
 import type { NavBadges } from "@/lib/roles";
+import type { TopbarScope } from "@/lib/data/topbar-scope";
 
 export default function AppShell({
   session,
   bellSlot,
   badges,
+  scope,
   children,
 }: {
   session: Session;
   bellSlot: ReactNode;
   /** Số việc đang chờ xử lý theo từng màn — đếm thật từ DB (rỗng = không hiện badge). */
   badges?: NavBadges;
+  /** Số shop + vai trò thật cho Topbar (SUPABASE MODE) — null/undefined = ẩn số. */
+  scope?: TopbarScope | null;
   children: ReactNode;
 }) {
   return (
     <div className="min-h-screen">
-      <Topbar session={session} bellSlot={bellSlot} />
+      <Topbar session={session} bellSlot={bellSlot} scope={scope} />
       <div className="mx-auto grid max-w-[1440px] grid-cols-1 lg:grid-cols-[242px_1fr]">
         <div className="hidden lg:block">
           <Sidebar persona={session.persona} badges={badges} />

@@ -168,3 +168,25 @@ export function navFor(persona: PersonaKey) {
     items: g.items.filter((it) => it.personas.includes(persona)),
   })).filter((g) => g.items.length > 0);
 }
+
+/* ============================================================================
+ * VAI TRÒ THẬT (SUPABASE MODE) — nhãn cho iam.app_role, dùng ở Topbar.
+ * Pure function để test được bằng node thuần (không kéo next/headers).
+ * ==========================================================================*/
+
+/** Nhãn tiếng Việt cho iam.app_role (enum trong migration 0001). */
+export const ROLE_LABELS: Record<string, string> = {
+  super_admin: "Quản trị hệ thống",
+  org_admin: "Quản trị tổ chức",
+  dept_lead: "Trưởng phòng",
+  operator: "Nhân viên vận hành",
+  analyst: "Phân tích dữ liệu",
+  client_viewer: "Khách hàng (chỉ xem)",
+};
+
+/** Vai trò cao nhất khi user có nhiều role — hiện đúng 1 nhãn trên Topbar. */
+export function pickTopRole(roles: string[]): string | null {
+  const order = ["super_admin", "org_admin", "dept_lead", "operator", "analyst", "client_viewer"];
+  for (const r of order) if (roles.includes(r)) return ROLE_LABELS[r];
+  return roles.length > 0 ? roles[0] : null;
+}
