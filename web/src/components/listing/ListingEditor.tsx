@@ -246,7 +246,11 @@ export function ListingEditor(props: ListingEditorProps) {
             {busy === "save" ? "Đang lưu…" : "Lưu nháp"}
           </button>
 
-          {actions.map((a) => (
+          {/* FIX 09/2026: bỏ action "save" khỏi vòng lặp — nút "Lưu nháp" cứng
+              phía trên đã đảm nhiệm (handleSave gửi KÈM nội dung form). Trước
+              đây render cả hai → màn hình có 2 nút Lưu nháp, và nút thứ hai đi
+              đường handleAction (không gửi payload) nên lưu không có nội dung. */}
+          {actions.filter((a) => a.action !== "save").map((a) => (
             <button
               key={a.action}
               type="button"
