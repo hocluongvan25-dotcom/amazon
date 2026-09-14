@@ -264,6 +264,32 @@ export type AdsClientOptions = {
   sleep?: (ms: number) => Promise<void>;
 };
 
+/**
+ * Vendor media type BẮT BUỘC cho từng resource SP v3 — theo Postman collection
+ * chính thức (amzn/ads-advanced-tools-docs). Amazon docs ghi rõ: gửi
+ * Content-Type `application/json` cho các endpoint /sp/* có thể bị
+ * 415 UNSUPPORTED_MEDIA_TYPE. Cả Content-Type LẪN Accept phải là vendor type.
+ * Path không có trong bảng → fallback application/json (vd /v2/profiles).
+ */
+export function spV3MediaType(path: string): string | null {
+  // Thứ tự quan trọng: prefix dài (campaignNegative*) phải đứng trước prefix ngắn.
+  const TABLE: [string, string][] = [
+    ["/sp/campaignNegativeKeywords", "application/vnd.spCampaignNegativeKeyword.v3+json"],
+    ["/sp/campaignNegativeTargets", "application/vnd.spCampaignNegativeTargetingClause.v3+json"],
+    ["/sp/negativeKeywords", "application/vnd.spNegativeKeyword.v3+json"],
+    ["/sp/negativeTargets", "application/vnd.spNegativeTargetingClause.v3+json"],
+    ["/sp/campaigns", "application/vnd.spCampaign.v3+json"],
+    ["/sp/adGroups", "application/vnd.spAdGroup.v3+json"],
+    ["/sp/productAds", "application/vnd.spProductAd.v3+json"],
+    ["/sp/keywords", "application/vnd.spKeyword.v3+json"],
+    ["/sp/targets", "application/vnd.spTargetingClause.v3+json"],
+  ];
+  for (const [prefix, mediaType] of TABLE) {
+    if (path === prefix || path.startsWith(`${prefix}/`)) return mediaType;
+  }
+  return null;
+}
+
 export class AdsClient {
   private readonly host: string;
   private readonly clientId: string;
@@ -516,6 +542,14 @@ export class AdsClient {
     let lastWait = 1000;
     let lastError: Error | null = null;
 
+    // Media type theo docs chính thức (Postman collection amzn/ads-advanced-tools-docs):
+    // các endpoint /sp/* dùng vendor type (application/vnd.spCampaign.v3+json…)
+    // cho CẢ Content-Type lẫn Accept — gửi application/json có thể bị
+    // 415 UNSUPPORTED_MEDIA_TYPE. opts.contentType (Reporting v3) ưu tiên hơn.
+    const spMediaType = spV3MediaType(path);
+    const contentType = opts.contentType ?? spMediaType ?? "application/json";
+    const accept = spMediaType ?? "application/json";
+
     for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
       const token = await this.lwa.getAccessToken();
       const res = await this.fetchFn(`${this.host}${path}`, {
@@ -524,11 +558,9 @@ export class AdsClient {
           Authorization: `Bearer ${token}`,
           "Amazon-Advertising-API-ClientId": this.clientId,
           ...(opts.profileId ? { "Amazon-Advertising-API-Scope": opts.profileId } : {}),
-          Accept: "application/json",
+          Accept: accept,
           "User-Agent": USER_AGENT,
-          ...(body !== undefined
-            ? { "Content-Type": opts.contentType ?? "application/json" }
-            : {}),
+          ...(body !== undefined ? { "Content-Type": contentType } : {}),
         },
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       });

@@ -160,7 +160,10 @@ export const ADS_REPORT_SPECS: Record<AdsReportKind, AdsReportSpec> = {
     kind: "purchased-products",
     reportTypeId: "spPurchasedProduct",
     adProduct: "SPONSORED_PRODUCTS",
-    groupBy: ["purchasedAsin"],
+    // Theo docs chính thức Reporting v3 (report type spPurchasedProduct):
+    // groupBy hợp lệ là ["asin"] — KHÔNG phải ["purchasedAsin"] (tên cột ≠ tên
+    // groupBy; gửi sai Amazon trả 400). Xem amzn/ads-advanced-tools-docs #340.
+    groupBy: ["asin"],
     columns: [
       "date",
       "campaignId",
