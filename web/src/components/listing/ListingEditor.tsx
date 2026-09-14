@@ -7,7 +7,7 @@
  * server khi lưu — snapshot `validation` trong DB là cổng chặn của trigger 0014.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { Chip, Panel } from "@/components/ui";
@@ -418,6 +418,68 @@ function IssueRow({ issue }: { issue: ValidationIssue }) {
 /* Điều khiển từng trường                                             */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Auto-Preview ảnh cho ô nhập URL: dán link xong là thấy khung xem trước ngay
+ * bên dưới. Trình duyệt tự tải ảnh qua thẻ <img>; nếu link hỏng hoặc không
+ * phải ảnh → onError → báo lỗi tiếng Việt. Debounce 500ms để không tải lại
+ * ảnh trên từng phím gõ.
+ */
+function ImageUrlPreview({ url }: { url: string }) {
+  const [src, setSrc] = useState("");
+  const [status, setStatus] = useState<"idle" | "loading" | "ok" | "error">("idle");
+
+  useEffect(() => {
+    const trimmed = url.trim();
+    if (!trimmed) {
+      setSrc("");
+      setStatus("idle");
+      return;
+    }
+    // Không phải http(s) thì khỏi cho <img> thử — báo lỗi luôn.
+    if (!/^https?:\/\/.+/i.test(trimmed)) {
+      setSrc("");
+      setStatus("error");
+      return;
+    }
+    setStatus("loading");
+    const t = setTimeout(() => setSrc(trimmed), 500);
+    return () => clearTimeout(t);
+  }, [url]);
+
+  if (status === "idle") return null;
+
+  if (status === "error") {
+    return (
+      <div className="mt-1 rounded-[8px] border border-[#f3d6d6] bg-[#fdf5f5] px-2.5 py-1.5 text-[11.5px] font-bold text-[#a13c3c]">
+        Link ảnh không hợp lệ/không hiển thị được
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-1 flex items-center gap-2">
+      <div className="flex h-[72px] w-[72px] items-center justify-center overflow-hidden rounded-[8px] border border-line bg-[#fafbfc]">
+        {src ? (
+          // eslint-disable-next-line @next/next/no-img-element -- URL ảnh ngoài (Amazon CDN…), không qua next/image
+          <img
+            key={src}
+            src={src}
+            alt="Xem trước ảnh listing"
+            className="h-full w-full object-contain"
+            onLoad={() => setStatus("ok")}
+            onError={() => setStatus("error")}
+          />
+        ) : null}
+      </div>
+      {status === "loading" ? (
+        <span className="text-[11px] text-soft">đang tải xem trước…</span>
+      ) : (
+        <span className="text-[11px] font-bold text-[#0b7a55]">✓ ảnh hiển thị được</span>
+      )}
+    </div>
+  );
+}
+
 function FieldControl({
   field,
   payload,
@@ -556,13 +618,16 @@ function FieldControl({
                   <span className="mt-2 w-[92px] text-[11px] font-semibold text-soft">
                     {attribute === "main_product_image_locator" ? "Ảnh chính" : `Ảnh ${attribute.split("_").pop()}`}
                   </span>
-                  <input
-                    className={inputCls}
-                    disabled={disabled}
-                    placeholder="https://m.media-amazon.com/images/I/....jpg"
-                    value={urls[0] ?? ""}
-                    onChange={(e) => onChange(setImageUrls(payload, attribute, e.target.value ? [e.target.value] : []))}
-                  />
+                  <div className="min-w-0 flex-1">
+                    <input
+                      className={inputCls}
+                      disabled={disabled}
+                      placeholder="https://m.media-amazon.com/images/I/....jpg"
+                      value={urls[0] ?? ""}
+                      onChange={(e) => onChange(setImageUrls(payload, attribute, e.target.value ? [e.target.value] : []))}
+                    />
+                    <ImageUrlPreview url={urls[0] ?? ""} />
+                  </div>
                 </div>
               );
             })}
