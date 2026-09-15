@@ -250,10 +250,10 @@ export function CollectionPanel({
                   <th className={tableCls.th}>#</th>
                   <th className={tableCls.th}>ASIN / brand</th>
                   <th className={`${tableCls.th} text-right`}>Giá</th>
-                  <th className={tableCls.th} text-right>Sao</th>
-                  <th className={tableCls.th} text-right>Lượt đánh giá</th>
-                  <th className={tableCls.th} text-right>BSR</th>
-                  <th className={tableCls.th} text-right>Đơn/tháng ước lượng</th>
+                  <th className={`${tableCls.th} text-right`}>Sao</th>
+                  <th className={`${tableCls.th} text-right`}>Lượt đánh giá</th>
+                  <th className={`${tableCls.th} text-right`}>BSR</th>
+                  <th className={`${tableCls.th} text-right`}>Đơn/tháng ước lượng</th>
                   <th className={tableCls.th}>Buybox</th>
                 </tr>
               </thead>
