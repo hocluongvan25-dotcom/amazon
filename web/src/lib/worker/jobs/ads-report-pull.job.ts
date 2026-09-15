@@ -36,6 +36,7 @@ import {
   type AdsImportOutcome,
   type AdsReportKind,
 } from "../ads/registry.ts";
+import { buildNegativeSuggestions, type SearchTermDailyRow } from "../ads/suggest.ts";
 
 export type AdsPullShop = {
   id: string;
@@ -80,6 +81,8 @@ export type AdsOutcome = {
   alertsFired: number;
   /** số dòng ads_spend đã lấp (chỉ report advertised-products) */
   spendApplied: number;
+  /** số gợi ý negative đã sinh/cập nhật cho A3 (chỉ report search-terms) */
+  suggestionsBuilt: number;
   needsReauth: boolean;
 };
 
@@ -213,6 +216,7 @@ export async function runAdsReportPull(opts: AdsPullOptions): Promise<AdsPullRes
         (o.counts ? `           ${fmtCounts(o.counts)}\n` : "") +
         (o.alertsFired > 0 ? `           ⚠ đã tạo/cập nhật ${o.alertsFired} cảnh báo theo rule ads\n` : "") +
         (o.spendApplied > 0 ? `           ↳ lấp ads_spend cho ${o.spendApplied} dòng F4\n` : "") +
+        (o.suggestionsBuilt > 0 ? `           ↳ sinh ${o.suggestionsBuilt} gợi ý negative cho A3 (SOP-04)\n` : "") +
         (o.warnings.length > 0 ? o.warnings.map((w) => `           ⚠ ${w}\n`).join("") : ""),
     );
     if (o.action === "failed" || o.action === "throttled") {
@@ -239,6 +243,7 @@ export async function runAdsReportPull(opts: AdsPullOptions): Promise<AdsPullRes
     bytes: 0,
     alertsFired: 0,
     spendApplied: 0,
+    suggestionsBuilt: 0,
     needsReauth: false,
   });
 
@@ -450,6 +455,32 @@ export async function runAdsReportPull(opts: AdsPullOptions): Promise<AdsPullRes
       const biz = await runCampaignBusiness(shop, parsed.rows);
       out.alertsFired = biz.alerts;
       out.warnings.push(...biz.warnings);
+    }
+
+    // A3 · SOP-04: nhập search term xong thì SINH gợi ý negative luôn — đây là
+    // mắt xích từng bị thiếu (bảng + RPC + UI duyệt đều có sẵn nhưng không ai
+    // sinh gợi ý → cột "Gợi ý" trên màn A3 vĩnh viễn trống).
+    if (kind === "search-terms") {
+      try {
+        const suggestions = buildNegativeSuggestions(
+          parsed.rows as unknown as SearchTermDailyRow[],
+        );
+        if (suggestions.length > 0) {
+          const c = await opts.db.upsertAdsSuggestions(shop.id, suggestions);
+          out.suggestionsBuilt = c.inserted + c.updated;
+          if (c.kept > 0) {
+            out.warnings.push(
+              `${c.kept} gợi ý đã được con người quyết trước đó — giữ nguyên, không ghi đè.`,
+            );
+          }
+        } else {
+          out.suggestionsBuilt = 0;
+        }
+      } catch (e) {
+        out.warnings.push(
+          `không sinh được gợi ý negative (${(e as Error).message.split("\n")[0]}) — dữ liệu metrics vẫn đã nhập.`,
+        );
+      }
     }
 
     if (kind === "advertised-products" && applySpend && period.start && period.end) {
