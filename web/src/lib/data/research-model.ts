@@ -10,7 +10,7 @@ import {
   type AssessmentAssumptions,
   type AssessmentResult,
   type VerdictCode,
-} from "@/lib/research/domain";
+} from "../research/domain/index.ts";
 
 /* ------------------------------- Row danh sách ------------------------------ */
 
