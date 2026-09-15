@@ -13,7 +13,11 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { RainforestClient } from "@/lib/intelligence";
-import { parseProductCollectionResults } from "@/lib/worker";
+import {
+  SupabaseResearchPort,
+  applyCompetitionScoring,
+  parseProductCollectionResults,
+} from "@/lib/worker";
 
 export const dynamic = "force-dynamic";
 
@@ -65,33 +69,35 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, matched: false });
   }
 
+  const port = new SupabaseResearchPort(sb);
   try {
     const client = new RainforestClient({ apiKey });
     const resultJson = await client.getCollection(collectionId);
     const rows = parseProductCollectionResults(resultJson, "rainforest");
 
-    const { data: upserted, error } = await sb.rpc("vexim_research_worker_upsert_competitors", {
-      p_run_id: run.id,
-      p_rows: rows,
-    });
-    if (error) throw error;
+    const { rows: written } = await port.upsertCompetitors(run.id, rows);
 
     const credits =
       (resultJson as { collection?: { credits?: number; credits_used?: number } }).collection?.credits ??
       (resultJson as { collection?: { credits_used?: number } }).collection?.credits_used ??
       rows.length * 3;
 
-    const { error: finErr } = await sb.rpc("vexim_research_worker_finish_run", {
-      p_run_id: run.id,
-      p_status: rows.length ? "done" : "no_data",
-      p_credits_used: Number(credits) || 0,
-      p_external_id: collectionId,
-      p_error: null,
-      p_raw: null,
+    await port.finishRun({
+      runId: run.id,
+      status: rows.length ? "done" : "no_data",
+      creditsUsed: Number(credits) || 0,
+      externalId: collectionId,
     });
-    if (finErr) throw finErr;
 
-    return NextResponse.json({ ok: true, rows: (upserted as { rows?: number })?.rows ?? rows.length });
+    // G3: chấm trụ cạnh tranh từ snapshot SERP + collection vừa về.
+    let scoring: { scored: boolean; message: string } | null = null;
+    try {
+      scoring = await applyCompetitionScoring(run.assessment_id, port);
+    } catch (e) {
+      scoring = { scored: false, message: `chấm tập trung lỗi: ${(e as Error).message}` };
+    }
+
+    return NextResponse.json({ ok: true, rows: written, scoring });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     try {

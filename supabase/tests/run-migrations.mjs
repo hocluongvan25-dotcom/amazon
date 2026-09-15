@@ -4658,6 +4658,142 @@ await cmp("0026: khách A thấy 2 run trên màn tiến độ",
 await ex("reset role; rollback;");
 await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
 
+// ============================================================================
+console.log("\n=== BƯỚC 26: 0027 — Module 8 G3 (worker ghi điểm trụ + veto tập trung) ===");
+await ex(rd("migrations/0027_module_8_research_scoring.sql"));
+console.log("   ran: 0027_module_8_research_scoring.sql");
+ok(true, "0027 chạy sạch (unique veto + 3 RPC worker chấm điểm)");
+await ex(rd("migrations/0027_module_8_research_scoring.sql"));
+ok(true, "0027 idempotent");
+await cmp(
+  "0027: unique index (assessment_id, rule_code) tồn tại",
+  `select count(*) n from pg_indexes where schemaname='research'
+    and tablename='veto_flags' and indexname='uq_research_veto_assessment_rule'`,
+  1,
+);
+await cmp(
+  "0027: 3 RPC worker chỉ service_role execute được",
+  `select count(*) n from pg_proc p join pg_namespace ns on ns.oid=p.pronamespace
+    where ns.nspname='public'
+      and p.proname in ('vexim_research_worker_set_pillar',
+                        'vexim_research_worker_add_veto',
+                        'vexim_research_worker_clear_vetoes')
+      and p.prosecdef
+      and not has_function_privilege('authenticated', p.oid, 'EXECUTE')
+      and has_function_privilege('service_role', p.oid, 'EXECUTE')`,
+  3,
+);
+
+await ex("begin");
+const a26Analyst = "eeee0000-0000-4000-8000-00000000a261";
+const a26Client = "dddd0000-0000-4000-8000-00000000a261";
+const orgA26 = "cccc0000-0000-4000-8000-00000000a261";
+await ex(`
+  insert into iam.organizations(id,name,slug) values ('${orgA26}','Khách G3','khach-g3');
+  insert into auth.users(id,email) values
+    ('${a26Analyst}','analyst-g3@vexim.vn'),
+    ('${a26Client}','khach-g3@example.test');
+  insert into iam.user_profiles(id,display_name,email,vexim_employee,org_id,status) values
+    ('${a26Analyst}','CV G3','analyst-g3@vexim.vn',true,null,'active'),
+    ('${a26Client}','Chủ G3','khach-g3@example.test',false,'${orgA26}','active');
+  insert into iam.role_assignments(user_id,role) values ('${a26Analyst}','analyst');
+`);
+await ex(`set local role authenticated; select set_config('request.jwt.claim.sub','${a26Analyst}',true);`);
+const created26 = (
+  await db.query("select public.vexim_research_create_assessment($1::jsonb) as r", [
+    JSON.stringify({
+      engineVersion: "x",
+      orgId: orgA26,
+      assumptions: {
+        title: "Ngách G3", keywords: ["rack"],
+        prices: { pessimistic: 24.99, base: 29.99, optimistic: 34.99 },
+        cogsPerUnit: 6, inboundFreightPerUnit: 1.5,
+        packDims: { lengthIn: 10, widthIn: 6, heightIn: 0.5, weightLb: 0.75 },
+      },
+      result: {
+        scorecard: {
+          verdict: "insufficient_data", overallScore: null,
+          pillars: [
+            { pillar: "finance", weight: 0.25, score: 5, confidence: "medium", reason: "tạm" },
+            { pillar: "competition", weight: 0.25, score: null, confidence: null, reason: "G3" },
+            { pillar: "demand", weight: 0.2, score: null, confidence: null, reason: "" },
+            { pillar: "differentiation", weight: 0.2, score: null, confidence: null, reason: "" },
+            { pillar: "logistics", weight: 0.1, score: 9, confidence: "medium", reason: "" },
+          ],
+          vetoes: [
+            { code: "margin_below_20", severity: "red", title: "Biên thấp", detail: "x", evidence: {} },
+          ],
+        },
+        financial: { feeTableVersion: "x", currentPackaging: { tier: "small_standard" },
+          scenarios: { base: { netMarginPct: 18 }, pessimistic: { netMarginPct: 5 } } },
+        roadmap: {},
+      },
+    }),
+  ])
+).rows[0].r;
+ok(created26?.ok, `0027: hồ sơ G3 sẵn sàng — ${created26?.code}`);
+
+// authenticated không gọi được RPC worker
+const denied26 = await ex(
+  `do $$ begin perform public.vexim_research_worker_set_pillar('${created26.id}','competition',2,'medium','x','{}'::jsonb);
+   exception when others then
+     if sqlerrm not like '%permission denied%' then raise exception '[test] chặn sai: %', sqlerrm; end if;
+   end $$;`,
+  "authenticated set_pillar (kỳ vọng FAIL)",
+);
+ok(denied26, "0027 CHẶN: authenticated không set được điểm trụ");
+
+// worker service_role chấm điểm
+await ex("reset role; select set_config('request.jwt.claim.sub','',false); set role service_role;");
+await ex(`select public.vexim_research_worker_set_pillar(
+  '${created26.id}','competition',2.0,'medium','CR3 72% · Amazon 1P top3',
+  '{"cr3Pct":72,"hhi":2500}'::jsonb)`);
+await cmp("0027: trụ competition được ghi điểm 2.0",
+  `select score::float n from research.scorecards where assessment_id='${created26.id}' and pillar='competition'`, 2);
+
+// add veto idempotent 2 lần → 1 dòng, bộ đếm veto đỏ = 2 (margin + cr3)
+await ex(`select public.vexim_research_worker_add_veto(
+  '${created26.id}','cr3_above_65','red','CR3 cao','72%','{"cr3Pct":72}'::jsonb)`);
+await ex(`select public.vexim_research_worker_add_veto(
+  '${created26.id}','cr3_above_65','red','CR3 cao','72%','{"cr3Pct":72}'::jsonb)`);
+await cmp("0027: add_veto idempotent theo (assessment, rule)",
+  `select count(*) n from research.veto_flags
+    where assessment_id='${created26.id}' and rule_code='cr3_above_65'`, 1);
+await cmp("0027: bộ đếm hồ sơ: tổng veto 2, đỏ 2",
+  `select veto_count n from research.assessments where id='${created26.id}'`, 2);
+await cmp("0027: red_veto_count = 2",
+  `select red_veto_count n from research.assessments where id='${created26.id}'`, 2);
+
+// điểm ngoài thang 1..10 bị chặn
+const badScore = await ex(
+  `do $$ begin perform public.vexim_research_worker_set_pillar('${created26.id}','demand',12,'high','x','{}'::jsonb);
+   exception when others then
+     if sqlerrm not like '%khoảng 1..10%' then raise exception '[test] chặn sai: %', sqlerrm; end if;
+   end $$;`,
+  "điểm 12 ngoài thang (kỳ vọng FAIL)",
+);
+ok(badScore, "0027 CHẶN: điểm trụ ngoài 1..10");
+
+// set điểm NULL (chưa đủ cơ sở) được chấp nhận
+await ex(`select public.vexim_research_worker_set_pillar('${created26.id}','demand',null,null,'chưa có sales estimate','{}'::jsonb)`);
+await cmp("0027: trụ demand giữ NULL khi chưa đủ cơ sở",
+  `select count(*) n from research.scorecards where assessment_id='${created26.id}' and pillar='demand' and score is null`, 1);
+
+// clear chỉ gỡ veto cạnh tranh, giữ veto tài chính G1
+await ex(`select public.vexim_research_worker_add_veto(
+  '${created26.id}','amazon1p_top3','red','1P top3','x','{}'::jsonb)`);
+await ex(`select public.vexim_research_worker_clear_vetoes('${created26.id}',null)`);
+await cmp("0027: clear gỡ CR3 + 1P",
+  `select count(*) n from research.veto_flags where assessment_id='${created26.id}'
+    and rule_code in ('cr3_above_65','amazon1p_top3')`, 0);
+await cmp("0027: clear GIỮ veto tài chính margin_below_20",
+  `select count(*) n from research.veto_flags where assessment_id='${created26.id}' and rule_code='margin_below_20'`, 1);
+await cmp("0027: bộ đếm cập nhật lại còn 1/1",
+  `select veto_count n from research.assessments where id='${created26.id}'`, 1);
+
+await ex("reset role; rollback;");
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+
 console.log(`\n${"=".repeat(70)}`);
 console.log(fails === 0 ? "TẤT CẢ PASS" : `${fails} MỤC FAIL`);
 console.log("=".repeat(70));

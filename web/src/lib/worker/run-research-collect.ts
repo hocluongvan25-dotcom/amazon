@@ -17,6 +17,7 @@ import { getIntelligenceProvider } from "../intelligence/index.ts";
 import type {
   CompetitorRow,
   CriticalReviewRow,
+  VetoFlag,
 } from "../research/domain/index.ts";
 import {
   drainResearchQueue,
@@ -88,27 +89,101 @@ export class SupabaseResearchPort implements ResearchWorkerPort {
     });
   }
 
-  async latestSerpAsins(assessmentId: string, limit: number): Promise<string[]> {
-    const { data: runs, error: e1 } = await this.sb
+  private async latestRunId(assessmentId: string, kind: string): Promise<string | null> {
+    const { data: runs, error } = await this.sb
       .from("vexim_research_runs")
       .select("run_id")
       .eq("assessment_id", assessmentId)
-      .eq("kind", "serp")
+      .eq("kind", kind)
       .eq("status", "done")
       .order("finished_at", { ascending: false })
       .limit(1);
-    if (e1) throw new Error(`latestSerpAsins runs: ${e1.message}`);
-    const runId = (runs?.[0] as { run_id?: string } | undefined)?.run_id;
+    if (error) throw new Error(`latestRunId(${kind}): ${error.message}`);
+    return (runs?.[0] as { run_id?: string } | undefined)?.run_id ?? null;
+  }
+
+  private async competitorsOfRun(runId: string | null): Promise<CompetitorRow[]> {
     if (!runId) return [];
-    const { data: rows, error: e2 } = await this.sb
+    const { data, error } = await this.sb
       .from("vexim_research_competitors")
-      .select("asin")
+      .select("*")
       .eq("run_id", runId)
-      .eq("is_sponsored", false)
-      .order("position", { ascending: true })
-      .limit(limit);
-    if (e2) throw new Error(`latestSerpAsins rows: ${e2.message}`);
-    return (rows ?? []).map((r) => String((r as { asin: string }).asin));
+      .order("position", { ascending: true });
+    if (error) throw new Error(`competitorsOfRun: ${error.message}`);
+    return (data ?? []).map((c) => {
+      const r = c as Record<string, unknown>;
+      return {
+        position: Number(r.position ?? 0),
+        isSponsored: !!r.is_sponsored,
+        asin: String(r.asin),
+        parentAsin: (r.parent_asin as string) ?? null,
+        brand: (r.brand as string) ?? null,
+        price: (r.price as number) ?? null,
+        currency: String(r.currency ?? "USD"),
+        rating: (r.rating as number) ?? null,
+        ratingsTotal: (r.ratings_total as number) ?? null,
+        estUnitsMonth: (r.est_units_month as number) ?? null,
+        estRevenueMonth: (r.est_revenue_month as number) ?? null,
+        isAmazon1p: !!r.is_amazon_1p,
+        dataSource: (r.data_source as "rainforest" | "mock") ?? "rainforest",
+      } as CompetitorRow;
+    });
+  }
+
+  async latestSerpAsins(assessmentId: string, limit: number): Promise<string[]> {
+    const runId = await this.latestRunId(assessmentId, "serp");
+    const rows = await this.competitorsOfRun(runId);
+    return rows.filter((r) => !r.isSponsored).map((r) => r.asin).slice(0, limit);
+  }
+
+  async latestScoringRows(assessmentId: string): Promise<{
+    serp: CompetitorRow[];
+    products: CompetitorRow[];
+  }> {
+    const [serpRun, productsRun] = await Promise.all([
+      this.latestRunId(assessmentId, "serp"),
+      this.latestRunId(assessmentId, "products"),
+    ]);
+    const [serp, products] = await Promise.all([
+      this.competitorsOfRun(serpRun),
+      this.competitorsOfRun(productsRun),
+    ]);
+    return { serp, products };
+  }
+
+  async setPillar(input: {
+    assessmentId: string;
+    pillar: "finance" | "competition" | "demand" | "differentiation" | "logistics";
+    score: number | null;
+    confidence: "high" | "medium" | "low" | null;
+    reason: string;
+    metrics?: Record<string, unknown>;
+  }): Promise<void> {
+    await this.rpc("vexim_research_worker_set_pillar", {
+      p_assessment: input.assessmentId,
+      p_pillar: input.pillar,
+      p_score: input.score,
+      p_confidence: input.confidence,
+      p_reason: input.reason,
+      p_metrics: input.metrics ?? {},
+    });
+  }
+
+  async replaceCompetitionVetoes(assessmentId: string, vetoes: VetoFlag[]): Promise<void> {
+    await this.rpc("vexim_research_worker_clear_vetoes", {
+      p_assessment: assessmentId,
+      p_rule_codes: ["cr3_above_65", "amazon1p_top3"],
+    });
+    for (const v of vetoes) {
+      await this.rpc("vexim_research_worker_add_veto", {
+        p_assessment: assessmentId,
+        p_rule_code: v.code,
+        p_severity: v.severity,
+        p_title: v.title,
+        p_detail: v.detail,
+        p_evidence: v.evidence ?? {},
+      });
+    }
   }
 }
 
@@ -143,6 +218,11 @@ export class NoopResearchPort implements ResearchWorkerPort {
   async latestSerpAsins(_assessmentId: string, _limit: number): Promise<string[]> {
     return [];
   }
+  async latestScoringRows(): Promise<{ serp: CompetitorRow[]; products: CompetitorRow[] }> {
+    return { serp: [], products: [] };
+  }
+  async setPillar(): Promise<void> {}
+  async replaceCompetitionVetoes(): Promise<void> {}
 }
 
 export type ResearchCollectResult = {

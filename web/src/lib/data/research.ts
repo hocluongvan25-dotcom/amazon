@@ -5,10 +5,21 @@
  * - Demo mode (chưa cấu hình Supabase): số liệu mẫu tính từ engine G1.
  */
 
-import { computeAssessment, type AssessmentAssumptions, type AssessmentResult } from "@/lib/research/domain";
+import {
+  computeAssessment,
+  parseProductBundle,
+  parseSearchPage,
+  computeReviewVelocity,
+  type AssessmentAssumptions,
+  type AssessmentResult,
+  type CompetitorRow,
+  type VelocityResult,
+} from "@/lib/research/domain";
+import { MockIntelligenceProvider } from "@/lib/intelligence";
 import { createClient } from "@/lib/supabase/server";
 import {
   DEMO_ASSESSMENTS,
+  DEMO_ASSUMPTIONS,
   DEMO_RESULTS,
   type AssessmentListRow,
 } from "./research-model";
@@ -119,15 +130,72 @@ export type CollectionData = {
   competitors: CompetitorRowView[];
   reviewCount: number;
   creditSpentMonth: number | null;
+  /** review velocity tính từ 2 lần quét gần nhất (null khi chưa đủ 2 mốc) */
+  velocity: VelocityResult | null;
 };
+
+/* ------------------------------ DEMO G2/G3 -------------------------------- */
+
+/**
+ * Dựng snapshot đối thủ MINH HỌA cho hồ sơ demo bằng MockIntelligenceProvider
+ * (gắn data_source='mock') — số liệu không phải thị trường thật.
+ */
+async function buildDemoCompetitors(id: string): Promise<CompetitorRowView[]> {
+  const assumptions = DEMO_ASSUMPTIONS[id];
+  if (!assumptions) return [];
+  const provider = new MockIntelligenceProvider();
+  const keyword = assumptions.keywords[0] ?? assumptions.title;
+  const search = parseSearchPage(await provider.search({ keyword }), "mock");
+  const rows: CompetitorRowView[] = [];
+  // Lấy toàn bộ trang SERP mock (4 sponsored + 26 organic); sau gộp variation
+  // vẫn còn ≥10 sản phẩm organic để chấm CR3/HHI.
+  for (const item of [...search.sponsored, ...search.organic]) {
+    const bundle = parseProductBundle({
+      product: await provider.product(item.asin),
+      offers: await provider.offers(item.asin),
+      sales: await provider.salesEstimate({ asin: item.asin }),
+    });
+    const merged: CompetitorRow = { ...item, ...bundle, dataSource: "mock" };
+    rows.push({
+      run_id: "demo-run",
+      position: merged.position,
+      is_sponsored: merged.isSponsored,
+      asin: merged.asin,
+      parent_asin: merged.parentAsin ?? null,
+      brand: merged.brand ?? null,
+      title: merged.title ?? null,
+      price: merged.price ?? null,
+      currency: merged.currency,
+      rating: merged.rating ?? null,
+      ratings_total: merged.ratingsTotal ?? null,
+      bsr_rank: merged.bsrRank ?? null,
+      bsr_category: merged.bsrCategory ?? null,
+      est_units_month: merged.estUnitsMonth ?? null,
+      est_revenue_month: merged.estRevenueMonth ?? null,
+      buybox_seller: merged.buyboxSeller ?? null,
+      is_amazon_1p: merged.isAmazon1p,
+      variation_count: merged.variationCount ?? null,
+      data_source: "mock",
+    });
+  }
+  return rows;
+}
 
 /** Dữ liệu thu thập G2 cho panel tiến độ trên trang chi tiết. */
 export async function readCollectionData(assessmentId: string): Promise<CollectionData | null> {
   if (assessmentId.startsWith("demo-")) {
-    return { runs: [], competitors: [], reviewCount: 0, creditSpentMonth: null };
+    const competitors = await buildDemoCompetitors(assessmentId);
+    return {
+      runs: [],
+      competitors,
+      reviewCount: 16,
+      creditSpentMonth: null,
+      velocity: null,
+    };
   }
   const db = await createClient();
-  if (!db) return { runs: [], competitors: [], reviewCount: 0, creditSpentMonth: null };
+  if (!db)
+    return { runs: [], competitors: [], reviewCount: 0, creditSpentMonth: null, velocity: null };
 
   const [runsRes, compRes, reviewRes] = await Promise.all([
     db
@@ -148,17 +216,34 @@ export async function readCollectionData(assessmentId: string): Promise<Collecti
   if (runsRes.error) throw new Error(`Không đọc được lượt thu thập — ${runsRes.error.message}`);
   if (compRes.error) throw new Error(`Không đọc được dữ liệu đối thủ — ${compRes.error.message}`);
 
-  const runs = (runsRes.data ?? []) as ResearchRunRow[];
+  const runs = (runsRes.data ?? []) as unknown as ResearchRunRow[];
   const allCompetitors = (compRes.data ?? []) as CompetitorRowView[];
   // Giữ lần quét CÓ dữ liệu đối thủ mới nhất (runs đã sắp xếp mới → cũ).
   const runsWithCompetitors = new Set(allCompetitors.map((c) => c.run_id));
   const preferred = runs.map((r) => r.run_id).find((id) => runsWithCompetitors.has(id)) ?? null;
   const competitors = preferred ? allCompetitors.filter((c) => c.run_id === preferred) : [];
 
+  // Review velocity: so 2 lần quét SERP gần nhất (cùng ASIN, lệch ratings_total).
+  let velocity: VelocityResult | null = null;
+  const serpRuns = runs
+    .filter((r) => r.kind === "serp" && r.finished_at)
+    .slice(0, 2)
+    .sort((a, b) => String(a.finished_at).localeCompare(String(b.finished_at)));
+  if (serpRuns.length === 2) {
+    const [prevRun, curRun] = serpRuns;
+    const toSnap = (r: ResearchRunRow) =>
+      allCompetitors
+        .filter((c) => c.run_id === r.run_id && !c.is_sponsored && c.ratings_total !== null)
+        .map((c) => ({ asin: c.asin, date: String(r.finished_at).slice(0, 10), ratingsTotal: c.ratings_total ?? 0 }));
+    velocity = computeReviewVelocity(toSnap(prevRun), toSnap(curRun));
+    if (!velocity.sufficientData) velocity = null;
+  }
+
   return {
     runs,
     competitors,
     reviewCount: reviewRes.count ?? 0,
     creditSpentMonth: null,
+    velocity,
   };
 }

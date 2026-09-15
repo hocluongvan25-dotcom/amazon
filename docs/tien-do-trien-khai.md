@@ -2,6 +2,40 @@
 
 > Cập nhật: 15/09/2026 (G1+G2 Module 8) · Thứ tự build đã chốt: **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** (21 màn Đợt 1)
 
+## Cập nhật 15/09 — MODULE 8 GIAI ĐOẠN 3: tập trung thị trường CR3/CR5/HHI, Amazon 1P, velocity (migration 0027)
+
+- **Engine thuần** `web/src/lib/research/domain/concentration.ts` (9 test mới,
+  web **284 pass**):
+  - **Gộp variation theo `parent_asin`** trước khi tính (sales lấy MAX, không
+    cộng trùng); sponsored loại khỏi thị phần tự nhiên, chỉ tính mật độ quảng cáo.
+  - **CR3/CR5/HHI** theo doanh thu ước lượng (fallback đơn vị), yêu cầu tối
+    thiểu 10 sản phẩm organic và ≥70% có sales estimate — thiếu thì trả
+    `null`/"chưa đủ cơ sở", không bịa.
+  - **Veto đỏ**: CR3 > 65% (`cr3_above_65`) và Amazon 1P trong top 3 organic
+    (`amazon1p_top3`); trụ cạnh tranh thang 1–10 kèm lý do công khai.
+  - **Review velocity** từ 2 lần quét SERP (≥3 ASIN đủ 2 mốc mới có nghĩa);
+    `mergeCompetitorSnapshots` ghép vị trí/sponsored từ SERP với sales/1P từ
+    collection products; `scoreCompetitionFromSnapshots` một phát cho worker/webhook.
+- **Migration 0027**: unique index `(assessment_id, rule_code)` cho veto; 3 RPC
+  chỉ service_role — `vexim_research_worker_set_pillar` (điểm null hợp lệ =
+  chưa đủ cơ sở, điểm ngoài 1..10 bị chặn), `vexim_research_worker_add_veto`
+  (idempotent, tự cập nhật bộ đếm veto trên hồ sơ), `clear_vetoes` (chỉ gỡ veto
+  cạnh tranh khi quét lại, giữ veto tài chính/chứng nhận). Harness BƯỚC 26
+  xanh hoàn toàn (chặn authenticated, idempotent, đếm lại, NULL demand, thang điểm).
+- **Worker**: sau bước products (direct mock lẫn webhook Collection) tự chấm trụ
+  cạnh tranh + đồng bộ veto; port DB có `latestScoringRows/setPillar/
+  replaceCompetitionVetoes`; 2 test worker mới (**457 pass**).
+- **UI Tab 2 trên web** (`MarketConcentrationPanel` tại `/research/[id]`):
+  KPI CR3/CR5/HHI/Amazon 1P, biểu đồ thanh thị phần brand đã gộp variation,
+  bảng brand, điểm trụ cạnh tranh, cảnh báo mật độ sponsored, ghi chú sai số
+  BSR→sales 20–40%, chỗ để kích hoạt Keepa/velocity sau lần quét thứ 2. Demo
+  mode dựng dữ liệu minh họa bằng MockIntelligenceProvider (ngách demo-1 CR3
+  73,5% dính veto đỏ; demo-2 có Amazon 1P top 3 + 3 veto đỏ), gắn nhãn mock.
+- **Chưa làm (G4+)**: LLM phân cụm pain Quality/Expectation Gap/Logistics từ
+  review critical, trích dẫn gốc truy vết, spec sheet xưởng, ma trận
+  impact×effort; tab R&D và demand pillar hoàn chỉnh (velocity đã có engine,
+  chờ lần quét thật thứ 2).
+
 ## Cập nhật 15/09 — MODULE 8 GIAI ĐOẠN 2: thu thập đối thủ & review (Rainforest, migration 0026)
 
 Tiếp nối G1, G2 xây xong toàn bộ đường ống thu thập dữ liệu thị trường, **chạy

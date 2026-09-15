@@ -13,11 +13,13 @@ import type {
   CompetitorRow,
   CriticalReviewRow,
   IntelligenceDataSource,
+  VetoFlag,
 } from "../../research/domain/index.ts";
 import {
   parseProductBundle,
   parseReviewsPage,
   parseSearchPage,
+  scoreCompetitionFromSnapshots,
   summarizeCompetitors,
 } from "../../research/domain/index.ts";
 import type {
@@ -58,6 +60,21 @@ export type ResearchWorkerPort = {
   }): Promise<void>;
   /** ASIN organic của lần quét SERP gần nhất (cho products/reviews bám theo). */
   latestSerpAsins(assessmentId: string, limit: number): Promise<string[]>;
+  /** Toàn bộ snapshot 2 loại run mới nhất để chấm tập trung thị phần (G3). */
+  latestScoringRows(assessmentId: string): Promise<{
+    serp: CompetitorRow[];
+    products: CompetitorRow[];
+  }>;
+  setPillar(input: {
+    assessmentId: string;
+    pillar: "finance" | "competition" | "demand" | "differentiation" | "logistics";
+    score: number | null;
+    confidence: "high" | "medium" | "low" | null;
+    reason: string;
+    metrics?: Record<string, unknown>;
+  }): Promise<void>;
+  /** Thay thế tập veto cạnh tranh của engine (giữ veto tài chính/chứng nhận). */
+  replaceCompetitionVetoes(assessmentId: string, vetoes: VetoFlag[]): Promise<void>;
 };
 
 export type CollectOutcome = {
@@ -212,13 +229,61 @@ export async function collectProducts(
     return { runId: run.id, kind: run.kind, status: "no_data", creditsUsed: asins.length * 3, message: "không có product bundle" };
   }
   await port.finishRun({ runId: run.id, status: "done", creditsUsed: asins.length * 3 });
+
+  // G3: chấm ngay trụ cạnh tranh từ SERP + product snapshot (không chặn việc
+  // thu thập nếu bước chấm lỗi — chỉ ghi log, lần chạy sau chấm lại).
+  let scoringMsg = "";
+  try {
+    const scoring = await applyCompetitionScoring(run.assessmentId, port);
+    scoringMsg = ` · ${scoring.message}`;
+  } catch (e) {
+    scoringMsg = ` · chấm tập trung lỗi: ${(e as Error).message}`;
+  }
+
   return {
     runId: run.id,
     kind: run.kind,
     status: "done",
     creditsUsed: asins.length * 3,
     competitors: written,
-    message: `${written} ASIN làm giàu product/offers/sales (${withEstimate} có sales estimate)`,
+    message: `${written} ASIN làm giàu product/offers/sales (${withEstimate} có sales estimate)${scoringMsg}`,
+  };
+}
+
+/**
+ * G3 — đọc snapshot mới nhất, chấm trụ cạnh tranh và đồng bộ veto CR3/1P.
+ * Dùng chung cho direct collect, webhook Collection và job research:scorecard.
+ * Trả về thông điệp ngắn để log; chưa đủ dữ liệu vẫn ghi điểm NULL (trung thực).
+ */
+export async function applyCompetitionScoring(
+  assessmentId: string,
+  port: ResearchWorkerPort,
+): Promise<{ scored: boolean; message: string }> {
+  const { serp, products } = await port.latestScoringRows(assessmentId);
+  const scored = scoreCompetitionFromSnapshots(serp, products);
+  await port.setPillar({
+    assessmentId,
+    pillar: "competition",
+    score: scored.pillar.score,
+    confidence: scored.pillar.confidence,
+    reason: scored.pillar.reason,
+    metrics: {
+      cr3Pct: scored.concentration.cr3Pct,
+      cr5Pct: scored.concentration.cr5Pct,
+      hhi: scored.concentration.hhi,
+      metric: scored.concentration.metric,
+      amazon1p: scored.concentration.amazon1p,
+      sponsoredSharePct: scored.concentration.sponsoredSharePct,
+      organicCount: scored.concentration.organicCount,
+    },
+  });
+  await port.replaceCompetitionVetoes(assessmentId, scored.vetoes);
+  return {
+    scored: scored.pillar.score !== null,
+    message:
+      scored.pillar.score === null
+        ? scored.pillar.reason
+        : `trụ cạnh tranh ${scored.pillar.score.toFixed(1)}/10 · CR3 ${scored.concentration.cr3Pct?.toFixed(1)}% · ${scored.vetoes.length} veto`,
   };
 }
 

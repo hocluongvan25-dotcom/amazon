@@ -11,6 +11,7 @@ import type { PersonaKey } from "@/lib/roles";
 import { readAssessmentDetail, readCollectionData } from "@/lib/data/research";
 import { createClient } from "@/lib/supabase/server";
 import { CollectionPanel } from "./CollectionPanel";
+import { MarketConcentrationPanel } from "./MarketConcentrationPanel";
 import {
   STATUS_LABEL,
   VERDICT_LABEL,
@@ -60,6 +61,10 @@ export default async function ResearchDetailPage({
         <Chip tone="gray">{row.keywords ? (row.keywords as string[]).join(", ") : ""}</Chip>
       </div>
       <ResearchResultView result={result} />
+
+      <div className="mt-4">
+        <MarketConcentrationPanel competitors={collection.competitors} velocity={collection.velocity} />
+      </div>
 
       <div className="mt-4">
         <CollectionPanel assessmentId={id} data={collection} connected={!!db} />

@@ -44,6 +44,10 @@ class FakePort implements ResearchWorkerPort {
   finishes: { runId: string; status: FinishStatus; credits: number; error?: string | null }[] = [];
   external: Record<string, string> = {};
   serpAsins: string[] = [];
+  serpRows: CompetitorRow[] = [];
+  productRows: CompetitorRow[] = [];
+  pillars: { pillar: string; score: number | null; reason: string }[] = [];
+  vetoReplacements: { assessmentId: string; vetoes: unknown[] }[] = [];
   constructor(queued: ClaimedRun[] = []) {
     this.queued = [...queued];
   }
@@ -88,6 +92,20 @@ class FakePort implements ResearchWorkerPort {
   }
   async latestSerpAsins(_id: string, limit: number) {
     return this.serpAsins.slice(0, limit);
+  }
+  async latestScoringRows() {
+    return { serp: this.serpRows, products: this.productRows };
+  }
+  async setPillar(input: {
+    pillar: string;
+    score: number | null;
+    confidence: string | null;
+    reason: string;
+  }) {
+    this.pillars.push({ pillar: input.pillar, score: input.score, reason: input.reason });
+  }
+  async replaceCompetitionVetoes(assessmentId: string, vetoes: unknown[]) {
+    this.vetoReplacements.push({ assessmentId, vetoes });
   }
 }
 
@@ -193,6 +211,61 @@ test("parseProductCollectionResults: gom 3 request/ASIN thành 1 CompetitorRow",
   assert.equal(rows[0].asin, "B0A");
   assert.equal(rows[0].bsrRank, 10);
   assert.equal(rows[0].estUnitsMonth, 100);
+});
+
+test("G3: applyCompetitionScoring ghi điểm trụ + veto CR3/1P từ snapshot ghép SERP+products", async () => {
+  // SERP: 12 sản phẩm 2 brand tập trung cao, vị trí #1 Amazon 1P
+  const serp: CompetitorRow[] = [];
+  for (let i = 0; i < 12; i++) {
+    serp.push({
+      asin: `S${i}`,
+      parentAsin: `P${i}`,
+      brand: i < 8 ? "MonoBrand" : "OtherBrand",
+      isSponsored: false,
+      position: i + 1,
+      isAmazon1p: false,
+      currency: "USD",
+      dataSource: "rainforest",
+    });
+  }
+  serp[0].isAmazon1p = true;
+  // Products run làm giàu sales estimate (tổng doanh thu lệch mạnh về MonoBrand)
+  const products: CompetitorRow[] = serp.map((s, i) => ({
+    ...s,
+    position: 0,
+    estRevenueMonth: i < 8 ? 50_000 : 5_000,
+    estUnitsMonth: i < 8 ? 1500 : 150,
+  }));
+  const port = new FakePort();
+  port.serpRows = serp;
+  port.productRows = products;
+
+  const { applyCompetitionScoring } = await import(
+    "../../web/src/lib/worker/jobs/research-collect.job.ts"
+  );
+  const out = await applyCompetitionScoring("assess-1", port);
+  assert.equal(out.scored, true);
+  const pillar = port.pillars.find((p) => p.pillar === "competition");
+  assert.ok(pillar && pillar.score !== null && pillar.score <= 3, `điểm phải ≤3, được ${pillar?.score}`);
+  // 2 veto: CR3 > 65 và Amazon 1P top3
+  const last = port.vetoReplacements.at(-1);
+  assert.equal(last?.assessmentId, "assess-1");
+  const codes = (last?.vetoes as { code: string }[]).map((v) => v.code).sort();
+  assert.deepEqual(codes, ["amazon1p_top3", "cr3_above_65"]);
+});
+
+test("G3: applyCompetitionScoring khi chưa đủ sales → điểm null, không veto", async () => {
+  const port = new FakePort();
+  port.serpRows = [
+    { asin: "A", isSponsored: false, position: 1, isAmazon1p: false, currency: "USD", dataSource: "rainforest" },
+  ];
+  const { applyCompetitionScoring } = await import(
+    "../../web/src/lib/worker/jobs/research-collect.job.ts"
+  );
+  const out = await applyCompetitionScoring("a1", port);
+  assert.equal(out.scored, false);
+  assert.equal(port.pillars[0].score, null);
+  assert.deepEqual(port.vetoReplacements[0].vetoes, []);
 });
 
 test("collectReviews: gom review nhiều ASIN, dừng khi đủ target/asin, mọi dòng sạch PII", async () => {

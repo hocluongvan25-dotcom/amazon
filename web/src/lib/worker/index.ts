@@ -36,6 +36,7 @@ export {
   collectSerp,
   collectProducts,
   collectReviews,
+  applyCompetitionScoring,
   drainResearchQueue,
   parseProductCollectionResults,
   RESEARCH_COLLECTORS,
