@@ -77,3 +77,33 @@ export async function saveAssessmentAction(raw: ResearchFormRaw): Promise<SaveAs
     computed,
   };
 }
+
+export type EnqueueState = { ok: boolean; message: string };
+
+/**
+ * G2 — analyst xếp hàng 1 lượt thu thập (serp/products/reviews). Ghi qua RPC
+ * vexim_research_enqueue_run bằng PHIÊN NGƯỜI DÙNG (không service_role); worker
+ * /cron nhận việc sau đó.
+ */
+export async function enqueueCollectionAction(
+  assessmentId: string,
+  kind: "serp" | "products" | "reviews",
+  params: Record<string, unknown> = {},
+): Promise<EnqueueState> {
+  const db = await createClient();
+  if (!db) {
+    return {
+      ok: false,
+      message: "DEMO MODE: không xếp hàng thu thập được; cần Supabase + worker/cron.",
+    };
+  }
+  const { data, error } = await db.rpc("vexim_research_enqueue_run", {
+    p_assessment: assessmentId,
+    p_kind: kind,
+    p_params: params,
+  });
+  if (error) return { ok: false, message: error.message };
+  const out = data as { ok: boolean; run_id: string };
+  revalidatePath(`/research/${assessmentId}`);
+  return { ok: true, message: `Đã xếp hàng lượt "${kind}" (${out.run_id.slice(0, 8)}). Worker/cron sẽ nhận và chạy.` };
+}

@@ -8,7 +8,9 @@ import { notFound } from "next/navigation";
 import { Chip, MockDataNotice, NoAccess, PageHeader } from "@/components/ui";
 import { requireSession } from "@/lib/auth/session";
 import type { PersonaKey } from "@/lib/roles";
-import { readAssessmentDetail } from "@/lib/data/research";
+import { readAssessmentDetail, readCollectionData } from "@/lib/data/research";
+import { createClient } from "@/lib/supabase/server";
+import { CollectionPanel } from "./CollectionPanel";
 import {
   STATUS_LABEL,
   VERDICT_LABEL,
@@ -28,8 +30,13 @@ export default async function ResearchDetailPage({
   if (!ALLOWED.includes(session.persona)) return <NoAccess />;
 
   const { id } = await params;
-  const detail = await readAssessmentDetail(id);
+  const [detail, collection, db] = await Promise.all([
+    readAssessmentDetail(id),
+    readCollectionData(id),
+    createClient(),
+  ]);
   if (!detail) notFound();
+  if (!collection) notFound();
   const { row, result } = detail;
 
   return (
@@ -53,6 +60,10 @@ export default async function ResearchDetailPage({
         <Chip tone="gray">{row.keywords ? (row.keywords as string[]).join(", ") : ""}</Chip>
       </div>
       <ResearchResultView result={result} />
+
+      <div className="mt-4">
+        <CollectionPanel assessmentId={id} data={collection} connected={!!db} />
+      </div>
     </>
   );
 }

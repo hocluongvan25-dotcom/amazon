@@ -1,6 +1,50 @@
 # TIẾN ĐỘ TRIỂN KHAI — VEXIM OPS
 
-> Cập nhật: 15/09/2026 · Thứ tự build đã chốt: **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** (21 màn Đợt 1)
+> Cập nhật: 15/09/2026 (G1+G2 Module 8) · Thứ tự build đã chốt: **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** (21 màn Đợt 1)
+
+## Cập nhật 15/09 — MODULE 8 GIAI ĐOẠN 2: thu thập đối thủ & review (Rainforest, migration 0026)
+
+Tiếp nối G1, G2 xây xong toàn bộ đường ống thu thập dữ liệu thị trường, **chạy
+được với provider mock khi chưa có key; chưa thử API thật trong sandbox bị chặn
+egress** (cần trial key của VEXIM theo G0):
+
+- **Migration 0026** (`research.competitor_snapshots`, `research.reviews_raw`,
+  `research.credit_ledger`): snapshot SERP giữ lịch sử theo run; review 1–3★
+  **cố ý không có cột danh tính reviewer** và RPC từ chối payload còn
+  `reviewerName/reviewerId/reviewerProfileUrl`; sổ cái credit lũy kế theo org +
+  view tổng hợp chi/tháng. RPC người dùng `vexim_research_enqueue_run` (analyst
+  xếp hàng, chặn trùng kind đang queued/running, audit `collection.enqueue`);
+  4 RPC worker chỉ `service_role` execute (claim có `skip locked`, finish kèm
+  trừ credit, upsert đối thủ idempotent, upsert review dedupe theo
+  `source_review_id`); 4 view `security_invoker`. Harness PGlite BƯỚC 25 xanh
+  hoàn toàn (RLS cô lập org, PII rejection, quyền worker, idempotent).
+- **Parser thuần** `web/src/lib/research/domain/collection.ts`: search (tách
+  sponsored/organic), gộp product+offers+sales estimation (nhận diện Amazon
+  1P/BSR/variation/dims), review critical lọc sạch PII + chuẩn hóa ngày; thiếu
+  trường để null, không bịa số. 8 test web mới (tổng **274 pass**).
+- **Provider** `web/src/lib/intelligence/`: interface chung; `MockIntelligenceProvider`
+  deterministic (26 ASIN, CR3 cao + Amazon Basics 1P, 16 review critical/ASIN top,
+  collection in-memory) gắn `data_source='mock'`; `RainforestClient` thật (REST
+  `/request`, retry 429/5xx, Collections ≤1.000 request, webhook URL ký secret).
+- **Jobs** `web/src/lib/worker/jobs/research-collect.job.ts` (thuần, port DB giả
+  để test): `collectSerp` (≤2 trang, ~1 credit/trang), `collectProducts` (provider
+  thật → tạo Collection bất đồng bộ, webhook kết thúc; mock → gọi trực tiếp 3
+  request/ASIN), `collectReviews` (top ASIN của SERP, dừng theo target/trần trang,
+  dedupe), `drainResearchQueue`. 13 test worker mới (454 pass; còn 1 fail CÓ SẴN
+  từ test oauth phụ thuộc ngày hết hạn token 2026-09-18, không liên quan G2).
+- **Vận hành**: runner `runResearchCollect` (CLI `npm run worker:research-collect
+  -- --kinds=serp,products,reviews`), cron `/api/cron/research-collect?max=5`
+  (Bearer CRON_SECRET, trần 60s Vercel Hobby), **webhook**
+  `/api/webhooks/rainforest?secret=…` (GET lại kết quả collection rồi mới parse,
+  không tin payload webhook). Trang chi tiết hồ sơ có panel "Thu thập dữ liệu"
+  với nút xếp hàng + bảng tiến độ run/credits/lỗi + bảng đối thủ.
+- Env mới trong `.env.example`: `RAINFOREST_API_KEY`, `RAINFOREST_WEBHOOK_SECRET`,
+  `RAINFOREST_WEBHOOK_BASE_URL`, (`LLM_*` dành sẵn G4),
+  `RESEARCH_CREDIT_BUDGET_MONTHLY`.
+- **Chưa làm (G3+)**: CR3/CR5/HHI gộp variation theo brand, review velocity,
+  chỗ cắm Keepa, biểu đồ thị phần; thử thật bằng 100 credit trial; đối chiếu
+  field Rainforest thực tế khi có key (parser đã viết phòng thủ nhiều biến thể
+  field name).
 
 ## Cập nhật 15/09 — MODULE 8 (PRODUCT R&D) GIAI ĐOẠN 1: máy tính what-if tài chính (migration 0025)
 

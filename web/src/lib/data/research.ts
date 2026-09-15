@@ -76,3 +76,89 @@ export async function readAssessmentDetail(id: string): Promise<AssessmentDetail
   const result = computeAssessment(latest.inputs, new Date(row.created_at));
   return { row, result };
 }
+
+/* --------------------------------- G2 ------------------------------------- */
+
+export type ResearchRunRow = {
+  run_id: string;
+  kind: string;
+  status: string;
+  provider: string;
+  external_id: string | null;
+  credits_used: number | null;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+};
+
+export type CompetitorRowView = {
+  run_id: string;
+  position: number;
+  is_sponsored: boolean;
+  asin: string;
+  parent_asin: string | null;
+  brand: string | null;
+  title: string | null;
+  price: number | null;
+  currency: string;
+  rating: number | null;
+  ratings_total: number | null;
+  bsr_rank: number | null;
+  bsr_category: string | null;
+  est_units_month: number | null;
+  est_revenue_month: number | null;
+  buybox_seller: string | null;
+  is_amazon_1p: boolean | null;
+  variation_count: number | null;
+  data_source: string;
+};
+
+export type CollectionData = {
+  runs: ResearchRunRow[];
+  competitors: CompetitorRowView[];
+  reviewCount: number;
+  creditSpentMonth: number | null;
+};
+
+/** Dữ liệu thu thập G2 cho panel tiến độ trên trang chi tiết. */
+export async function readCollectionData(assessmentId: string): Promise<CollectionData | null> {
+  if (assessmentId.startsWith("demo-")) {
+    return { runs: [], competitors: [], reviewCount: 0, creditSpentMonth: null };
+  }
+  const db = await createClient();
+  if (!db) return { runs: [], competitors: [], reviewCount: 0, creditSpentMonth: null };
+
+  const [runsRes, compRes, reviewRes] = await Promise.all([
+    db
+      .from("vexim_research_runs")
+      .select("*")
+      .eq("assessment_id", assessmentId)
+      .order("created_at", { ascending: false }),
+    db
+      .from("vexim_research_competitors")
+      .select("*")
+      .eq("assessment_id", assessmentId)
+      .order("position", { ascending: true }),
+    db
+      .from("vexim_research_reviews")
+      .select("source_review_id", { count: "exact", head: true })
+      .eq("assessment_id", assessmentId),
+  ]);
+  if (runsRes.error) throw new Error(`Không đọc được lượt thu thập — ${runsRes.error.message}`);
+  if (compRes.error) throw new Error(`Không đọc được dữ liệu đối thủ — ${compRes.error.message}`);
+
+  const runs = (runsRes.data ?? []) as ResearchRunRow[];
+  const allCompetitors = (compRes.data ?? []) as CompetitorRowView[];
+  // Giữ lần quét CÓ dữ liệu đối thủ mới nhất (runs đã sắp xếp mới → cũ).
+  const runsWithCompetitors = new Set(allCompetitors.map((c) => c.run_id));
+  const preferred = runs.map((r) => r.run_id).find((id) => runsWithCompetitors.has(id)) ?? null;
+  const competitors = preferred ? allCompetitors.filter((c) => c.run_id === preferred) : [];
+
+  return {
+    runs,
+    competitors,
+    reviewCount: reviewRes.count ?? 0,
+    creditSpentMonth: null,
+  };
+}
