@@ -7,13 +7,18 @@
 
 import {
   computeAssessment,
+  mergeExternalScores,
   parseProductBundle,
   parseSearchPage,
   computeReviewVelocity,
+  scoreCompetitionFromSnapshots,
   type AssessmentAssumptions,
   type AssessmentResult,
   type CompetitorRow,
+  type PillarKey,
+  type PillarScore,
   type VelocityResult,
+  type VetoFlag,
 } from "@/lib/research/domain";
 import { MockIntelligenceProvider } from "@/lib/intelligence";
 import { createClient } from "@/lib/supabase/server";
@@ -56,15 +61,23 @@ export async function readAssessments(): Promise<{
 export async function readAssessmentDetail(id: string): Promise<AssessmentDetail | null> {
   if (id.startsWith("demo-")) {
     const row = DEMO_ASSESSMENTS.find((r) => r.id === id);
-    const result = DEMO_RESULTS[id];
-    if (!row || !result) return null;
+    const engineResult = DEMO_RESULTS[id];
+    if (!row || !engineResult) return null;
+    // Demo: chấm luôn trụ cạnh tranh từ dữ liệu mock minh họa.
+    const competitors = await buildDemoCompetitors(id);
+    const scored = scoreCompetitionFromView(competitors);
+    const result = mergeExternalScores(
+      engineResult,
+      scored.pillar ? { competition: scored.pillar } : {},
+      scored.vetoes,
+    );
     return { row, result };
   }
 
   const db = await createClient();
   if (!db) return null;
 
-  const [assessmentRes, inputsRes] = await Promise.all([
+  const [assessmentRes, inputsRes, scorecardsRes, vetoesRes] = await Promise.all([
     db.from("vexim_research_assessments").select("*").eq("id", id).maybeSingle(),
     db
       .from("vexim_research_inputs")
@@ -72,6 +85,8 @@ export async function readAssessmentDetail(id: string): Promise<AssessmentDetail
       .eq("assessment_id", id)
       .order("version", { ascending: false })
       .limit(1),
+    db.from("vexim_research_scorecards").select("*").eq("assessment_id", id),
+    db.from("vexim_research_vetoes").select("*").eq("assessment_id", id),
   ]);
 
   if (assessmentRes.error) {
@@ -84,8 +99,53 @@ export async function readAssessmentDetail(id: string): Promise<AssessmentDetail
   if (!latest) {
     throw new Error(`Hồ sơ ${row.code} thiếu giả định đầu vào (versioned inputs).`);
   }
-  const result = computeAssessment(latest.inputs, new Date(row.created_at));
+  const engineResult = computeAssessment(latest.inputs, new Date(row.created_at));
+
+  // Ghép điểm/veto worker đã chấm từ dữ liệu thu thập (G3+: competition...).
+  const overrides: Partial<Record<PillarKey, Pick<PillarScore, "score" | "confidence" | "reason">>> = {};
+  for (const s of (scorecardsRes.data ?? []) as Array<{
+    pillar: PillarKey;
+    score: number | null;
+    confidence: PillarScore["confidence"];
+    reason: string;
+  }>) {
+    if (s.score !== null && s.pillar !== "finance" && s.pillar !== "logistics") {
+      overrides[s.pillar] = { score: s.score, confidence: s.confidence, reason: s.reason };
+    }
+  }
+  const externalVetoes = ((vetoesRes.data ?? []) as Array<{
+    rule_code: VetoFlag["code"];
+    severity: VetoFlag["severity"];
+    title: string;
+    detail: string;
+    evidence: Record<string, unknown>;
+  }>)
+    .filter((v) => v.rule_code === "cr3_above_65" || v.rule_code === "amazon1p_top3")
+    .map((v) => ({ code: v.rule_code, severity: v.severity, title: v.title, detail: v.detail, evidence: v.evidence ?? {} }));
+
+  const result = mergeExternalScores(engineResult, overrides, externalVetoes);
   return { row, result };
+}
+
+/** Bọc scoreCompetitionFromSnapshots cho snapshot đối thủ đã gộp 1 run. */
+function scoreCompetitionFromView(competitors: CompetitorRowView[]) {
+  const input: CompetitorRow[] = competitors.map((c) => ({
+    asin: c.asin,
+    parentAsin: c.parent_asin,
+    brand: c.brand,
+    isSponsored: c.is_sponsored,
+    position: c.position,
+    currency: c.currency ?? "USD",
+    price: c.price,
+    rating: c.rating,
+    ratingsTotal: c.ratings_total,
+    estUnitsMonth: c.est_units_month,
+    estRevenueMonth: c.est_revenue_month,
+    isAmazon1p: !!c.is_amazon_1p,
+    dataSource: c.data_source === "mock" ? "mock" : "rainforest",
+  }));
+  const scored = scoreCompetitionFromSnapshots([], input);
+  return { pillar: scored.pillar, vetoes: scored.vetoes };
 }
 
 /* --------------------------------- G2 ------------------------------------- */

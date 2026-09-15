@@ -163,6 +163,53 @@ export function buildVetoes(
   return vetoes;
 }
 
+/**
+ * G3+ — ghép điểm các trụ do worker chấm từ dữ liệu thu thập (competition ở G3,
+ * demand/differentiation ở G4) vào scorecard engine G1. HÀM THUẦN: không I/O;
+ * data layer đọc view vexim_research_scorecards/vetoes rồi truyền vào.
+ *
+ * - Trụ nào có điểm trong `pillarOverrides` (score khác null) thì thay thế;
+ *   trụ chưa chấm giữ nguyên null ("chưa đủ cơ sở").
+ *   - Veto bổ sung (CR3/1P…) được GỘP, không nhân đôi theo rule_code.
+ *   - Khi đủ 5 trụ mới tính lại overallScore/verdict; thiếu vẫn insufficient_data.
+ */
+export function mergeExternalScores(
+  result: import("./types.ts").AssessmentResult,
+  pillarOverrides: Partial<Record<PillarKey, Pick<PillarScore, "score" | "confidence" | "reason">>>,
+  extraVetoes: VetoFlag[] = [],
+): import("./types.ts").AssessmentResult {
+  const pillars = result.scorecard.pillars.map((p) => {
+    const over = pillarOverrides[p.pillar];
+    return over && over.score !== null && over.score !== undefined
+      ? { ...p, score: over.score, confidence: over.confidence ?? p.confidence, reason: over.reason || p.reason }
+      : p;
+  });
+
+  const byCode = new Map<string, VetoFlag>();
+  for (const v of result.scorecard.vetoes) byCode.set(v.code, v);
+  for (const v of extraVetoes) if (!byCode.has(v.code)) byCode.set(v.code, v);
+  const vetoes = [...byCode.values()];
+
+  const ready = pillars.every((p) => p.score !== null);
+  let overallScore: number | null = null;
+  let verdictCode: ScorecardResult["verdict"];
+  if (!ready) {
+    verdictCode = "insufficient_data";
+  } else {
+    overallScore = R1(pillars.reduce((acc, p) => acc + (p.score ?? 0) * p.weight, 0));
+    const hasRedVeto = vetoes.some((v) => v.severity === "red");
+    if (overallScore <= 4.9) verdictCode = "do_not_invest";
+    else if (overallScore < 8 || hasRedVeto) verdictCode = "improve";
+    else verdictCode = "go_test";
+  }
+  const v = verdictLabel(verdictCode);
+
+  return {
+    ...result,
+    scorecard: { pillars, overallScore, verdict: v.code, verdictLabel: v.label, vetoes },
+  };
+}
+
 function verdictLabel(
   code: ScorecardResult["verdict"],
 ): { code: ScorecardResult["verdict"]; label: string } {

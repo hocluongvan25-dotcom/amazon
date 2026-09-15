@@ -10,8 +10,10 @@ import {
   computeScorecard,
   financeScore,
   logisticsScore,
+  mergeExternalScores,
   PILLAR_WEIGHTS,
 } from "../src/lib/research/domain/scorecard.ts";
+import { computeAssessment } from "../src/lib/research/domain/index.ts";
 import type { AssessmentAssumptions } from "../src/lib/research/domain/types.ts";
 
 function healthy(): AssessmentAssumptions {
@@ -109,4 +111,48 @@ test("oversize sinh veto mức warning kèm bằng chứng tier", () => {
   assert.ok(v);
   assert.equal(v?.severity, "warning");
   assert.equal((v?.evidence as { tier: string }).tier, "small_bulky");
+});
+
+test("G3 mergeExternalScores: đủ 5 trụ mới tính overall/verdict, gộp veto không nhân đôi", () => {
+  const a = healthy();
+  const base = computeAssessment(a);
+  // mới G1: finance/logistics có điểm → insufficient_data
+  assert.equal(base.scorecard.overallScore, null);
+
+  // chấm nốt competition (veto CR3 kèm theo)
+  const withComp = mergeExternalScores(
+    base,
+    { competition: { score: 9, confidence: "medium", reason: "CR3 thấp" } },
+    [{ code: "cr3_above_65", severity: "red", title: "CR3 cao", detail: "x", evidence: {} }],
+  );
+  assert.equal(withComp.scorecard.overallScore, null, "vẫn thiếu demand/differentiation");
+  assert.ok(withComp.scorecard.vetoes.some((v) => v.code === "cr3_above_65"));
+
+  const full = mergeExternalScores(
+    withComp,
+    {
+      demand: { score: 8, confidence: "medium", reason: "" },
+      differentiation: { score: 8, confidence: "low", reason: "" },
+    },
+    [],
+  );
+  assert.notEqual(full.scorecard.overallScore, null);
+  // veto đỏ kéo verdict về improve dù điểm cao
+  assert.equal(full.scorecard.verdict, "improve");
+
+  // gọi lại với cùng veto không nhân đôi
+  const again = mergeExternalScores(full, {}, [
+    { code: "cr3_above_65", severity: "red", title: "CR3 cao", detail: "x", evidence: {} },
+  ]);
+  assert.equal(again.scorecard.vetoes.filter((v) => v.code === "cr3_above_65").length, 1);
+});
+
+test("G3 mergeExternalScores: override score null thì GIỮ NGUYÊN trụ G1 (không đè)", () => {
+  const a = healthy();
+  const base = computeAssessment(a);
+  const before = base.scorecard.pillars.find((p) => p.pillar === "competition");
+  const merged = mergeExternalScores(base, { competition: { score: null, confidence: null, reason: "vẫn thiếu" } }, []);
+  const comp = merged.scorecard.pillars.find((p) => p.pillar === "competition");
+  assert.equal(comp?.score, null);
+  assert.equal(comp?.reason, before?.reason);
 });
