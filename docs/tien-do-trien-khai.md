@@ -1,6 +1,126 @@
 # TIẾN ĐỘ TRIỂN KHAI — VEXIM OPS
 
-> Cập nhật: 13/09/2026 · Thứ tự build đã chốt: **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** (21 màn Đợt 1)
+> Cập nhật: 15/09/2026 (G1+G2 Module 8) · Thứ tự build đã chốt: **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** (21 màn Đợt 1)
+
+## Cập nhật 15/09 — MODULE 8 GIAI ĐOẠN 3: tập trung thị trường CR3/CR5/HHI, Amazon 1P, velocity (migration 0027)
+
+- **Engine thuần** `web/src/lib/research/domain/concentration.ts` (9 test mới,
+  web **284 pass**):
+  - **Gộp variation theo `parent_asin`** trước khi tính (sales lấy MAX, không
+    cộng trùng); sponsored loại khỏi thị phần tự nhiên, chỉ tính mật độ quảng cáo.
+  - **CR3/CR5/HHI** theo doanh thu ước lượng (fallback đơn vị), yêu cầu tối
+    thiểu 10 sản phẩm organic và ≥70% có sales estimate — thiếu thì trả
+    `null`/"chưa đủ cơ sở", không bịa.
+  - **Veto đỏ**: CR3 > 65% (`cr3_above_65`) và Amazon 1P trong top 3 organic
+    (`amazon1p_top3`); trụ cạnh tranh thang 1–10 kèm lý do công khai.
+  - **Review velocity** từ 2 lần quét SERP (≥3 ASIN đủ 2 mốc mới có nghĩa);
+    `mergeCompetitorSnapshots` ghép vị trí/sponsored từ SERP với sales/1P từ
+    collection products; `scoreCompetitionFromSnapshots` một phát cho worker/webhook.
+- **Migration 0027**: unique index `(assessment_id, rule_code)` cho veto; 3 RPC
+  chỉ service_role — `vexim_research_worker_set_pillar` (điểm null hợp lệ =
+  chưa đủ cơ sở, điểm ngoài 1..10 bị chặn), `vexim_research_worker_add_veto`
+  (idempotent, tự cập nhật bộ đếm veto trên hồ sơ), `clear_vetoes` (chỉ gỡ veto
+  cạnh tranh khi quét lại, giữ veto tài chính/chứng nhận). Harness BƯỚC 26
+  xanh hoàn toàn (chặn authenticated, idempotent, đếm lại, NULL demand, thang điểm).
+- **Worker**: sau bước products (direct mock lẫn webhook Collection) tự chấm trụ
+  cạnh tranh + đồng bộ veto; port DB có `latestScoringRows/setPillar/
+  replaceCompetitionVetoes`; 2 test worker mới (**457 pass**).
+- **UI Tab 2 trên web** (`MarketConcentrationPanel` tại `/research/[id]`):
+  KPI CR3/CR5/HHI/Amazon 1P, biểu đồ thanh thị phần brand đã gộp variation,
+  bảng brand, điểm trụ cạnh tranh, cảnh báo mật độ sponsored, ghi chú sai số
+  BSR→sales 20–40%, chỗ để kích hoạt Keepa/velocity sau lần quét thứ 2. Demo
+  mode dựng dữ liệu minh họa bằng MockIntelligenceProvider (ngách demo-1 CR3
+  73,5% dính veto đỏ; demo-2 có Amazon 1P top 3 + 3 veto đỏ), gắn nhãn mock.
+- **Chưa làm (G4+)**: LLM phân cụm pain Quality/Expectation Gap/Logistics từ
+  review critical, trích dẫn gốc truy vết, spec sheet xưởng, ma trận
+  impact×effort; tab R&D và demand pillar hoàn chỉnh (velocity đã có engine,
+  chờ lần quét thật thứ 2).
+
+## Cập nhật 15/09 — MODULE 8 GIAI ĐOẠN 2: thu thập đối thủ & review (Rainforest, migration 0026)
+
+Tiếp nối G1, G2 xây xong toàn bộ đường ống thu thập dữ liệu thị trường, **chạy
+được với provider mock khi chưa có key; chưa thử API thật trong sandbox bị chặn
+egress** (cần trial key của VEXIM theo G0):
+
+- **Migration 0026** (`research.competitor_snapshots`, `research.reviews_raw`,
+  `research.credit_ledger`): snapshot SERP giữ lịch sử theo run; review 1–3★
+  **cố ý không có cột danh tính reviewer** và RPC từ chối payload còn
+  `reviewerName/reviewerId/reviewerProfileUrl`; sổ cái credit lũy kế theo org +
+  view tổng hợp chi/tháng. RPC người dùng `vexim_research_enqueue_run` (analyst
+  xếp hàng, chặn trùng kind đang queued/running, audit `collection.enqueue`);
+  4 RPC worker chỉ `service_role` execute (claim có `skip locked`, finish kèm
+  trừ credit, upsert đối thủ idempotent, upsert review dedupe theo
+  `source_review_id`); 4 view `security_invoker`. Harness PGlite BƯỚC 25 xanh
+  hoàn toàn (RLS cô lập org, PII rejection, quyền worker, idempotent).
+- **Parser thuần** `web/src/lib/research/domain/collection.ts`: search (tách
+  sponsored/organic), gộp product+offers+sales estimation (nhận diện Amazon
+  1P/BSR/variation/dims), review critical lọc sạch PII + chuẩn hóa ngày; thiếu
+  trường để null, không bịa số. 8 test web mới (tổng **274 pass**).
+- **Provider** `web/src/lib/intelligence/`: interface chung; `MockIntelligenceProvider`
+  deterministic (26 ASIN, CR3 cao + Amazon Basics 1P, 16 review critical/ASIN top,
+  collection in-memory) gắn `data_source='mock'`; `RainforestClient` thật (REST
+  `/request`, retry 429/5xx, Collections ≤1.000 request, webhook URL ký secret).
+- **Jobs** `web/src/lib/worker/jobs/research-collect.job.ts` (thuần, port DB giả
+  để test): `collectSerp` (≤2 trang, ~1 credit/trang), `collectProducts` (provider
+  thật → tạo Collection bất đồng bộ, webhook kết thúc; mock → gọi trực tiếp 3
+  request/ASIN), `collectReviews` (top ASIN của SERP, dừng theo target/trần trang,
+  dedupe), `drainResearchQueue`. 13 test worker mới (454 pass; còn 1 fail CÓ SẴN
+  từ test oauth phụ thuộc ngày hết hạn token 2026-09-18, không liên quan G2).
+- **Vận hành**: runner `runResearchCollect` (CLI `npm run worker:research-collect
+  -- --kinds=serp,products,reviews`), cron `/api/cron/research-collect?max=5`
+  (Bearer CRON_SECRET, trần 60s Vercel Hobby), **webhook**
+  `/api/webhooks/rainforest?secret=…` (GET lại kết quả collection rồi mới parse,
+  không tin payload webhook). Trang chi tiết hồ sơ có panel "Thu thập dữ liệu"
+  với nút xếp hàng + bảng tiến độ run/credits/lỗi + bảng đối thủ.
+- Env mới trong `.env.example`: `RAINFOREST_API_KEY`, `RAINFOREST_WEBHOOK_SECRET`,
+  `RAINFOREST_WEBHOOK_BASE_URL`, (`LLM_*` dành sẵn G4),
+  `RESEARCH_CREDIT_BUDGET_MONTHLY`.
+- **Chưa làm (G3+)**: CR3/CR5/HHI gộp variation theo brand, review velocity,
+  chỗ cắm Keepa, biểu đồ thị phần; thử thật bằng 100 credit trial; đối chiếu
+  field Rainforest thực tế khi có key (parser đã viết phòng thủ nhiều biến thể
+  field name).
+
+## Cập nhật 15/09 — MODULE 8 (PRODUCT R&D) GIAI ĐOẠN 1: máy tính what-if tài chính (migration 0025)
+
+Theo kế hoạch `docs/ke-hoach-module-8-tham-dinh-rnd-san-pham.md` (phương án B —
+Report Canvas structured blocks đã duyệt), G1 đã xong và chạy được **không cần
+khóa API ngoài**:
+
+- **Engine thuần TypeScript** (`web/src/lib/research/domain/`): P&L 3 kịch bản
+  giá, ACOS hòa vốn (biên trước ads), bảng size tier + phí FBA US 2026
+  (`FBA-US-2026-approx`, gồm bậc **Small Bulky mới từ 15/01/2026**), dimensional
+  weight (hệ số 139; bulky giả định mép tối thiểu 2"), mô phỏng tối ưu bao bì
+  (nén/nệm/đổi thùng, quy tiết kiệm/năm theo velocity), scorecard 5 trụ có
+  trọng số, **veto đỏ engine sinh không có thao tác gỡ** (biên bi quan <20%,
+  cert barrier, oversize…), roadmap lô test phủ hàng theo velocity BI QUAN
+  × 30–45 ngày + ngân sách ads test + mức lỗ tối đa + gate QUY MÔ/SỬA/DỪNG.
+  Trụ thiếu dữ liệu (cạnh tranh/nhu cầu/khác biệt ở G1) để `score = null` ⇒
+  kết luận `insufficient_data` — engine cố ý không tự suy diễn.
+- **Kiểm thử**: 5 file `web/tests/research-*.test.ts` (266 test web toàn bộ
+  PASS); harness PGlite `supabase` thêm BƯỚC 24 cho migration 0025 — **TẤT CẢ
+  PASS**, gồm chặn user vô vai trò/client_viewer gọi RPC, chặn INSERT trực
+  tiếp (chỉ SELECT cho `authenticated`, ghi duy nhất qua RPC security-definer),
+  lưu đủ 5 trụ/2 trụ điểm/veto/roadmap/audit `m8_research`, RLS cô lập org.
+- **Migration 0025**: schema `research.*` 7 bảng (assessments,
+  assessment_inputs versioned, pnl_snapshots, scorecards, veto_flags, roadmap,
+  collection_runs sẵn cho G2), RLS theo org (nhân viên VEXIM đọc tất cả, khách
+  đọc hồ sơ org mình; ghi qua RPC `public.vexim_research_create_assessment`),
+  6 view `public.vexim_research_*` bật `security_invoker`, enum
+  `iam.module_code` thêm `m8_research` (ALTER TYPE nằm ngoài transaction đúng
+  quy tắc Postgres). Idempotent, chạy 2 lần sạch.
+- **Màn hình**: `/research` (danh sách + mẫu demo), `/research/new` (máy tính
+  what-if tính trực tiếp, server action chạy lại engine ở server rồi mới gọi
+  RPC — không tin số client), `/research/[id]` (chi tiết scorecard/P&L/bao
+  bì/roadmap). Demo mode hiện 2 hồ sơ mẫu (1 ngách khỏe, 1 ngách cồng kềnh
+  dính veto đỏ) và không cho lưu; Supabase mode lưu thật qua RPC.
+- **Chưa làm (đúng thứ tự G2→G7)**: bảng thu thập Rainforest (SERP/offers/
+  sales/reviews, CR3/CR5/HHI, Amazon 1P, review velocity), trích dẫn pain +
+  LLM nháp (TipTap G5), risk register, PDF (G6/G7).
+- Nav trái thêm mục **🔬 Thẩm định R&D (M8)** (tạm gắn persona `ceo` vì bộ
+  persona demo chưa có `analyst`; DB đã phân vai trò analyst/dept_lead).
+- Phí FBA là ƯỚC LƯỢNG từ bảng 2026 (gắn nhãn nguồn `estimated_table`); con
+  số chuẩn sẽ lấy từ SP-API Product Fees ở G2 (trường `fbaFeeOverride`,
+  `FeeSource='spapi'`).
 
 ## Cập nhật 13/09 — MODULE 0: NGƯỜI DÙNG & PHÂN QUYỀN LÀM THẬT (migration 0022)
 

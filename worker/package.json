@@ -17,7 +17,8 @@
     "worker:ads-sync": "node --experimental-strip-types src/cli.ts ads:sync",
     "worker:ads-pull": "node --experimental-strip-types src/cli.ts ads:pull",
     "worker:ads-apply": "node --experimental-strip-types src/cli.ts ads:apply",
-    "worker:oauth-soon": "node --experimental-strip-types src/cli.ts oauth:soon"
+    "worker:oauth-soon": "node --experimental-strip-types src/cli.ts oauth:soon",
+    "worker:research-collect": "node --experimental-strip-types src/cli.ts research:collect"
   },
   "engines": {
     "node": ">=22"

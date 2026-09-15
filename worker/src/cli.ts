@@ -20,6 +20,7 @@ import { runListingsSyncCli } from "./runtime/run-listings-sync.ts";
 import { runInventoryFcSyncCli } from "./runtime/run-inventory-fc-sync.ts";
 import { runReportPullCli } from "./runtime/run-report-pull.ts";
 import { runAdsApplyCli, runAdsPullCli, runAdsSyncCli, runOauthSoonCli } from "./runtime/run-ads.ts";
+import { runResearchCollect } from "./runtime/run-research-collect.ts";
 
 /** Đọc tham số dạng --key=value / --flag (không có giá trị) */
 function parseArgs(argv: string[]): { flags: Set<string>; values: Record<string, string> } {
@@ -341,6 +342,23 @@ async function main() {
       }
       break;
     }
+    case "research:collect": {
+      // Module 8 G2: nhận hàng đợi collection (analyst bấm "Xếp hàng" trên web).
+      // --kinds=serp,products,reviews (mặc định cả 3) · --max=N · không DB = demo no-op.
+      if (loaded) process.stderr.write(`[worker] loaded env from ${loaded}\n`);
+      const { values } = parseArgs(process.argv.slice(3));
+      const kinds = (values.kinds ?? "serp,products,reviews").split(",").map((x) => x.trim()).filter(Boolean);
+      const result = await runResearchCollect({
+        kinds,
+        max: values.max ? Number(values.max) : 20,
+        log: (line) => process.stdout.write(line + "\n"),
+      });
+      process.stdout.write(`\n[research:collect] mode=${result.mode} provider=${result.providerName} db=${result.db}\n`);
+      for (const o of result.outcomes) {
+        process.stdout.write(`  ${o.kind.padEnd(9)} ${o.status.padEnd(17)} credits=${o.creditsUsed} · ${o.message}\n`);
+      }
+      break;
+    }
     case "help":
     case "--help":
     case "-h":
@@ -361,6 +379,7 @@ async function main() {
           "  ads:sync             M5 P1: đồng bộ cấu trúc Amazon Ads (profile → campaign → ad group → target)",
           "  ads:pull             M5 P1: TỰ KÉO 5 report Amazon Ads (--kind=all|campaigns|targeting|search-terms|advertised-products|purchased-products",
           "                       [--days=30] [--poll=3]) + cảnh báo ACOS/ngân sách + lấp ads_spend (F4/TACOS)",
+          "  research:collect    M8 G2: nhận hàng đợi quét Rainforest (--kinds=serp,products,reviews --max=N)",
           "  ads:apply            M5 P3: ghi các yêu cầu ĐÃ DUYỆT lên Amazon (bid · ngân sách · negative) [--limit=20]",
           "  oauth:soon           M0: shop sắp hết hạn token (--days=30 [--mark]) — --mark mới tạo cảnh báo",
           "  reports:pull         M3 nâng cao: TỰ KÉO 4 report FBA qua Reports API (--type=all|fc|receipts|storage-fees|noncompliance",

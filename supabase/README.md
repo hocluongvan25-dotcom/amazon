@@ -60,22 +60,39 @@ supabase/
 
 ## Cách đưa vào Supabase khi có project (VEXIM làm 1 lần)
 
-**Cách 1 — Supabase CLI (khuyến nghị):**
+> ⚠️ **Phải áp ĐỦ CHUỖI theo thứ tự.** Mỗi migration sau phụ thuộc các migration
+> trước — ví dụ `0025_module_8_research_core.sql` dùng schema `iam` (tạo ở 0001),
+> enum `iam.module_code` và hàm `iam.has_role` (0022). Nếu dán riêng 0025 vào
+> project mới/trống sẽ gặp:
+> `ERROR: 3F000: schema "iam" does not exist`.
+> Kiểm tra nhanh project đang ở mức nào:
+> ```sql
+> select s.schema_name,
+>        (select count(*) from information_schema.tables t where t.table_schema = s.schema_name) as bang
+>   from unnest(array['iam','connections','catalog','sales','inventory','ads','finance','ops','research']) as s(schema_name);
+> ```
+> Thiếu schema `iam` (hoảng các schema trên) = project chưa chạy chuỗi migration
+> → bắt đầu từ 0001, KHÔNG nhảy cóc.
+
+**Cách 1 — Script psql (nhanh nhất, áp đúng thứ tự cả chuỗi):**
+```bash
+# Lấy URI ở Dashboard → Project Settings → Database → Connection string → "Session"
+export DATABASE_URL="postgres://postgres:[MẬT KHẨU]@db.<ref>.supabase.co:5432/postgres"
+# (mạng IPv6/Vercel cổng 5432 không vào được thì dùng Session Pooler:
+#  postgres://postgres.<ref>:[MẬT KHẨU]@aws-0-<region>.pooler.supabase.com:5432/postgres)
+bash supabase/apply-migrations.sh           # 0001 → mới nhất, dừng ngay nếu lỗi
+bash supabase/apply-migrations.sh --seed    # kèm seed.sql (12 SOP template)
+```
+Script idempotent (`IF NOT EXISTS`/`CREATE OR REPLACE`) nên chạy lại an toàn.
+
+**Cách 2 — Supabase CLI:**
 ```bash
 supabase link --project-ref <ref>
-supabase db push        # tự chạy 0001 → 0007 theo thứ tự
-# sau đó chạy seed.sql qua SQL Editor (hoặc supabase db reset với seed cấu hình)
+supabase db push        # tự chạy theo thứ tự
+# sau đó chạy seed.sql qua SQL Editor (hoặc cấu hình seed cho supabase db reset)
 ```
 
-**Cách 2 — Dashboard:** mở **SQL Editor** trên supabase.com, dán & chạy theo thứ tự:
-1. `migrations/0001_init.sql`
-2. `migrations/0002_task_workflows.sql`
-3. `migrations/0003_cost_inputs.sql`
-4. `migrations/0004_ui_policies_notifs_profile_invite.sql`
-5. `migrations/0005_worker_inventory_rpc.sql`
-6. `migrations/0006_cleanup_rls_test_fixtures.sql` *(dọn fixture test — idempotent)*
-7. `migrations/0007_seed_admin_and_alerts.sql` *(super_admin + alerts)*
-8. `seed.sql`
+**Cách 3 — Dashboard SQL Editor:** mở **SQL Editor** trên supabase.com, dán & chạy **lần lượt theo thứ tự tên file** trong thư mục `migrations/` (bắt đầu từ `0001_init.sql` cho tới file số cao nhất hiện có), cuối cùng chạy `seed.sql`. Riêng các file 0025–0027 (Module 8) bắt buộc chạy SAU khi đã có đủ 0001–0024.
 
 > `seed/seed_demo.sql` **không còn cần** cho phần admin/alerts — 0007 đã thay thế
 > vì nó không phụ thuộc `auth.uid()` (thứ khiến seed_demo âm thầm bỏ qua trong SQL Editor).
@@ -87,7 +104,7 @@ supabase db push        # tự chạy 0001 → 0007 theo thứ tự
 ```bash
 cd supabase
 npm install     # cài PGlite (PostgreSQL 18 biên dịch sang WASM)
-npm test        # 53 PASS / 0 FAIL
+npm test        # toàn bộ BƯỚC 1..26 PASS / 0 FAIL
 ```
 
 Harness `tests/run-migrations.mjs` chạy **Postgres thật** trong bộ nhớ và:

@@ -28,3 +28,17 @@ export type { AdsApplyResult, AdsApplyShopResult } from "./jobs/ads-apply.job";
 export { ADS_REPORT_SPECS, ADS_ALL_KINDS, isAdsReportKind } from "./ads/registry";
 export type { AdsReportKind } from "./ads/registry";
 export { AdsClient, AdsLwaTokenManager, AdsApiRequestError } from "./amazon/ads";
+
+/* ---- Module 8 G2 (0026): thu thập đối thủ/review Rainforest ---- */
+export { runResearchCollect, SupabaseResearchPort, NoopResearchPort } from "./run-research-collect";
+export type { ResearchCollectResult } from "./run-research-collect";
+export {
+  collectSerp,
+  collectProducts,
+  collectReviews,
+  applyCompetitionScoring,
+  drainResearchQueue,
+  parseProductCollectionResults,
+  RESEARCH_COLLECTORS,
+} from "./jobs/research-collect.job";
+export type { ClaimedRun, ResearchWorkerPort, CollectOutcome } from "./jobs/research-collect.job";
