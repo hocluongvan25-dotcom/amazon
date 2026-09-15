@@ -97,6 +97,21 @@ supabase db push        # tự chạy theo thứ tự
 > `seed/seed_demo.sql` **không còn cần** cho phần admin/alerts — 0007 đã thay thế
 > vì nó không phụ thuộc `auth.uid()` (thứ khiến seed_demo âm thầm bỏ qua trong SQL Editor).
 
+### Sự cố thường gặp sau khi áp migration
+
+**Lỗi web: `Could not find the table 'public.vexim_research_assessments' in the schema cache`**
+(các RPC `vexim_research_*` đã có nhưng web vẫn báo thiếu bảng). Nguyên nhân: đoạn
+`CREATE VIEW` cuối file 0025/0026 không được áp (chạy thiếu khối khi dán thủ công),
+hoặc PostgREST chưa nạp lại schema cache. Xử lý:
+
+1. Chạy file vá sẵn có **trong SQL Editor** (idempotent, đã test trên PGlite):
+   `repair/recreate_research_public_views.sql` — dựng lại đủ 10 view public + grant
+   + `notify pgrst, 'reload schema'`.
+2. Nếu vẫn lỗi: Dashboard → **Settings → API → "Reload schema cache"** (hoạch đợi
+   vài giây rồi tải lại trang).
+3. Kiểm tra biến `NEXT_PUBLIC_SUPABASE_URL` của web có trỏ ĐÚNG project vừa áp
+   migration không (dán nhầm project khác cũng gây đúng triệu chứng này).
+
 > ⚠️ **KHÔNG** chạy file `tests/0000_local_compat_shim.sql` trên Supabase thật — nó chỉ giả lập `auth` schema & roles cho Postgres thường; Supabase đã có sẵn các thành phần đó.
 
 ## Kiểm chứng lại ở local (không cần Docker/Supabase)
