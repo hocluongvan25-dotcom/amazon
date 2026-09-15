@@ -334,6 +334,35 @@ Alert `account_health`, `odr_threshold` → SOP-08. KPI: số shop xanh/vàng/đ
 
 ---
 
+## MODULE 8 — PRODUCT RESEARCH & THẨM ĐỊNH R&D 🔬 (route `/research`, schema `research.*`)
+
+> Tài liệu thiết kế đầy đủ (G0–G7, phương án B Report Canvas, ~16 bảng, vòng đời
+> block drafted→in_review→verified): `docs/ke-hoach-module-8-tham-dinh-rnd-san-pham.md`.
+> KHÔNG gọi module này là "F4" — F4 là màn Lợi nhuận SKU của Module 6.
+
+### Trạng thái theo giai đoạn (cập nhật 15/09/2026)
+
+| Giai đoạn | Nội dung | Trạng thái |
+|---|---|---|
+| G0 | Chuẩn bị key Rainforest/LLM, cấu hình env | 🟡 chờ VEXIM (trial 100 credit, không chặn G1) |
+| **G1** | **Engine what-if nội bộ: P&L 3 kịch bản, break-even ACOS, size tier/phí FBA US 2026, tối ưu bao bì, scorecard 5 trụ (2 trụ điểm + 3 trụ "chưa đủ cơ sở"), veto đỏ, roadmap lô test** | ✅ **ĐÃ XONG (15/09)** — engine thuần `web/src/lib/research/domain/` + 5 file test (266 test web PASS); migration `0025` (7 bảng `research.*`, RLS theo org, RPC security-definer ghi duy nhất, 6 view `vexim_research_*`, audit `m8_research`) — BƯỚC 24 harness PGlite TẤT CẢ PASS; UI `/research`, `/research/new`, `/research/[id]` chạy cả demo lẫn Supabase mode |
+| G2 | Bảng thu thập Rainforest (SERP 20–50 ASIN, CR3/CR5/HHI gộp variation theo brand, Amazon 1P, offers, sales estimation, reviews) + worker collection + collection_runs | ⬜ chưa làm (bảng `research.collection_runs` đã dựng sẵn ở 0025) |
+| G3 | Màn duyệt dữ liệu thô + chốt mẫu thị trường + chỗ cắm Keepa; review velocity, pain clusters | ⬜ |
+| G4 | LLM nháp Tab 3 R&D (3 cụm pain, trích dẫn gốc ASIN/sao/ngày, spec sheet, ma trận impact×effort) | ⬜ |
+| G5 | Report Canvas structured blocks, TipTap chỉ cho khối `narrative`, ký từng phần | ⬜ (chỉ thêm TipTap ở phase này) |
+| G6 | Risk register 8–12 dòng, Full ~24 trang + Executive 2–4 trang, print CSS, watermark, TTL 30 ngày | ⬜ |
+| G7 | PDF khóa until approved qua Playwright (worker/VPS), bucket private `client-reports` | ⬜ (Playwright chỉ ở worker/VPS) |
+
+### Nguyên tắc cố hữu của module (không được bỏ qua ở các G sau)
+
+- Scorecard 5 trụ, trọng số finance .25 / competition .25 / demand .2 / differentiation .2 / logistics .1;
+  thiếu trụ → verdict `insufficient_data`, KHÔNG tự suy diễn; **veto đỏ do engine sinh, không có thao tác gỡ**.
+- Mọi số chưa có nguồn thật hiển thị "chưa có dữ liệu"/"chưa đủ cơ sở" — cấm số bịa.
+- Phí FBA trong engine là bảng ƯỚC LƯỢNG 2026 (nhãn `estimated_table`); SP-API Product Fees
+  đè vào trường `fbaFeeOverride` (nhãn `spapi`). Sai số BSR→sales 20–40% ghi ở phụ lục phương pháp.
+- Ghi DB duy nhất qua RPC bằng phiên đăng nhập; web không dùng service_role; khách (`client_viewer`)
+  chỉ đọc hồ sơ org mình, không tự tạo báo cáo.
+
 ## PHỤ LỤC — NGUỒN TÀI LIỆU AMAZON ĐÃ DÙNG KIỂM CHỨNG
 
 1. Listings Items API v2021-08-01 + patch `purchasable_offer` (audience bắt buộc): developer-docs.amazon.com/sp-api/docs/listings-items-api-v2021-08-01-reference

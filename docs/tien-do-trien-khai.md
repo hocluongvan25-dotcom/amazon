@@ -1,6 +1,48 @@
 # TIẾN ĐỘ TRIỂN KHAI — VEXIM OPS
 
-> Cập nhật: 13/09/2026 · Thứ tự build đã chốt: **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** (21 màn Đợt 1)
+> Cập nhật: 15/09/2026 · Thứ tự build đã chốt: **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** (21 màn Đợt 1)
+
+## Cập nhật 15/09 — MODULE 8 (PRODUCT R&D) GIAI ĐOẠN 1: máy tính what-if tài chính (migration 0025)
+
+Theo kế hoạch `docs/ke-hoach-module-8-tham-dinh-rnd-san-pham.md` (phương án B —
+Report Canvas structured blocks đã duyệt), G1 đã xong và chạy được **không cần
+khóa API ngoài**:
+
+- **Engine thuần TypeScript** (`web/src/lib/research/domain/`): P&L 3 kịch bản
+  giá, ACOS hòa vốn (biên trước ads), bảng size tier + phí FBA US 2026
+  (`FBA-US-2026-approx`, gồm bậc **Small Bulky mới từ 15/01/2026**), dimensional
+  weight (hệ số 139; bulky giả định mép tối thiểu 2"), mô phỏng tối ưu bao bì
+  (nén/nệm/đổi thùng, quy tiết kiệm/năm theo velocity), scorecard 5 trụ có
+  trọng số, **veto đỏ engine sinh không có thao tác gỡ** (biên bi quan <20%,
+  cert barrier, oversize…), roadmap lô test phủ hàng theo velocity BI QUAN
+  × 30–45 ngày + ngân sách ads test + mức lỗ tối đa + gate QUY MÔ/SỬA/DỪNG.
+  Trụ thiếu dữ liệu (cạnh tranh/nhu cầu/khác biệt ở G1) để `score = null` ⇒
+  kết luận `insufficient_data` — engine cố ý không tự suy diễn.
+- **Kiểm thử**: 5 file `web/tests/research-*.test.ts` (266 test web toàn bộ
+  PASS); harness PGlite `supabase` thêm BƯỚC 24 cho migration 0025 — **TẤT CẢ
+  PASS**, gồm chặn user vô vai trò/client_viewer gọi RPC, chặn INSERT trực
+  tiếp (chỉ SELECT cho `authenticated`, ghi duy nhất qua RPC security-definer),
+  lưu đủ 5 trụ/2 trụ điểm/veto/roadmap/audit `m8_research`, RLS cô lập org.
+- **Migration 0025**: schema `research.*` 7 bảng (assessments,
+  assessment_inputs versioned, pnl_snapshots, scorecards, veto_flags, roadmap,
+  collection_runs sẵn cho G2), RLS theo org (nhân viên VEXIM đọc tất cả, khách
+  đọc hồ sơ org mình; ghi qua RPC `public.vexim_research_create_assessment`),
+  6 view `public.vexim_research_*` bật `security_invoker`, enum
+  `iam.module_code` thêm `m8_research` (ALTER TYPE nằm ngoài transaction đúng
+  quy tắc Postgres). Idempotent, chạy 2 lần sạch.
+- **Màn hình**: `/research` (danh sách + mẫu demo), `/research/new` (máy tính
+  what-if tính trực tiếp, server action chạy lại engine ở server rồi mới gọi
+  RPC — không tin số client), `/research/[id]` (chi tiết scorecard/P&L/bao
+  bì/roadmap). Demo mode hiện 2 hồ sơ mẫu (1 ngách khỏe, 1 ngách cồng kềnh
+  dính veto đỏ) và không cho lưu; Supabase mode lưu thật qua RPC.
+- **Chưa làm (đúng thứ tự G2→G7)**: bảng thu thập Rainforest (SERP/offers/
+  sales/reviews, CR3/CR5/HHI, Amazon 1P, review velocity), trích dẫn pain +
+  LLM nháp (TipTap G5), risk register, PDF (G6/G7).
+- Nav trái thêm mục **🔬 Thẩm định R&D (M8)** (tạm gắn persona `ceo` vì bộ
+  persona demo chưa có `analyst`; DB đã phân vai trò analyst/dept_lead).
+- Phí FBA là ƯỚC LƯỢNG từ bảng 2026 (gắn nhãn nguồn `estimated_table`); con
+  số chuẩn sẽ lấy từ SP-API Product Fees ở G2 (trường `fbaFeeOverride`,
+  `FeeSource='spapi'`).
 
 ## Cập nhật 13/09 — MODULE 0: NGƯỜI DÙNG & PHÂN QUYỀN LÀM THẬT (migration 0022)
 

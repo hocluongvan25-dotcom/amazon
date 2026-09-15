@@ -4200,6 +4200,253 @@ ok(tamper, "0022 CHẶN: người thường KHÔNG sửa được hồ sơ ngư�
 await ex("rollback");
 await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
 
+// ===========================================================================
+console.log("\n=== BƯỚC 24: 0025 — Module 8 Product Research (G1: tài chính + scorecard) ===");
+// ===========================================================================
+ok(
+  await ex(rd("migrations/0025_module_8_research_core.sql"), "0025_module_8_research_core.sql"),
+  "0025 chạy sạch (schema research · 7 bảng · RPC · 6 view · enum m8_research)",
+);
+ok(await ex(rd("migrations/0025_module_8_research_core.sql"), "0025 lần 2"), "0025 idempotent");
+await cmp(
+  "0025: đủ 7 bảng trong schema research",
+  "select count(*) n from information_schema.tables where table_schema='research'",
+  7,
+);
+await cmp(
+  "0025: đủ 6 view vexim_research_* trong public",
+  `select count(*) n from information_schema.views where table_schema='public'
+     and table_name in ('vexim_research_assessments','vexim_research_scorecards',
+       'vexim_research_vetoes','vexim_research_roadmap','vexim_research_inputs','vexim_research_pnl')`,
+  6,
+);
+await cmp(
+  "0025: view list bật security_invoker (RLS org vẫn áp)",
+  `select count(*) n from pg_class c join pg_namespace n on n.oid=c.relnamespace
+    where n.nspname='public' and c.relname like 'vexim_research_%'
+      and 'security_invoker=true'=any(c.reloptions)`,
+  6,
+);
+await cmp(
+  "0025: audit có mã module m8_research",
+  `select count(*) n from pg_enum e join pg_type t on t.oid=e.enumtypid
+    where t.typname='module_code' and e.enumlabel='m8_research'`,
+  1,
+);
+
+function m8Payload(over = {}) {
+  return {
+    title: over.title ?? "Ngách test R&D",
+    marketplace: "US",
+    currency: "USD",
+    keywords: ["kitchen organizer"],
+    orgId: over.orgId ?? null,
+    engineVersion: "research-engine-0.1.0+FBA-US-2026-approx",
+    assumptions: {
+      title: "Ngách test R&D",
+      prices: { pessimistic: 24.99, base: 29.99, optimistic: 34.99 },
+      cogsPerUnit: 6,
+      inboundFreightPerUnit: 1.5,
+    },
+    result: {
+      scorecard: {
+        verdict: "insufficient_data",
+        overallScore: null,
+        pillars: [
+          { pillar: "finance", weight: 0.25, score: 3, confidence: "medium", reason: "biên cơ sở 18.1%" },
+          { pillar: "competition", weight: 0.25, score: null, confidence: null, reason: "chưa thu thập" },
+          { pillar: "demand", weight: 0.2, score: null, confidence: null, reason: "chưa thu thập" },
+          { pillar: "differentiation", weight: 0.2, score: null, confidence: null, reason: "chưa thu thập" },
+          { pillar: "logistics", weight: 0.1, score: 10, confidence: "medium", reason: "small standard" },
+        ],
+        vetoes: [
+          { code: "margin_below_20", severity: "red", title: "Biên dưới 20%", detail: "biên bi quan 5.4%", evidence: { pessimisticMarginPct: 5.4 } },
+        ],
+      },
+      financial: {
+        feeTableVersion: "FBA-US-2026-approx",
+        currentPackaging: { tier: "small_standard" },
+        scenarios: {
+          pessimistic: { netMarginPct: 5.4 },
+          base: { netMarginPct: 18.1 },
+          optimistic: { netMarginPct: 27.0 },
+        },
+      },
+      roadmap: {
+        testOrderQty: 135, coverDays: 45, lotCapital: 1012.5, adsBudgetPerDay: 24,
+        adsTestDays: 45, adsTestSpend: 1080, breakEvenAcosPct: 53.8, maxLossAmount: 1080,
+        gates: [], killCriteria: [], notes: [],
+      },
+    },
+  };
+}
+async function rpcM8(over = {}) {
+  try {
+    const r = await db.query(
+      "select public.vexim_research_create_assessment($1::jsonb) as r",
+      [JSON.stringify(m8Payload(over))],
+    );
+    return r.rows[0].r;
+  } catch (e) {
+    return { error: e.message.split("\n")[0] };
+  }
+}
+
+await ex("begin");
+// Hai org khách + 2 user khách + 1 analyst nhân viên VEXIM + 1 người vô vai trò.
+// Dùng id MỚI (outsiderId ở bước 23 đã được gán org_admin cho test khác).
+const analystM8 = "eeee0000-0000-4000-8000-00000000a001";
+const noRoleM8 = "eeee0000-0000-4000-8000-00000000a002";
+const clientA = "dddd0000-0000-4000-8000-0000000000a1";
+const clientB = "dddd0000-0000-4000-8000-0000000000b2";
+const orgA = "cccc0000-0000-4000-8000-0000000000a1";
+const orgB = "cccc0000-0000-4000-8000-0000000000b2";
+await ex(`
+  insert into iam.organizations(id,name,slug) values
+    ('${orgA}','Khách A','khach-a-m8'),
+    ('${orgB}','Khách B','khach-b-m8');
+  insert into auth.users(id,email) values
+    ('${analystM8}','analyst-m8@vexim.vn'),
+    ('${noRoleM8}','norole-m8@vexim.vn'),
+    ('${clientA}','khach-a@example.test'),
+    ('${clientB}','khach-b@example.test');
+  insert into iam.user_profiles(id,display_name,email,vexim_employee,org_id,status) values
+    ('${analystM8}','Chuyên viên R&D','analyst-m8@vexim.vn',true,null,'active'),
+    ('${noRoleM8}','Người vô vai trò','norole-m8@vexim.vn',true,null,'active'),
+    ('${clientA}','Chủ khách A','khach-a@example.test',false,'${orgA}','active'),
+    ('${clientB}','Chủ khách B','khach-b@example.test',false,'${orgB}','active');
+  insert into iam.role_assignments(user_id,role) values
+    ('${analystM8}','analyst'),
+    ('${clientA}','client_viewer');
+`);
+
+// Bọc ca KỲ VỌNG BỊ CHẶN trong DO-block để lỗi không làm hỏng transaction ngoài
+// (đúng pattern các bước RLS trước: lỗi nằm trong subtransaction plpgsql).
+async function expectRpcDenied(label) {
+  const json = JSON.stringify(m8Payload({ orgId: orgA })).replace(/'/g, "''");
+  return ex(
+    `do $$
+     begin
+       perform public.vexim_research_create_assessment('${json}'::jsonb);
+       raise exception '[test] LẼ RA PHẢI BỊ CHẶN';
+     exception
+       when others then
+         if sqlerrm not like '%không được tạo hồ sơ%' then
+           raise exception '[test] chặn sai lý do: %', sqlerrm;
+         end if;
+     end $$;`,
+    label,
+  );
+}
+
+// (1) người không vai trò không tạo được hồ sơ
+await ex(`set local role authenticated; select set_config('request.jwt.claim.sub','${noRoleM8}',true);`);
+ok(
+  await expectRpcDenied("user vô vai trò gọi RPC (kỳ vọng FAIL)"),
+  "0025 CHẶN: user vô vai trò không tạo được hồ sơ",
+);
+
+// (2) client_viewer (khách) cũng không tạo được
+await ex(`select set_config('request.jwt.claim.sub','${clientA}',true);`);
+ok(
+  await expectRpcDenied("client_viewer gọi RPC (kỳ vọng FAIL)"),
+  "0025 CHẶN: client_viewer không tạo được hồ sơ (chỉ nhận báo cáo)",
+);
+
+// (3) analyst nhân viên VEXIM tạo cho org khách A
+await ex(`select set_config('request.jwt.claim.sub','${analystM8}',true);`);
+const created = await rpcM8({ orgId: orgA, title: "Giá đỡ inox" });
+ok(created?.ok === true && /^PR-\d{6}-\d{4}$/.test(created?.code), `0025: analyst tạo hồ sơ, mã ${created?.code}`);
+const created2 = await rpcM8({ orgId: orgA, title: "Hộp cơm" });
+ok(
+  created2?.code && created2.code !== created?.code && created2.code.endsWith("-0002"),
+  `0025: mã hồ sơ tuần tự trong org/tháng — ${created.code}, ${created2.code}`,
+);
+
+// (4) GHI TRỰC TIẾP bị chặn (authenticated chỉ có SELECT; còn RLS cũng không có policy ghi)
+const directInsert = await ex(
+  `do $$
+   begin
+     insert into research.assessments(org_id,code,title) values
+       ('${orgA}','PR-X-9','Ghi lén');
+     raise exception '[test] LẼ RA PHẢI BỊ CHẶN';
+   exception
+     when others then
+       if sqlerrm not like '%permission denied%'
+          and sqlerrm not like '%row-level security%' then
+         raise exception '[test] chặn sai lý do: %', sqlerrm;
+       end if;
+   end $$;`,
+  "ghi trực tiếp bảng research.assessments (kỳ vọng FAIL)",
+);
+ok(directInsert, "0025 CHẶN: authenticated không INSERT trực tiếp, bắt buộc qua RPC");
+
+// (5) dữ liệu engine được lưu đủ: scorecard 5 trụ (2 trụ điểm, 3 trụ null), veto, roadmap, pnl, inputs, audit
+const aId = created.id;
+await cmp("0025: lưu đủ 5 trụ điểm", `select count(*) n from public.vexim_research_scorecards where assessment_id='${aId}'`, 5);
+await cmp(
+  "0025: G1 chỉ 2 trụ có điểm (finance + logistics), 3 trụ chưa đủ cơ sở",
+  `select count(*) n from public.vexim_research_scorecards where assessment_id='${aId}' and score is not null`,
+  2,
+);
+await cmp(
+  "0025: 1 veto đỏ margin_below_20",
+  `select count(*) n from public.vexim_research_vetoes where assessment_id='${aId}' and severity='red'`,
+  1,
+);
+const listRow = await one(`select code,status,verdict,base_margin_pct,pess_margin_pct,size_tier,veto_count,red_veto_count
+  from public.vexim_research_assessments where id='${aId}'`);
+ok(
+  listRow?.verdict === "insufficient_data" &&
+    Number(listRow.base_margin_pct) === 18.1 &&
+    Number(listRow.pess_margin_pct) === 5.4 &&
+    listRow.size_tier === "small_standard" &&
+    Number(listRow.red_veto_count) === 1,
+  `0025: view list tóm tắt đúng — ${JSON.stringify(listRow)}`,
+);
+const rm = await one(`select * from public.vexim_research_roadmap where assessment_id='${aId}'`);
+ok(
+  Number(rm?.test_order_qty) === 135 && Number(rm?.ads_test_spend) === 1080 && Number(rm?.max_loss_amount) === 1080,
+  "0025: roadmap lưu đủ lô test/ngân sách ads/mức lỗ tối đa",
+);
+await cmp("0025: inputs version 1", `select count(*) n from public.vexim_research_inputs where assessment_id='${aId}' and version=1`, 1);
+await cmp("0025: pnl snapshot 1 dòng", `select count(*) n from public.vexim_research_pnl where assessment_id='${aId}'`, 1);
+// Nhật ký audit chỉ admin đọc được (RLS) → kiểm bằng super_admin.
+await ex(`reset role; select set_config('request.jwt.claim.sub','${adminId}',false);`);
+await cmp(
+  "0025: audit ghi assessment.create với module m8_research",
+  `select count(*) n from iam.audit_logs where entity='${created.code}' and action='assessment.create' and module='m8_research'`,
+  1,
+);
+// Quay lại vai trò authenticated cho các phép thử RLS khách hàng
+await ex(`set local role authenticated;`);
+
+// (6) RLS theo org: khách A thấy hồ sơ của mình; khách B KHÔNG thấy
+await ex(`select set_config('request.jwt.claim.sub','${clientB}',true);`);
+await cmp(
+  "0025 CHẶN RLS: khách B không thấy hồ sơ org A",
+  `select count(*) n from public.vexim_research_assessments where org_id='${orgA}'`,
+  0,
+);
+await cmp(
+  "0025 CHẶN RLS: khách B không thấy cả pnl snapshot (bảng con theo assessment)",
+  `select count(*) n from public.vexim_research_pnl where assessment_id='${aId}'`,
+  0,
+);
+await ex(`select set_config('request.jwt.claim.sub','${clientA}',true);`);
+await cmp(
+  "0025: khách A thấy đúng 2 hồ sơ của org mình",
+  `select count(*) n from public.vexim_research_assessments where org_id='${orgA}'`,
+  2,
+);
+await cmp(
+  "0025: khách A không thấy bảng cờ veto nội bộ chưa phát hành? (G1 vẫn cho đọc trong org)",
+  `select count(*) n from public.vexim_research_vetoes where assessment_id='${aId}'`,
+  1,
+);
+await ex("reset role; rollback;");
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+
 console.log(`\n${"=".repeat(70)}`);
 console.log(fails === 0 ? "TẤT CẢ PASS" : `${fails} MỤC FAIL`);
 console.log("=".repeat(70));
