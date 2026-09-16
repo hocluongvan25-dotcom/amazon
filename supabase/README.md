@@ -100,6 +100,13 @@ supabase db push        # tự chạy theo thứ tự
 > Chạy SAU 0030. Idempotent; tự dựng lại view được cả khi deployment cũ chưa chạy 0024.
 > Chi tiết điều tra & cách kiểm chứng: `docs/bao-cao-loi-ten-shop-amazon.md`.
 
+> **`0032_shop_admin.sql`** — quản lý shop trên màn Module 0: `seller_accounts.seller_id`
+> bỏ NOT NULL (thêm shop trước, authorize sau), 3 RPC `vexim_admin_create_shop` /
+> `vexim_admin_delete_shop` (xoá 2 bước) / `vexim_worker_claim_shop_seller_id` (chỉ
+> callback), và **ẩn 6 shop mock** (`status='revoked'`). Chạy SAU 0031. Idempotent;
+> nhật ký xoá shop được giữ lại (ghi với `seller_account_id = null`).
+> Chi tiết: `docs/tien-do-trien-khai.md` mục 16/09/2026.
+
 > `seed/seed_demo.sql` **không còn cần** cho phần admin/alerts — 0007 đã thay thế
 > vì nó không phụ thuộc `auth.uid()` (thứ khiến seed_demo âm thầm bỏ qua trong SQL Editor).
 

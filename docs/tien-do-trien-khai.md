@@ -1,6 +1,6 @@
 # TIẾN ĐỘ TRIỂN KHAI — VEXIM OPS
 
-> Cập nhật: 15/09/2026 (G1+G2 Module 8) · Thứ tự build đã chốt: **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** (21 màn Đợt 1)
+> Cập nhật: 16/09/2026 (quản lý shop Module 0 · tên shop Amazon) · G1+G2 Module 8 · Thứ tự build đã chốt: **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** (21 màn Đợt 1)
 
 ## Cập nhật 15/09 — MODULE 8 GIAI ĐOẠN 3: tập trung thị trường CR3/CR5/HHI, Amazon 1P, velocity (migration 0027)
 
@@ -1269,3 +1269,29 @@ Code chỉ đọc **5 tên** này (`grep -rn "process.env" web/src`):
 
 **VEXIM cần làm:** chạy migration `0031` (SQL Editor) → Redeploy web → mở Module 0 → Kết nối shop → bấm **[⤓ Đồng bộ tên shop Amazon]**.
 Chi tiết đầy đủ + checklist API + SQL kiểm tra: **`docs/bao-cao-loi-ten-shop-amazon.md`**.
+
+---
+
+## 16/09/2026 — Quản lý shop: thêm shop mới · xoá shop cũ · dọn giao diện Module 0 (đã xử lý)
+
+**Yêu cầu (chủ dự án):** (1) 6 shop demo phải biến mất khỏi màn Kết nối shop, (2) thêm nút **[+ Thêm shop mới]** để sau này kết nối cho dễ, (3) giao diện gọn hơn, (4) xoá 3 khối chữ thừa (checklist MD1000/MD9100 · panel "Đề xuất đổi tên thân thiện (thay A1/B1/P1)" kèm SQL · panel "Fix MD9100 — This app can't connect right now").
+
+**Migration `0032_shop_admin.sql`** (idempotent, tự soát ở DO-block cuối):
+1. `connections.seller_accounts.seller_id` **bỏ NOT NULL** — cho phép tạo shop *trước* khi authorize (chưa biết selling partner id).
+2. `vexim_admin_create_shop(p_display_name, p_marketplace, p_seller_id)` — chỉ admin; tên bắt buộc ≤ 120 ký tự, marketplace phải thuộc danh sách thật, seller id rỗng ⇒ NULL / có thì chuẩn hoá HOA và khớp `^[A-Z0-9]{6,32}$`; shop mới **`status='paused'` + `data_source='production'`** (worker chỉ đồng bộ shop `active` ⇒ chưa cắm nhầm vào cron production); trùng `(seller_id, marketplace)` ⇒ trả `created=false` và **giữ nguyên tên cũ**, không nhân bản; ghi audit `shop.create`.
+3. `vexim_admin_delete_shop(p_id, p_force)` — **2 bước an toàn**: `p_force=false` *chỉ đếm* (số bản ghi ở mọi bảng có cột `seller_account_id`, dò động qua `pg_attribute`, kèm cả `iam.audit_logs` và `connections.oauth_tokens`) rồi trả `requires_force=true` + câu giải thích; chỉ `p_force=true` mới xoá thật (51 khoá ngoại `ON DELETE CASCADE`). Audit `shop.delete` ghi **TRƯỚC** khi xoá với `seller_account_id = null` nên **không bị xoá theo shop** — sau khi xoá vẫn còn dấu vết ai xoá shop nào.
+4. `vexim_worker_claim_shop_seller_id(...)` — **chỉ `service_role`** (callback OAuth gọi): shop chưa có seller id ⇒ nhận `selling_partner_id` thật từ Amazon (`adopted=true`); shop đã có ⇒ chỉ so khớp (`matches`), **lệch shop thì callback từ chối lưu token**; đụng `unique_violation` ⇒ trả về shop sẵn có, không tạo bản sao.
+5. **Ẩn 6 shop mock**: `status='revoked'` (giữ nguyên dòng + dữ liệu, chỉ biến khỏi danh sách vận hành) — không xoá dữ liệu demo.
+6. `revoke`/`grant` + self-check: RPC admin chỉ `authenticated` gọi được và bên trong chặn bằng `is_user_admin()`, RPC worker chỉ `service_role`, không policy ghi nào bị hở.
+
+**Web (Vercel Root Directory = `web`):**
+- `web/src/lib/data/admin-rpc.ts` (mới) — gom `adminRpc()` + `supabaseAdminConfig()` + `isMissingRpcError()` dùng chung cho mọi RPC admin; chỉ gọi `/rest/v1/rpc/<fn>` và dịch lỗi PostgREST `{message,hint,details}` sang tiếng Việt.
+- `web/src/lib/data/shop-admin-model.ts` (mới, thuần — dùng chung client & server) + `shop-admin.ts` (mới, server-only): `createShop`, `deleteShop` (2 bước), `claimShopSellerId`, `describeDependents`; lỗi thiếu RPC chỉ đúng file `0032`.
+- `web/src/app/(app)/module0/connect/actions.ts` (mới, `"use server"`): 3 server action, mỗi action qua `guardAdmin()` (có session + `mode === "supabase"` + persona `ceo`).
+- `ShopConnectTable.tsx` viết lại: toolbar **[+ Thêm shop mới]** / **[⤓ Đồng bộ tên shop Amazon]**, mỗi dòng có nút **[Xoá]** mở modal 2 bước (hỏi → liệt kê dữ liệu phụ thuộc → xác nhận), modal thêm shop (tên · marketplace · seller id tuỳ chọn) và modal kết nối.
+- `/api/oauth/amazon/callback` gọi `claimShopSellerId` thay cho PATCH REST cũ (đã bỏ — sai cú pháp PostgREST `schema.table`); shop lệch ⇒ **không lưu token**, báo lỗi tiếng Việt.
+- `page.tsx` bỏ hẳn 3 khối chữ thừa theo yêu cầu (checklist MD1000/MD9100, panel đổi tên thân thiện + SQL, panel Fix MD9100), đổi tên khối "Điều kiện kết nối (biến môi trường)", bỏ jargon MD ở header.
+
+**Kiểm chứng:** `supabase npm test` **TẤT CẢ PASS** (thêm **BƯỚC 32** ~30 assert trên Postgres 18: 0032 chạy sạch + chạy lại vẫn sạch, 6 mock đã revoked mà 2 shop production vẫn active, `seller_id` cho NULL, chặn non-admin, thêm shop ⇒ `paused` và `active_production_shops()` bỏ qua, trùng seller id giữ tên cũ, chặn tên/marketplace/seller id/data_source sai, xoá bước 1 chỉ đếm rồi xoá thật khi `force=true`, audit xoá sống sót, shop có token ⇒ bắt buộc xác nhận + bản đếm nêu `oauth_tokens`, claim seller id đủ 3 nhánh, web **không đọc được** bảng token) · `web tsc --noEmit` sạch · `web npm test` **368/368** (11 test mới `tests/shop-admin.test.ts`) · `next build` OK · `worker npm test` **481/481**.
+
+**VEXIM cần làm:** chạy `0032_shop_admin.sql` trong SQL Editor **SAU `0031`** → Redeploy web → mở **Module 0 → Kết nối shop**: 6 shop demo biến mất, bấm **[+ Thêm shop mới]** để tạo shop rồi mới authorize (callback tự điền seller id thật), shop cũ không dùng nữa thì bấm **[Xoá]** và xác nhận bước 2. **Không cần** tự chạy SQL `update` tay nữa.

@@ -22,6 +22,7 @@ import { NextResponse } from "next/server";
 
 import { normalizeRegion, exchangeCodeForRefreshToken, explainLwaError, validateRedirectUri } from "@/lib/spapi/oauth";
 import { listShopCredentials, syncStoreNamesWithFreshToken } from "@/lib/data/shop-names";
+import { claimShopSellerId } from "@/lib/data/shop-admin";
 
 export const dynamic = "force-dynamic";
 
@@ -164,12 +165,36 @@ export async function GET(req: Request) {
   }
   if (!shop) return back(req, { oauth: "error", msg: "Shop không tồn tại." });
 
+  // ---------------------------------------------------------------------------
+  // ĐỐI CHIẾU SELLER ID — chống authorize nhầm shop
+  // ---------------------------------------------------------------------------
+  // 3 trường hợp:
+  //   1. Shop đã khai seller_id  → phải TRÙNG selling_partner_id Amazon trả,
+  //      lệch ⇒ KHÔNG lưu token (bấm nhầm sang shop khác).
+  //   2. Shop chưa có seller_id (tạo bằng nút [+ Thêm shop mới] — migration 0032)
+  //      → NHẬN seller id thật từ Amazon rồi lưu tiếp. Trước 0032 cột seller_id là
+  //      NOT NULL nên không thể tạo shop trước khi authorize — đây là lý do luồng
+  //      "thêm shop → gửi link → shop bấm Authorize" trước đây không chạy được.
+  //   3. Amazon không trả selling_partner_id → vẫn lưu token, nhưng ghi chú để
+  //      người vận hành đối chiếu tay.
   if (sellingPartnerId !== "" && shop.seller_id && shop.seller_id !== sellingPartnerId) {
     return back(req, {
       oauth: "error",
       seller: sellerId,
       msg: `Bạn vừa authorize shop KHÁC (Amazon trả ${sellingPartnerId}, shop này là ${shop.seller_id}) nên KHÔNG lưu token.`,
     });
+  }
+  if (sellingPartnerId !== "" && !shop.seller_id) {
+    const claim = await claimShopSellerId({ sellerAccountId: sellerId, sellerIdFromAmazon: sellingPartnerId });
+    if (!claim.matches) {
+      console.error(`[OAuth Callback] Không nhận được seller id: ${claim.message}`);
+      return back(req, {
+        oauth: "error",
+        seller: sellerId,
+        msg: `Không gắn được Seller ID cho shop: ${claim.message} (Amazon trả ${sellingPartnerId}).`,
+      });
+    }
+    console.log(`[OAuth Callback] Đã nhận seller id ${claim.sellerId} cho shop ${shop.display_name ?? sellerId}`);
   }
 
   console.log(`[OAuth Callback] Exchanging code: ${code.slice(0, 8)}... redirectUri=${redirectUri} seller=${sellerId}`);

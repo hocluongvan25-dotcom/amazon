@@ -32,12 +32,16 @@
 
 // Import TƯƠNG ĐỐI (không dùng alias "@/…") để worker/tests import trực tiếp file
 // này bằng node --test được — alias chỉ Next.js resolve.
+import { adminRpc, isMissingRpcError } from "./admin-rpc.ts";
 import {
   explainMissingStoreName,
   fetchStoreNamesWithToken,
   type StoreNameFetchResult,
 } from "../spapi/shop-name.ts";
 import { normalizeStoreName } from "../spapi/whoami.ts";
+
+// Re-export để code cũ (và test) vẫn import từ đây được như trước.
+export { isMissingRpcError };
 
 /** Seller id của token self-authorization mặc định (shop production VEXIM). */
 export const DEFAULT_SELF_SELLER_ID = "AQMVYI4HJTI4C";
@@ -88,71 +92,6 @@ export type ShopNameSyncReport = {
   skipped: number;
   rows: ShopNameSyncRow[];
 };
-
-type RpcResult<T> = { ok: true; data: T } | { ok: false; error: string; status: number | null };
-
-function supabaseAdminConfig(): { url: string; key: string } | null {
-  const url = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").replace(/\/$/, "");
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
-  if (!url || !key) return null;
-  return { url, key };
-}
-
-/**
- * Gọi RPC bằng service_role.
- *
- * CHỈ gọi RPC trong schema `public` (path `/rest/v1/rpc/<fn>`) — không đụng
- * `/rest/v1/connections.xxx` vì PostgREST sẽ trả PGRST205 (bài học sự cố
- * 12/09/2026, xem migration 0008).
- */
-async function adminRpc<T>(
-  fn: string,
-  body: Record<string, unknown>,
-  fetchFn: typeof fetch,
-): Promise<RpcResult<T>> {
-  const cfg = supabaseAdminConfig();
-  if (!cfg) {
-    return { ok: false, error: "Chưa cấu hình NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY", status: null };
-  }
-  let res: Response;
-  try {
-    res = await fetchFn(`${cfg.url}/rest/v1/rpc/${fn}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: cfg.key,
-        Authorization: `Bearer ${cfg.key}`,
-      },
-      body: JSON.stringify(body ?? {}),
-      cache: "no-store",
-    });
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e), status: null };
-  }
-  const text = await res.text();
-  let data: unknown = null;
-  try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    data = text;
-  }
-  if (!res.ok) {
-    const message =
-      typeof data === "object" && data !== null && "message" in data
-        ? String((data as { message: unknown }).message)
-        : `HTTP ${res.status}`;
-    return { ok: false, error: message, status: res.status };
-  }
-  return { ok: true, data: data as T };
-}
-
-/** RPC chưa tồn tại (migration 0031 chưa chạy) — dùng để fallback thay vì sập. */
-export function isMissingRpcError(error: string, status: number | null): boolean {
-  return (
-    status === 404 ||
-    /PGRST202|PGRST205|does not exist|schema cache/i.test(error)
-  );
-}
 
 /**
  * Danh sách shop + token (service_role). Trả `null` khi KHÔNG đọc được để caller
