@@ -112,3 +112,41 @@ test("có sẵn lịch gate 8 tuần và kill criteria rating < 4 sau 50 đơn",
   assert.ok(r.gates.length >= 4);
   assert.ok(r.killCriteria.some((k) => k.includes("Rating < 4")));
 });
+
+/* ---- velocityLadderRange: khoảng min–max khi CHƯA chốt velocity (sự cố 16/09/2026) ---- */
+import { velocityLadder, velocityLadderRange } from "../src/lib/research/domain/roadmap.ts";
+
+test("velocityLadderRange: chưa chốt velocity vẫn ra khoảng lô test/vốn/ads/lỗ từ lưới", () => {
+  const a = healthy({ pessimisticUnitsPerDay: undefined });
+  const f = computeFinancial(a);
+  const lr = velocityLadderRange(velocityLadder(a, f));
+  // Lưới mặc định 1..10 đơn/ngày × 45 ngày phủ
+  assert.deepEqual(lr.testOrderQty, [45, 450]);
+  // Vốn = qty × landed 7.5
+  assert.deepEqual(lr.lotCapital, [337.5, 3375]);
+  // Ads đề xuất = velocity × PPC/đơn (8$) → 8..80/ngày; tổng 45 ngày
+  assert.deepEqual(lr.adsBudgetPerDay, [8, 80]);
+  assert.deepEqual(lr.adsTestSpend, [360, 3600]);
+  assert.ok(lr.maxLoss !== null);
+  assert.ok(lr.maxLoss[1] > lr.maxLoss[0]); // mức cao lỗ nhiều hơn
+});
+
+test("velocityLadderRange: thiếu CPC/CR → cột ads null nhưng lô test/vốn/lỗ vẫn có khoảng", () => {
+  const a = healthy({ pessimisticUnitsPerDay: undefined, cpc: undefined, conversionRate: undefined });
+  const f = computeFinancial(a);
+  const lr = velocityLadderRange(velocityLadder(a, f));
+  assert.equal(lr.adsBudgetPerDay, null);
+  assert.equal(lr.adsTestSpend, null);
+  assert.deepEqual(lr.testOrderQty, [45, 450]);
+  assert.deepEqual(lr.lotCapital, [337.5, 3375]);
+  assert.ok(lr.maxLoss !== null); // lỗ hàng vẫn tính được (chỉ thiếu phần ads)
+});
+
+test("velocityLadderRange: lưới rỗng → mọi khoảng null (không vỡ UI)", () => {
+  const lr = velocityLadderRange([]);
+  assert.equal(lr.testOrderQty, null);
+  assert.equal(lr.lotCapital, null);
+  assert.equal(lr.adsBudgetPerDay, null);
+  assert.equal(lr.adsTestSpend, null);
+  assert.equal(lr.maxLoss, null);
+});

@@ -12,6 +12,7 @@ import {
   adFeasibility,
   cpcCrSensitivityGrid,
   velocityLadder,
+  velocityLadderRange,
   type AssessmentResult,
   type ScenarioKey,
 } from "@/lib/research/domain";
@@ -84,6 +85,7 @@ export function ResearchResultView({ result }: { result: AssessmentResult }) {
   const feas = adFeasibility(result.assumptions, s.pessimistic);
   const grid = cpcCrSensitivityGrid(s.pessimistic);
   const ladder = velocityLadder(result.assumptions, fin);
+  const lr = velocityLadderRange(ladder);
   const monthly500 = fin.monthly.find((m) => m.unitsPerMonth === 500);
   const redVetoes = scorecard.vetoes.filter((v) => v.severity === "red");
   const warnVetoes = scorecard.vetoes.filter((v) => v.severity === "warning");
@@ -402,9 +404,58 @@ export function ResearchResultView({ result }: { result: AssessmentResult }) {
       {/* Roadmap lô test */}
       <Panel title="Lộ trình validate (G1)" hint="mọi mốc lấy theo kịch bản BI QUAN">
         <KpiGrid>
-          <KpiCard label={`Lô test (${rm.coverDays} ngày phủ)`} value={rm.testOrderQty === null ? "—" : `${rm.testOrderQty} đơn`} sub={rm.testOrderQty === null ? "nhập đơn/ngày bi quan" : `vốn hàng ${usd(rm.lotCapital, 0)}`} tone="flat" />
-          <KpiCard label="Ads thăm dò" value={rm.adsBudgetPerDay === null ? "—" : `${usd(rm.adsBudgetPerDay)}/ngày`} sub={`${rm.adsTestDays} ngày · tổng ${usd(rm.adsTestSpend, 0)}`} tone="flat" />
-          <KpiCard label="Mức lỗ tối đa" value={usd(rm.maxLossAmount, 0)} sub="vượt mức này → DỪNG" tone={rm.maxLossAmount !== null && rm.maxLossAmount > 3000 ? "down" : "warn"} />
+          <KpiCard
+            label={`Lô test (${rm.coverDays} ngày phủ)`}
+            value={
+              rm.testOrderQty !== null
+                ? `${rm.testOrderQty} đơn`
+                : lr.testOrderQty !== null
+                  ? `${lr.testOrderQty[0]}–${lr.testOrderQty[1]} đơn`
+                  : "—"
+            }
+            sub={
+              rm.testOrderQty !== null
+                ? `vốn hàng ${usd(rm.lotCapital, 0)}`
+                : lr.lotCapital !== null
+                  ? `vốn ${usd(lr.lotCapital[0], 0)}–${usd(lr.lotCapital[1], 0)} · chốt velocity ở lưới bên dưới`
+                  : "nhập đơn/ngày bi quan"
+            }
+            tone="flat"
+          />
+          <KpiCard
+            label="Ads thăm dò"
+            value={
+              rm.adsBudgetPerDay !== null
+                ? `${usd(rm.adsBudgetPerDay)}/ngày`
+                : lr.adsBudgetPerDay !== null
+                  ? `${usd(lr.adsBudgetPerDay[0])}–${usd(lr.adsBudgetPerDay[1])}/ngày`
+                  : "—"
+            }
+            sub={
+              rm.adsTestSpend !== null
+                ? `${rm.adsTestDays} ngày · tổng ${usd(rm.adsTestSpend, 0)}`
+                : lr.adsTestSpend !== null
+                  ? `${rm.adsTestDays} ngày · tổng ${usd(lr.adsTestSpend[0], 0)}–${usd(lr.adsTestSpend[1], 0)}`
+                  : `thiếu CPC & CR ở mục 3 (hoặc nhập ngân sách ads)`
+            }
+            tone="flat"
+          />
+          <KpiCard
+            label="Mức lỗ tối đa"
+            value={
+              rm.maxLossAmount !== null
+                ? usd(rm.maxLossAmount, 0)
+                : lr.maxLoss !== null
+                  ? `${usd(lr.maxLoss[0], 0)}–${usd(lr.maxLoss[1], 0)}`
+                  : "—"
+            }
+            sub={
+              rm.maxLossAmount === null && lr.maxLoss !== null
+                ? "khoảng theo lưới vận tốc · vượt mức chọn → DỪNG"
+                : "vượt mức này → DỪNG"
+            }
+            tone={(rm.maxLossAmount ?? lr.maxLoss?.[1] ?? 0) > 3000 ? "down" : "warn"}
+          />
           <KpiCard label="ACOS mục tiêu sau test" value="≤ break-even" sub="không chốt quảng cáo khi ACOS > hòa vốn" tone="flat" />
         </KpiGrid>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">

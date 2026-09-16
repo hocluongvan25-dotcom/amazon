@@ -9,6 +9,8 @@ import {
   computeSeasonality,
   restockAdvice,
   summarizeBsr,
+  velocityLadder,
+  velocityLadderRange,
   type AssessmentResult,
   type BsrPoint,
   type ConcentrationResult,
@@ -95,15 +97,38 @@ export function PrintScorecard({ result }: { result: AssessmentResult }) {
 export function PrintMoney({ result }: { result: AssessmentResult }) {
   const s = result.financial.scenarios;
   const r = result.roadmap;
+  // Chưa chốt velocity bi quan → bày KHOẢNG theo lưới vận tốc (cùng công thức),
+  // không để "chưa đủ cơ sở" trống trơn dù dữ liệu lưới có sẵn.
+  const lr = velocityLadderRange(velocityLadder(result.assumptions, result.financial));
+  const qty = r.testOrderQty !== null
+    ? `${num(r.testOrderQty)} đơn`
+    : lr.testOrderQty !== null
+      ? `${num(lr.testOrderQty[0])}–${num(lr.testOrderQty[1])} đơn (chưa chốt velocity bi quan)`
+      : NA;
+  const capital = r.lotCapital !== null
+    ? usd0(r.lotCapital)
+    : lr.lotCapital !== null
+      ? `${usd0(lr.lotCapital[0])}–${usd0(lr.lotCapital[1])} (theo khoảng lô test)`
+      : NA;
+  const ads = r.adsBudgetPerDay !== null
+    ? `${usd0(r.adsBudgetPerDay)}/ngày × ${r.adsTestDays} ngày = ${usd0(r.adsTestSpend)}`
+    : lr.adsBudgetPerDay !== null
+      ? `${usd0(lr.adsBudgetPerDay[0])}–${usd0(lr.adsBudgetPerDay[1])}/ngày × ${r.adsTestDays} ngày = ${lr.adsTestSpend !== null ? `${usd0(lr.adsTestSpend[0])}–${usd0(lr.adsTestSpend[1])}` : NA}`
+      : NA;
+  const loss = r.maxLossAmount !== null
+    ? usd0(r.maxLossAmount)
+    : lr.maxLoss !== null
+      ? `${usd0(lr.maxLoss[0])}–${usd0(lr.maxLoss[1])} (tùy mức velocity chọn)`
+      : NA;
   const rows: [string, string][] = [
     ["Giá bán (bi quan / cơ sở / lạc quan)", `${usd(s.pessimistic.price, 2)} / ${usd(s.base.price, 2)} / ${usd(s.optimistic.price, 2)}`],
     ["Biên lợi nhuận ròng (bi quan / cơ sở / lạc quan)", `${pct(s.pessimistic.netMarginPct)} / ${pct(s.base.netMarginPct)} / ${pct(s.optimistic.netMarginPct)}`],
     ["Phí FBA/đơn (size tier)", `${usd(result.financial.currentPackaging.fbaFee)} — ${result.financial.currentPackaging.tierLabel}`],
     ["ACOS hòa vốn", pct(s.base.breakEvenAcosPct)],
-    ["Số lượng lô test đề xuất", r.testOrderQty === null ? NA : `${num(r.testOrderQty)} đơn`],
-    ["Vốn hàng lô test", usd0(r.lotCapital)],
-    ["Ngân sách quảng cáo test", `${usd0(r.adsBudgetPerDay)}/ngày × ${r.adsTestDays} ngày = ${usd0(r.adsTestSpend)}`],
-    ["Mức lỗ tối đa nếu fail", usd0(r.maxLossAmount)],
+    ["Số lượng lô test đề xuất", qty],
+    ["Vốn hàng lô test", capital],
+    ["Ngân sách quảng cáo test", ads],
+    ["Mức lỗ tối đa nếu fail", loss],
   ];
   return (
     <div className="pr-block">

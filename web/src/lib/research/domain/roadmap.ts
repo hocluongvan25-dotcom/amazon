@@ -159,3 +159,33 @@ export function velocityLadder(
       return { unitsPerDay: v, testOrderQty, lotCapital, adsBudgetPerDay, adsTestSpend, maxLoss };
     });
 }
+
+/**
+ * Khoảng min–max của lộ trình test theo LƯỚI VẬN TỐC — dùng khi velocity bi quan
+ * CHƯA được chốt (G1 không bắt đoán). Thay vì bỏ trống "—", bày ra khoảng giá
+ * trị tính từ cùng công thức với computeRoadmap để giám đốc thấy quy mô và chốt
+ * mức rủi ro ở bảng "Quy mô lô test theo velocity". Null khi thiếu CPC/CR (lưới
+ * không tính được cột ads).
+ */
+export type VelocityLadderRange = {
+  testOrderQty: [number, number] | null;
+  lotCapital: [number, number] | null;
+  adsBudgetPerDay: [number, number] | null;
+  adsTestSpend: [number, number] | null;
+  maxLoss: [number, number] | null;
+};
+
+export function velocityLadderRange(rows: VelocityLadderRow[]): VelocityLadderRange {
+  const span = (vals: (number | null)[]): [number, number] | null => {
+    const nums = vals.filter((v): v is number => v !== null && Number.isFinite(v));
+    if (nums.length === 0) return null;
+    return [Math.min(...nums), Math.max(...nums)];
+  };
+  return {
+    testOrderQty: span(rows.map((r) => r.testOrderQty)),
+    lotCapital: span(rows.map((r) => r.lotCapital)),
+    adsBudgetPerDay: span(rows.map((r) => r.adsBudgetPerDay)),
+    adsTestSpend: span(rows.map((r) => r.adsTestSpend)),
+    maxLoss: span(rows.map((r) => r.maxLoss)),
+  };
+}
