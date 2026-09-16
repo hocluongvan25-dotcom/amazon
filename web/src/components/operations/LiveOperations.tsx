@@ -122,10 +122,16 @@ export async function LiveOperations({
         >
           <ul className="flex list-disc flex-col gap-1 pl-5 text-[13px] text-soft">
             <li>
-              Dữ liệu đơn hàng chỉ có sau khi job đồng bộ chạy: cron 04:00 UTC{" "}
-              <code>/api/cron/orders-sync</code> (hoặc chạy tay{" "}
-              <code>cd worker && npm run worker:orders-sync</code>, thêm{" "}
-              <code>-- --days=7</code> nếu muốn kéo lại 7 ngày).
+              Dữ liệu đơn hàng chỉ có sau khi job đồng bộ chạy: bấm nút{" "}
+              <b>“▶ Đồng bộ đơn hàng ngay”</b> ở trên, hoặc chờ cron <code>report-pull</code> 03:00 UTC
+              (bước đơn hàng nằm cuối — thêm <code>?orders=0</code> để tắt), hoặc gọi thẳng{" "}
+              <code>/api/cron/orders-sync</code> với header <code>Authorization: Bearer &lt;CRON_SECRET&gt;</code>{" "}
+              (nhận <code>?days=</code>, <code>?shop=</code>, <code>?dryRun=1</code>).
+            </li>
+            <li>
+              Chạy trên máy/VPS: <code>cd worker && npm run worker:orders-sync -- --days=7</code>
+              {" "}(backfill 30 ngày thì <code>--days=30</code>; đối soát bằng report thì{" "}
+              <code>--report=&lt;file&gt;</code>).
             </li>
             <li>
               Kiểm tra credential SP-API (<code>AMAZON_LWA_CLIENT_ID</code> / <code>_SECRET</code> /{" "}
