@@ -72,3 +72,6 @@ export * from "./scorecard.ts";
 export * from "./roadmap.ts";
 export * from "./collection.ts";
 export * from "./concentration.ts";
+export * from "./numbers.ts";
+export * from "./pain.ts";
+export * from "./demand.ts";

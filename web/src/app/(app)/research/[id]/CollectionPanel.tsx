@@ -191,7 +191,9 @@ export function CollectionPanel({
           >
             + Xếp hàng: {KIND_LABEL.reviews}
           </button>
-          <span className="text-[11px] text-muted">≤ {reviewsCredits} credits</span>
+          <span className="text-[11px] text-muted">
+            ≤ {reviewsCredits} credits. G4 đủ mẫu: đặt 10 ASIN × 5 trang ≈ 500 review 1–3★.
+          </span>
         </div>
       </div>
 

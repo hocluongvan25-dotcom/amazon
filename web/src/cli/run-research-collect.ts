@@ -46,7 +46,9 @@ function arg(name: string): string | undefined {
   return hit?.slice(`--${name}=`.length);
 }
 
-const kinds = (arg("kinds") ?? "serp,products,reviews")
+// G4: mặc định drain cả 'analyze' (phân tích pain bằng LLM sau khi review về);
+// tách riêng bằng --kinds=reviews,analyze nếu chỉ muốn chạy phần phân tích.
+const kinds = (arg("kinds") ?? "serp,products,reviews,analyze")
   .split(",")
   .map((k) => k.trim())
   .filter(Boolean);

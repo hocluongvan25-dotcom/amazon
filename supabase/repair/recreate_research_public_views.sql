@@ -104,8 +104,58 @@ select o.id as org_id, o.name as org_name,
   join iam.organizations o on o.id = l.org_id
  group by o.id, o.name, date_trunc('month', l.created_at);
 
+
+-- =================== Module 8 G4 (migration 0028) =========================
+create or replace view public.vexim_research_pain_clusters
+with (security_invoker = true) as
+select c.assessment_id, a.code, c.code as cluster_code, c.share_pct,
+       c.review_count, c.item_count, c.severity_avg_stars, c.narrative,
+       c.model, c.llm_run_id, c.updated_at
+  from research.pain_clusters c
+  join research.assessments a on a.id = c.assessment_id;
+
+create or replace view public.vexim_research_pain_items
+with (security_invoker = true) as
+select i.assessment_id, a.code, i.cluster_code, i.item_key, i.title, i.sub_label,
+       i.frequency, i.frequency_pct, i.avg_stars, i.severity, i.impact_score,
+       i.effort_score, i.priority, i.effort_hint, i.factory_requirement,
+       i.listing_fix, i.source, i.updated_by, i.updated_at
+  from research.pain_items i
+  join research.assessments a on a.id = i.assessment_id;
+
+create or replace view public.vexim_research_pain_quotes
+with (security_invoker = true) as
+select q.assessment_id, a.code, q.pain_item_id, i.item_key, q.review_id,
+       q.source_review_id, q.quote, q.asin, q.stars, q.review_date, q.url,
+       q.verified, q.helpful_count, q.photos_count
+  from research.pain_quotes q
+  join research.assessments a on a.id = q.assessment_id
+  join research.pain_items i on i.id = q.pain_item_id;
+
+create or replace view public.vexim_research_improvement_specs
+with (security_invoker = true) as
+select s.assessment_id, a.code, s.item_key, s.cluster_code, s.pain_title,
+       s.requirement, s.test_method, s.acceptance_standard,
+       s.cost_impact_estimate, s.owner, s.source, s.confirmed_by, s.confirmed_at
+  from research.improvement_specs s
+  join research.assessments a on a.id = s.assessment_id;
+
+create or replace view public.vexim_research_llm_runs
+with (security_invoker = true) as
+select l.assessment_id, a.code, l.section_key, l.chunk_index, l.provider, l.model,
+       l.prompt_hash, l.tokens_in, l.tokens_out, l.cost_usd, l.status, l.error,
+       l.created_by, l.created_at
+  from research.llm_runs l
+  join research.assessments a on a.id = l.assessment_id;
+
 grant select on public.vexim_research_runs, public.vexim_research_competitors,
   public.vexim_research_reviews, public.vexim_research_credit_monthly
+  to authenticated, anon, service_role;
+
+grant select on
+  public.vexim_research_pain_clusters, public.vexim_research_pain_items,
+  public.vexim_research_pain_quotes, public.vexim_research_improvement_specs,
+  public.vexim_research_llm_runs
   to authenticated, anon, service_role;
 
 -- Bắt PostgREST nạp lại schema cache (bắt buộc sau khi tạo view thủ công)
@@ -117,4 +167,5 @@ notify pgrst, 'reload schema';
 --  order by table_name;
 --
 -- assessments, competitors, credit_monthly, inputs, pnl, roadmap,
--- reviews, runs, scorecards, vetoes
+-- reviews, runs, scorecards, vetoes,
+-- pain_clusters, pain_items, pain_quotes, improvement_specs, llm_runs (G4, 15 view)

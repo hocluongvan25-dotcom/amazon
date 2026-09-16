@@ -101,9 +101,66 @@ export async function enqueueCollectionAction(
     p_assessment: assessmentId,
     p_kind: kind,
     p_params: params,
+    p_provider: null,
   });
   if (error) return { ok: false, message: error.message };
   const out = data as { ok: boolean; run_id: string };
   revalidatePath(`/research/${assessmentId}`);
   return { ok: true, message: `Đã xếp hàng lượt "${kind}" (${out.run_id.slice(0, 8)}). Worker/cron sẽ nhận và chạy.` };
+}
+
+/**
+ * G4 — xếp hàng phân tích pain bằng LLM (run kind='analyze', provider='llm').
+ * Yêu cầu worker có LLM_API_KEY (không có thì worker chạy mock và gắn
+ * provider='mock' — UI hiển thị rõ để không nhầm với phân tích thật).
+ */
+export async function enqueueAnalyzeAction(assessmentId: string): Promise<EnqueueState> {
+  const db = await createClient();
+  if (!db) {
+    return { ok: false, message: "DEMO MODE: không xếp hàng phân tích được; cần Supabase + worker." };
+  }
+  const { data, error } = await db.rpc("vexim_research_enqueue_run", {
+    p_assessment: assessmentId,
+    p_kind: "analyze",
+    p_params: { chunkSize: 25 },
+    p_provider: "llm",
+  });
+  if (error) return { ok: false, message: error.message };
+  const out = data as { ok: boolean; run_id: string };
+  revalidatePath(`/research/${assessmentId}`);
+  return {
+    ok: true,
+    message: `Đã xếp hàng phân tích pain bằng LLM (${out.run_id.slice(0, 8)}). Worker sẽ map/reduce trên review 1–3★.`,
+  };
+}
+
+/**
+ * G4 — analyst thẩm định lại 1 pain item: đổi ưu tiên must/should/skip và/sửa
+ * yêu cầu cho xưởng. RPC chuyển source sang human_confirmed (migration 0028).
+ * Tham số null = giữ nguyên; chuỗi rỗng = bỏ gợi ý.
+ */
+export async function updatePainItemAction(
+  assessmentId: string,
+  itemKey: string,
+  input: {
+    priority?: "must" | "should" | "skip";
+    factoryRequirement?: string | null;
+    listingFix?: string | null;
+  },
+): Promise<EnqueueState> {
+  const db = await createClient();
+  if (!db) {
+    return { ok: false, message: "DEMO MODE: bản demo không lưu chỉnh sửa pain." };
+  }
+  const { error } = await db.rpc("vexim_research_update_pain_item", {
+    p_assessment: assessmentId,
+    p_item_key: itemKey,
+    p_priority: input.priority ?? null,
+    p_factory_requirement:
+      input.factoryRequirement === undefined ? null : input.factoryRequirement,
+    p_listing_fix: input.listingFix === undefined ? null : input.listingFix,
+  });
+  if (error) return { ok: false, message: error.message };
+  revalidatePath(`/research/${assessmentId}`);
+  return { ok: true, message: `Đã cập nhật pain "${itemKey}".` };
 }

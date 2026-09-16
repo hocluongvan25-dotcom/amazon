@@ -142,3 +142,80 @@ Quy ước trung thực: field nào Rainforest không trả thì để `null` / 
   rồi cập nhật lại Vercel + `.env.local`.
 - Secret webhook nằm trong query URL của callback (đúng thiết kế route); nếu
   Rainforest đổi sang cơ chế header chữ ký ở G7, cập nhật cả client lẫn route.
+
+## 8. G4 — phân tích điểm đau bằng LLM (gpt-4.1-mini)
+
+### 8.1. Áp migration 0028 (bảng pain + llm_runs + trigger truy vết quote)
+
+```bash
+bash supabase/apply-migrations.sh   # chạy đủ chuỗi; KHÔNG áp lẻ từng file
+```
+
+Sau khi áp, reload PostgREST schema cache (Supabase Dashboard → API →
+"Reload schema cache", hoặc RPC `NOTIFY pgrst, 'reload schema'`) để 5 view mới
+xuất hiện: `vexim_research_pain_clusters`, `..._pain_items`, `..._pain_quotes`,
+`..._improvement_specs`, `..._llm_runs`.
+
+### 8.2. Biến môi trường LLM (chỉ server, KHÔNG tiền tố NEXT_PUBLIC_)
+
+```bash
+# .env.local (máy chạy worker) và Vercel Environment Variables
+LLM_API_KEY=sk-...            # nạp $10 OpenAI là đủ ~80–100 hồ sơ 500 review
+LLM_MODEL=gpt-4.1-mini        # CHỐT: 1 model cho toàn bộ map/reduce/narrative
+LLM_PROVIDER=                  # để trống: có key là tự chạy OpenAI; =mock để ép giả lập
+```
+
+Không có key, worker vẫn chạy được nhưng mọi kết quả gắn `provider='mock'` —
+UI hiện chip "dữ liệu MOCK minh họa", không được dùng cho quyết định sản xuất.
+
+### 8.3. Đủ mẫu review rồi mới phân tích
+
+- Mục tiêu ~500 review 1–3★/ngách: panel G2 đặt **10 ASIN × 5 trang**
+  (≈50 credits reviews, mỗi trang 1 credit).
+- Dưới 30 review, trụ "khác biệt hóa" để **null – chưa đủ cơ sở** (không chấm bừa).
+
+### 8.4. Chạy phân tích
+
+1. Trên trang hồ sơ `/research/<id>`, panel "Điểm đau khách hàng (G4)" bấm
+   **"+ Xếp hàng phân tích pain (LLM)"** (RPC `vexim_research_enqueue_run`
+   kind=`analyze`, provider=`llm`, cần vai trò analyst/dept_lead).
+2. Worker nhận run: CLI
+   `npm run worker:research-collect -- --kinds=analyze --max=2`, hoặc cron
+   `/api/cron/research-collect?kinds=analyze&max=2` (đảm bảo đủ thời gian:
+   500 review ≈ 20 lô map tuần tự; Vercel cron nên tách riêng kind=analyze).
+
+### 8.5. Đối chiếu kết quả
+
+```sql
+-- 3 cụm pain + narrative
+select cluster_code, review_count, share_pct, item_count, severity_avg_stars
+  from public.vexim_research_pain_clusters where code='<mã hồ sơ>';
+
+-- pain ưu tiên + hướng xử lý gợi ý
+select cluster_code, item_key, title, frequency, frequency_pct, severity,
+       impact_score, effort_score, priority, source
+  from public.vexim_research_pain_items where code='<mã hồ sơ>'
+ order by priority, frequency desc;
+
+-- MỌI trích dẫn phải mở được link review gốc; đối chiếu câu là nguyên văn
+select i.title, q.asin, q.stars, q.review_date, q.quote, q.url
+  from public.vexim_research_pain_quotes q
+  join public.vexim_research_pain_items i on i.item_key = q.item_key
+ where q.code='<mã hồ sơ>';
+
+-- token/chi phí thực từng lượt (không có dòng nào là "không rõ chi phí")
+select section_key, chunk_index, model, tokens_in, tokens_out, cost_usd, status
+  from public.vexim_research_llm_runs
+ where code='<mã hồ sơ>' order by created_at;
+```
+
+### 8.6. Chốt an toàn
+
+- Trigger `trg_guard_pain_quote` đối chiếu câu trích với `reviews_raw.body`
+  (≤25 từ, đúng thứ tự, cho cách ≤12 ký tự dấu câu); câu bịa/thuộc review
+  khác bị **chặn cả lượt lưu**, không có pain "ma" trên UI.
+- Tần suất/sao trung bình/nghiêm trọng/impact×effort **hệ thống tính lại** từ
+  dữ liệu gốc — LLM chỉ gợi ý tên pain, câu trích và hướng xử lý.
+- Spec gửi xưởng mặc định `llm_suggested`; analyst đổi ưu tiên/sửa yêu cầu
+  (RPC `vexim_research_update_pain_item`) mới chuyển `human_confirmed` và ghi
+  audit log. Không coi gợi ý AI là chỉ thị sản xuất khi chưa có người ký.

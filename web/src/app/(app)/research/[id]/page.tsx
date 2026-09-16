@@ -9,9 +9,11 @@ import { Chip, MockDataNotice, NoAccess, PageHeader } from "@/components/ui";
 import { requireSession } from "@/lib/auth/session";
 import type { PersonaKey } from "@/lib/roles";
 import { readAssessmentDetail, readCollectionData } from "@/lib/data/research";
+import { readPainData } from "@/lib/data/research-pain";
 import { createClient } from "@/lib/supabase/server";
 import { CollectionPanel } from "./CollectionPanel";
 import { MarketConcentrationPanel } from "./MarketConcentrationPanel";
+import { PainPanel } from "./PainPanel";
 import {
   STATUS_LABEL,
   VERDICT_LABEL,
@@ -31,13 +33,15 @@ export default async function ResearchDetailPage({
   if (!ALLOWED.includes(session.persona)) return <NoAccess />;
 
   const { id } = await params;
-  const [detail, collection, db] = await Promise.all([
+  const [detail, collection, pain, db] = await Promise.all([
     readAssessmentDetail(id),
     readCollectionData(id),
+    readPainData(id),
     createClient(),
   ]);
   if (!detail) notFound();
   if (!collection) notFound();
+  if (!pain) notFound();
   const { row, result } = detail;
 
   return (
@@ -68,6 +72,10 @@ export default async function ResearchDetailPage({
 
       <div className="mt-4">
         <CollectionPanel assessmentId={id} data={collection} connected={!!db} />
+      </div>
+
+      <div className="mt-4">
+        <PainPanel assessmentId={id} data={pain} connected={!!db} />
       </div>
     </>
   );

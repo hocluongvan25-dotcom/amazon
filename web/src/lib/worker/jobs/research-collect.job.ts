@@ -10,9 +10,12 @@
  */
 
 import type {
+  AnalysisReview,
   CompetitorRow,
   CriticalReviewRow,
   IntelligenceDataSource,
+  PainAnalysis,
+  VelocitySnapshot,
   VetoFlag,
 } from "../../research/domain/index.ts";
 import {
@@ -20,18 +23,21 @@ import {
   parseReviewsPage,
   parseSearchPage,
   scoreCompetitionFromSnapshots,
+  scoreDemandFromSnapshots,
   summarizeCompetitors,
 } from "../../research/domain/index.ts";
 import type {
   CollectionEntry,
   IntelligenceProvider,
 } from "../../intelligence/types.ts";
+import { runPainPipeline } from "../../ai/pain-pipeline.ts";
+import type { LlmProvider, LlmRunRecord } from "../../ai/types.ts";
 
 export type ClaimedRun = {
   id: string;
   assessmentId: string;
   orgId: string;
-  kind: "serp" | "products" | "offers" | "sales" | "reviews" | "fees";
+  kind: "serp" | "products" | "offers" | "sales" | "reviews" | "fees" | "analyze";
   params: Record<string, unknown>;
   title: string;
   marketplace: string;
@@ -75,6 +81,38 @@ export type ResearchWorkerPort = {
   }): Promise<void>;
   /** Thay thế tập veto cạnh tranh của engine (giữ veto tài chính/chứng nhận). */
   replaceCompetitionVetoes(assessmentId: string, vetoes: VetoFlag[]): Promise<void>;
+
+  /* ------------------------------- G4: LLM pain ------------------------- */
+  /** Toàn bộ review 1–3★ đã lưu để phân tích pain (đọc từ reviews_raw). */
+  loadReviewsForAnalysis(assessmentId: string): Promise<AnalysisReview[]>;
+  /** Ghi nhật ký 1 lượt gọi LLM, trả id dòng llm_runs. */
+  recordLlmRun(rec: LlmRunRecord): Promise<string>;
+  /** Thay thế toàn bộ kết quả pain 1 lượt phân tích (RPC worker 0028). */
+  savePainAnalysis(
+    assessmentId: string,
+    payload: PainAnalysisPayload,
+    reduceRunId: string | null,
+  ): Promise<Record<string, number>>;
+  /** 2 mốc ratings_total gần nhất để tính velocity review (có thể rỗng). */
+  demandVelocitySnapshots(
+    assessmentId: string,
+  ): Promise<{ prev: VelocitySnapshot[]; current: VelocitySnapshot[] }>;
+};
+
+/** Payload JSON cho RPC vexim_research_worker_save_pain_analysis (0028). */
+export type PainAnalysisPayload = {
+  model: string;
+  provider: string;
+  schemaVersion: string;
+  sampleSize: number;
+  asinCount: number;
+  observationsDropped: number;
+  quotesDropped: number;
+  generatedAt: string;
+  executiveNarrative: string | null;
+  clusters: PainAnalysis["clusters"];
+  items: PainAnalysis["items"];
+  specs: PainAnalysis["specs"];
 };
 
 export type CollectOutcome = {
@@ -84,6 +122,18 @@ export type CollectOutcome = {
   creditsUsed: number;
   competitors?: number;
   reviews?: { inserted: number; duplicatesSkipped: number };
+  analysis?: {
+    provider: string;
+    model: string;
+    items: number;
+    quotes: number;
+    specs: number;
+    quotesDropped: number;
+    tokensIn: number;
+    tokensOut: number;
+    costUsd: number;
+    llmRuns: number;
+  };
   message: string;
 };
 
@@ -355,6 +405,125 @@ export async function collectReviews(
   };
 }
 
+/* ------------------------------ G4: ANALYZE ------------------------------ */
+
+function llmRunKey(r: Pick<LlmRunRecord, "sectionKey" | "chunkIndex">): string {
+  return `${r.sectionKey}:${r.chunkIndex ?? "-"}`;
+}
+
+/**
+ * Bước G4: đọc toàn bộ review 1–3★ đã lưu, chạy map/reduce LLM, xác thực
+ * nguyên văn trích dẫn, ghi llm_runs + pain_*, rồi chấm 2 trụ demand và
+ * differentiation. Không tốn credits Rainforest; chi phí LLM nằm ở llm_runs.
+ */
+export async function analyzePain(
+  run: ClaimedRun,
+  llm: LlmProvider,
+  port: ResearchWorkerPort,
+): Promise<CollectOutcome> {
+  const assessmentId = run.assessmentId;
+  const reviews = await port.loadReviewsForAnalysis(assessmentId);
+  if (!reviews.length) {
+    await port.finishRun({
+      runId: run.id,
+      status: "no_data",
+      error: null,
+    });
+    return { runId: run.id, kind: run.kind, status: "no_data", creditsUsed: 0, message: "chưa có review 1–3★ để phân tích" };
+  }
+
+  const chunkSize = Math.min(
+    Math.max(asNumber(run.params.chunkSize, 25), 5),
+    100,
+  );
+  const runIds = new Map<string, string>();
+  const result = await runPainPipeline({
+    assessmentId,
+    reviews,
+    provider: llm,
+    chunkSize,
+    createdBy: run.params.regeneratedBy === "human" ? "human_regen" : "ai",
+    context: { title: run.title, keywords: run.keywords, marketplace: run.marketplace },
+    recordRun: async (rec) => {
+      const id = await port.recordLlmRun(rec);
+      runIds.set(llmRunKey(rec), id);
+    },
+  });
+
+  const a = result.analysis;
+  const payload: PainAnalysisPayload = {
+    provider: a.provider,
+    model: a.model,
+    schemaVersion: a.schemaVersion,
+    sampleSize: a.sampleSize,
+    asinCount: a.asinCount,
+    observationsDropped: a.observationsDropped,
+    quotesDropped: a.quotesDropped,
+    generatedAt: a.generatedAt,
+    executiveNarrative: a.executiveNarrative,
+    clusters: a.clusters,
+    items: a.items,
+    specs: a.specs,
+  };
+  const reduceRunId = runIds.get(llmRunKey({ sectionKey: "pain_reduce", chunkIndex: null })) ?? null;
+  const counts = await port.savePainAnalysis(assessmentId, payload, reduceRunId);
+
+  await port.setPillar({
+    assessmentId,
+    pillar: "differentiation",
+    score: result.differentiation.score,
+    confidence: result.differentiation.confidence,
+    reason: result.differentiation.reason,
+    metrics: {
+      sampleSize: a.sampleSize,
+      asinCount: a.asinCount,
+      items: a.items.length,
+      quotes: a.items.reduce((s, i) => s + i.quotes.length, 0),
+      model: a.model,
+      provider: a.provider,
+    },
+  });
+
+  // Demand: sales estimate + velocity review từ snapshot G2/G3 (không LLM).
+  const { products } = await port.latestScoringRows(assessmentId);
+  const snapshots = await port.demandVelocitySnapshots(assessmentId);
+  const demand = scoreDemandFromSnapshots(products, snapshots);
+  await port.setPillar({
+    assessmentId,
+    pillar: "demand",
+    score: demand.score,
+    confidence: demand.confidence,
+    reason: demand.reason,
+    metrics: {
+      productsSample: products.length,
+      medianRatingsTotal: null,
+    },
+  });
+
+  await port.finishRun({ runId: run.id, status: "done", creditsUsed: 0 });
+  return {
+    runId: run.id,
+    kind: run.kind,
+    status: "done",
+    creditsUsed: 0,
+    analysis: {
+      provider: llm.name,
+      model: a.model,
+      items: a.items.length,
+      quotes: counts.quotes ?? a.items.reduce((s, i) => s + i.quotes.length, 0),
+      specs: counts.specs ?? a.specs.length,
+      quotesDropped: a.quotesDropped,
+      tokensIn: result.totalTokensIn,
+      tokensOut: result.totalTokensOut,
+      costUsd: result.totalCostUsd,
+      llmRuns: result.llmRuns.length,
+    },
+    message:
+      `${a.items.length} pain · ${result.totalTokensIn}+${result.totalTokensOut} token · ` +
+      `$${result.totalCostUsd.toFixed(5)} · trụ khác biệt ${result.differentiation.score ?? "null"} · demand ${demand.score ?? "null"}`,
+  };
+}
+
 /**
  * Gom kết quả 1 Rainforest Collection (mỗi ASIN có nhiều request
  * product/offers/sales_estimation) thành CompetitorRow cho run 'products'.
@@ -405,7 +574,13 @@ export const RESEARCH_COLLECTORS = {
 export async function drainResearchQueue(
   provider: IntelligenceProvider,
   port: ResearchWorkerPort,
-  opts: { kinds?: string[]; max?: number; log?: (s: string) => void },
+  opts: {
+    kinds?: string[];
+    max?: number;
+    log?: (s: string) => void;
+    /** provider LLM cho run 'analyze' (bắt buộc khi kinds gồm 'analyze'). */
+    llm?: LlmProvider;
+  },
 ): Promise<CollectOutcome[]> {
   const kinds = opts.kinds ?? ["serp", "products", "reviews"];
   const max = opts.max ?? 20;
@@ -418,12 +593,23 @@ export async function drainResearchQueue(
     }
     if (!run) break;
     const fn = RESEARCH_COLLECTORS[run.kind as keyof typeof RESEARCH_COLLECTORS];
-    if (!fn) {
+    if (!fn && run.kind !== "analyze") {
       await port.finishRun({ runId: run.id, status: "failed", error: `loại run chưa hỗ trợ: ${run.kind}` });
       continue;
     }
     try {
-      const outcome = await fn(run, provider, port);
+      const outcome =
+        run.kind === "analyze"
+          ? opts.llm
+            ? await analyzePain(run, opts.llm, port)
+            : (() => {
+                throw new Error("run 'analyze' cần LLM provider (LLM_API_KEY hoặc provider=mock)");
+              })()
+          : fn
+            ? await fn(run, provider, port)
+            : (() => {
+                throw new Error(`loại run chưa hỗ trợ: ${run.kind}`);
+              })();
       outcomes.push(outcome);
       opts.log?.(`[research] ${run.kind} ${run.id.slice(0, 8)} → ${outcome.status}: ${outcome.message}`);
     } catch (e) {

@@ -4794,6 +4794,210 @@ await cmp("0027: bộ đếm cập nhật lại còn 1/1",
 await ex("reset role; rollback;");
 await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
 
+
+// ============================================================================
+console.log("\n=== BƯỚC 27: 0028 — Module 8 G4 (LLM pain clustering + truy vết quote) ===");
+await ex(rd("migrations/0028_module_8_research_llm_pain.sql"), "0028 lần 1");
+ok(true, "0028 chạy sạch (5 bảng, trigger quote, RPC worker/người dùng, 5 view)");
+await ex(rd("migrations/0028_module_8_research_llm_pain.sql"), "0028 lần 2");
+ok(true, "0028 idempotent");
+
+// 27.1 Đối chiếu nguyên văn câu trích ngay tại DB (lớp chặn thứ 2)
+await cmp("0028: quote nguyên văn (lệch hoa + dấu phẩy) khớp",
+ `select case when research.quote_matches_body(
+   'started rusting after three weeks, next to the sink',
+   'The shelf STARTED RUSTING after three weeks, next to the sink — bad.') then 1 else 0 end n`, 1);
+await cmp("0028: quote nhiều đoạn nối … khớp đúng thứ tự",
+ `select case when research.quote_matches_body(
+   'started rusting after three weeks … disappointing for stainless steel',
+   'The shelf started rusting after three weeks; disappointing for stainless steel quality.') then 1 else 0 end n`, 1);
+await cmp("0028: câu bịa (không có chữ trong body) bị từ chối",
+ `select case when research.quote_matches_body('battery exploded and caught fire today',
+   'The shelf started rusting after three weeks of normal use near the sink.') then 1 else 0 end n`, 0);
+await cmp("0028: sai thứ tự từ bị từ chối",
+ `select case when research.quote_matches_body('weeks three after rusting started shelf the',
+   'The shelf started rusting after three weeks of normal use near the sink.') then 1 else 0 end n`, 0);
+await cmp("0028: quote >25 từ bị từ chối",
+ `select case when research.quote_matches_body(
+   'one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty twentyone twentytwo twentythree twentyfour twentyfive twentysix',
+   'x one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty twentyone twentytwo twentythree twentyfour twentyfive twentysix y') then 1 else 0 end n`, 0);
+await cmp("0028: hai từ cách nhau quá nhiều chữ bị từ chối",
+ `select case when research.quote_matches_body('rusting sink',
+   'It started rusting, and sadly the chrome finish peeled all over before I ever reached the sink.') then 1 else 0 end n`, 0);
+
+// 27.2 Fixture: org, người dùng, hồ sơ
+await ex("begin");
+const a28Analyst = "eeee0000-0000-4000-8000-00000000a281";
+const a28ClientA = "dddd0000-0000-4000-8000-00000000a281";
+const a28ClientB = "dddd0000-0000-4000-8000-00000000a282";
+const org28A = "cccc0000-0000-4000-8000-00000000a281";
+const org28B = "cccc0000-0000-4000-8000-00000000a282";
+await ex(`
+  insert into iam.organizations(id,name,slug) values
+    ('${org28A}','Khách G4 A','khach-g4-a'),('${org28B}','Khách G4 B','khach-g4-b');
+  insert into auth.users(id,email) values
+    ('${a28Analyst}','analyst-g4@vexim.vn'),
+    ('${a28ClientA}','khach-g4a@example.test'),
+    ('${a28ClientB}','khach-g4b@example.test');
+  insert into iam.user_profiles(id,display_name,email,vexim_employee,org_id,status) values
+    ('${a28Analyst}','CV G4','analyst-g4@vexim.vn',true,null,'active'),
+    ('${a28ClientA}','Chủ A','khach-g4a@example.test',false,'${org28A}','active'),
+    ('${a28ClientB}','Chủ B','khach-g4b@example.test',false,'${org28B}','active');
+  insert into iam.role_assignments(user_id,role) values ('${a28Analyst}','analyst');
+`);
+await ex(`set local role authenticated; select set_config('request.jwt.claim.sub','${a28Analyst}',true);`);
+const created28 = (
+  await db.query("select public.vexim_research_create_assessment($1::jsonb) as r", [
+    JSON.stringify({
+      engineVersion: "x", orgId: org28A,
+      assumptions: {
+        title: "Ngách G4", keywords: ["dish rack"],
+        prices: { pessimistic: 24.99, base: 29.99, optimistic: 34.99 },
+        cogsPerUnit: 6, inboundFreightPerUnit: 1.5,
+        packDims: { lengthIn: 10, widthIn: 6, heightIn: 0.5, weightLb: 0.75 },
+      },
+      result: {
+        scorecard: { verdict: "insufficient_data", overallScore: null, pillars: [], vetoes: [] },
+        financial: { feeTableVersion: "x", currentPackaging: { tier: "small_standard" },
+          scenarios: { base: { netMarginPct: 18 } } },
+        roadmap: {},
+      },
+    }),
+  ])
+).rows[0].r;
+ok(created28?.ok, `0028: hồ sơ G4 sẵn sàng — ${created28?.code}`);
+const id28 = created28.id;
+
+// worker nạp reviews_raw
+await ex("reset role; select set_config('request.jwt.claim.sub','',false); set role service_role;");
+await ex(`
+  insert into research.collection_runs(assessment_id,kind,status,provider,started_at,finished_at)
+  values ('${id28}','reviews','done','rainforest',now(),now());
+  insert into research.reviews_raw
+    (assessment_id, run_id, asin, source_review_id, stars, title, body, review_date, url, verified, helpful_count)
+  values
+    ('${id28}', (select id from research.collection_runs where assessment_id='${id28}' and kind='reviews'),
+     'B001TESTG4', 'RV-1', 1.0, 'Rusted',
+     'The shelf started rusting after three weeks next to the sink, and rust spots appeared around the welds.',
+     '2026-09-01','https://www.amazon.test/dp/RV-1', true, 5),
+    ('${id28}', (select id from research.collection_runs where assessment_id='${id28}' and kind='reviews'),
+     'B001TESTG4', 'RV-2', 1.0, 'Missing screws',
+     'The hardware pack was missing four screws, so I could not finish assembly without a store trip.',
+     '2026-09-02','https://www.amazon.test/dp/RV-2', false, 1);
+`);
+
+// 27.3 worker ghi nhật ký LLM (map + reduce)
+const recMap = { assessmentId: id28, sectionKey: "pain_map", chunkIndex: 0, provider: "mock",
+  model: "mock-llm-1", promptHash: "a".repeat(64), inputRefs: { chunkIndex: 0 },
+  output: { observations: [] }, tokensIn: 120, tokensOut: 30, costUsd: 0,
+  status: "ok", error: null, createdBy: "ai", createdAt: "2026-09-16T00:00:00Z" };
+await db.query("select public.vexim_research_worker_record_llm_run($1::jsonb) as r", [JSON.stringify(recMap)]);
+const recReduce = { ...recMap, sectionKey: "pain_reduce", chunkIndex: null, tokensIn: 200, tokensOut: 180 };
+const reduceRow = (await db.query(
+  "select public.vexim_research_worker_record_llm_run($1::jsonb) as r", [JSON.stringify(recReduce)])).rows[0].r;
+await cmp("0028: llm_runs ghi 2 lượt",
+  `select count(*) n from research.llm_runs where assessment_id='${id28}'`, 2);
+
+// 27.4 worker lưu phân tích pain hợp lệ
+const payload28 = {
+  model: "mock-llm-1", quotesDropped: 0,
+  clusters: [{ code: "quality", sharePct: 50, reviewCount: 1, itemCount: 1, avgStars: 1.0,
+    narrative: "Gỉ sét là pain nổi bật nhất." }],
+  items: [{ itemKey: "rust-frame", cluster: "quality", title: "Khung gỉ sét sau vài tuần",
+    subLabel: "gỉ sét", frequency: 1, frequencyPct: 50, avgStars: 1.0, severity: 9,
+    impactScore: 9, effortScore: 4, priority: "must", effortHint: 3,
+    factoryRequirement: "Nâng vật liệu lên inox 304", listingFix: null,
+    quotes: [{ reviewId: "RV-1", quote: "shelf started rusting after three weeks next to the sink",
+      asin: "B001TESTG4", stars: 1, reviewDate: "2026-09-01",
+      url: "https://www.amazon.test/dp/RV-1", verified: true, helpfulCount: 5, photosCount: 0 }] }],
+  specs: [{ itemKey: "rust-frame", cluster: "quality", painTitle: "Khung gỉ sét sau vài tuần",
+    requirement: "inox 304 hoặc mạ điện phân", testMethod: "salt spray 48h ASTM B117",
+    acceptanceStandard: "không gỉ sau 48h phun muối", costImpactEstimate: "+0.5 USD" }],
+};
+await db.query("select public.vexim_research_worker_save_pain_analysis($1::uuid,$2::jsonb,$3::uuid) as r",
+  [id28, JSON.stringify(payload28), reduceRow.id]);
+await cmp("0028: pain_items = 1",
+  `select count(*) n from research.pain_items where assessment_id='${id28}'`, 1);
+await cmp("0028: pain_quotes = 1 (truy được review)",
+  `select count(*) n from research.pain_quotes where assessment_id='${id28}'`, 1);
+await cmp("0028: improvement_specs = 1",
+  `select count(*) n from research.improvement_specs where assessment_id='${id28}'`, 1);
+await cmp("0028: view quote mang đủ ASIN–sao–ngày–link",
+  `select case when count(*)=1 and bool_and(asin='B001TESTG4' and stars=1.0
+     and review_date='2026-09-01' and url like 'http%') then 1 else 0 end n
+   from public.vexim_research_pain_quotes where assessment_id='${id28}'`, 1);
+await cmp("0028: view llm_runs ẩn output nhưng đủ token/cost/model",
+  `select case when count(*)=2 and sum(tokens_in)=320 and bool_and(model='mock-llm-1') then 1 else 0 end n
+   from public.vexim_research_llm_runs where assessment_id='${id28}'`, 1);
+
+// 27.5 quote bịa khi lưu phải bị trigger chặn, dữ liệu cũ còn nguyên
+await mustBlock(`select public.vexim_research_worker_save_pain_analysis(
+  '${id28}',
+  jsonb_build_object('model','mock-llm-1','clusters','[]'::jsonb,'specs','[]'::jsonb,
+    'items', jsonb_build_array(jsonb_build_object(
+      'itemKey','fake','cluster','quality','title','x','frequency',0,'frequencyPct',0,
+      'severity',0,'impactScore',0,'effortScore',0,'priority','should',
+      'quotes', jsonb_build_array(jsonb_build_object(
+        'reviewId','RV-2','quote','battery exploded into flames on the counter',
+        'asin','B001TESTG4','stars',1,'reviewDate','2026-09-02','url','x',
+        'verified',false,'helpfulCount',0,'photosCount',0))))),
+  null)`);
+await cmp("0028: sau khi quote bịa bị chặn, pain cũ vẫn còn nguyên",
+  `select count(*) n from research.pain_items where assessment_id='${id28}'`, 1);
+
+// 27.6 người dùng thường KHÔNG gọi được RPC worker
+await ex(`reset role; set local role authenticated; select set_config('request.jwt.claim.sub','${a28ClientA}',true);`);
+await mustBlock(`select public.vexim_research_worker_record_llm_run('{}'::jsonb)`);
+await mustBlock(`select public.vexim_research_worker_save_pain_analysis('${id28}','{}'::jsonb,null)`);
+ok(true, "0028 CHẶN: authenticated không gọi được RPC worker LLM");
+
+// 27.7 analyst thẩm định lại pain item → human_confirmed
+await ex(`reset role; set local role authenticated; select set_config('request.jwt.claim.sub','${a28Analyst}',true);`);
+const upd28 = await ex(`select public.vexim_research_update_pain_item('${id28}','rust-frame','skip',
+   'Dùng inox 430 kiểm tra lại', null)`, 'update_pain_item analyst');
+ok(upd28, '0028: update_pain_item chạy không lỗi');
+await cmp("0028: analyst sửa được priority + requirement, gắn human_confirmed",
+  `select case when count(*)=1 and bool_and(priority='skip' and source='human_confirmed'
+     and factory_requirement like '%inox 430%') then 1 else 0 end n
+   from research.pain_items where assessment_id='${id28}' and item_key='rust-frame'`, 1);
+await cmp("0028: spec sheet đồng bộ nhãn human_confirmed",
+  `select case when count(*)=1 and bool_and(source='human_confirmed') then 1 else 0 end n
+   from research.improvement_specs where assessment_id='${id28}' and item_key='rust-frame'`, 1);
+
+// 27.8 khách org B không sửa được và không thấy dữ liệu pain
+await ex(`reset role; set local role authenticated; select set_config('request.jwt.claim.sub','${a28ClientB}',true);`);
+await mustBlock(`select public.vexim_research_update_pain_item('${id28}','rust-frame','must',null,null)`);
+await cmp("0028 RLS: khách org B thấy 0 pain item của org A",
+  `select count(*) n from public.vexim_research_pain_items where assessment_id='${id28}'`, 0);
+await cmp("0028 RLS: khách org B thấy 0 lượt LLM của org A",
+  `select count(*) n from public.vexim_research_llm_runs where assessment_id='${id28}'`, 0);
+await ex(`reset role; set local role authenticated; select set_config('request.jwt.claim.sub','${a28ClientA}',true);`);
+await cmp("0028 RLS: khách org A thấy pain của mình",
+  `select count(*) n from public.vexim_research_pain_items where assessment_id='${id28}'`, 1);
+
+// 27.9 xếp hàng phân tích 'analyze' (provider llm); kind lạ bị chặn
+await ex(`reset role; set local role authenticated; select set_config('request.jwt.claim.sub','${a28Analyst}',true);`);
+const enq28 = await ex(`select public.vexim_research_enqueue_run('${id28}','analyze','{}'::jsonb)`, 'enqueue analyze');
+  ok(enq28, '0028: enqueue analyze chạy không lỗi');
+await cmp("0028: enqueue 'analyze' tạo run provider=llm",
+  `select count(*) n from research.collection_runs
+    where assessment_id='${id28}' and kind='analyze' and provider='llm' and status='queued'`, 1);
+await mustBlock(`select public.vexim_research_enqueue_run('${id28}','phongthuy','{}'::jsonb)`);
+
+await ex("reset role; rollback;");
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+
+// ============================================================================
+console.log("\n=== BƯỚC 28: repair/recreate_research_public_views.sql (gồm 5 view G4) ===");
+await ex(rd("repair/recreate_research_public_views.sql"), "repair views");
+await cmp("repair: đủ 15 view public.vexim_research_*",
+  `select count(*) n from information_schema.views
+    where table_schema='public' and table_name like 'vexim_research_%'`, 15);
+await cmp("repair: view llm_runs tồn tại",
+  `select count(*) n from information_schema.views
+    where table_schema='public' and table_name='vexim_research_llm_runs'`, 1);
+
+
 console.log(`\n${"=".repeat(70)}`);
 console.log(fails === 0 ? "TẤT CẢ PASS" : `${fails} MỤC FAIL`);
 console.log("=".repeat(70));
