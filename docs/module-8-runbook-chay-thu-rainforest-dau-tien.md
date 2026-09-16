@@ -181,8 +181,12 @@ UI hiện chip "dữ liệu MOCK minh họa", không được dùng cho quyết 
    kind=`analyze`, provider=`llm`, cần vai trò analyst/dept_lead).
 2. Worker nhận run: CLI
    `npm run worker:research-collect -- --kinds=analyze --max=2`, hoặc cron
-   `/api/cron/research-collect?kinds=analyze&max=2` (đảm bảo đủ thời gian:
-   500 review ≈ 20 lô map tuần tự; Vercel cron nên tách riêng kind=analyze).
+   `/api/cron/research-collect?kinds=analyze&max=2`.
+   Map chạy song song 4 lô/lượt (đặt `params.concurrency`, kẹp 1..8); 500
+   review ≈ 20 lô → khoảng 5 đợt gọi API, dự kiến **1–2 phút/hồ sơ** với
+   gpt-4.1-mini. Vercel Hobby giới hạn HTTP 60s: chạy analyze bằng CLI/VPS
+   (máy thường trú) hoặc chia nhỏ `params.chunkSize`/thu thập ít review hơn;
+   đừng gộp chung cron analyze với drain thu thập Rainforest.
 
 ### 8.5. Đối chiếu kết quả
 

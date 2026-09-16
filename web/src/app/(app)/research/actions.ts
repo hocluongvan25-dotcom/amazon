@@ -122,7 +122,7 @@ export async function enqueueAnalyzeAction(assessmentId: string): Promise<Enqueu
   const { data, error } = await db.rpc("vexim_research_enqueue_run", {
     p_assessment: assessmentId,
     p_kind: "analyze",
-    p_params: { chunkSize: 25 },
+    p_params: { chunkSize: 25, concurrency: 4 },
     p_provider: "llm",
   });
   if (error) return { ok: false, message: error.message };

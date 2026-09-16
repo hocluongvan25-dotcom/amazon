@@ -436,12 +436,14 @@ export async function analyzePain(
     Math.max(asNumber(run.params.chunkSize, 25), 5),
     100,
   );
+  const concurrency = Math.min(Math.max(asNumber(run.params.concurrency, 4), 1), 8);
   const runIds = new Map<string, string>();
   const result = await runPainPipeline({
     assessmentId,
     reviews,
     provider: llm,
     chunkSize,
+    concurrency,
     createdBy: run.params.regeneratedBy === "human" ? "human_regen" : "ai",
     context: { title: run.title, keywords: run.keywords, marketplace: run.marketplace },
     recordRun: async (rec) => {

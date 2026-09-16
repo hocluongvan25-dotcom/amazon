@@ -154,6 +154,40 @@ test("pipeline: model lạ chưa khai báo giá → ném lỗi và ghi run faile
   assert.equal(runs[0]?.status, "failed");
 });
 
+test("pipeline: các lô map chạy song song không vượt concurrency (mặc định 4)", async () => {
+  const reviews = buildReviews().slice(0, 75); // 3 lô theo chunkSize 25
+  let active = 0;
+  let maxActive = 0;
+  const provider = new MockLlmProvider();
+  const origMap = provider.mapPainChunk.bind(provider);
+  provider.mapPainChunk = async (input) => {
+    active++;
+    maxActive = Math.max(maxActive, active);
+    await new Promise((r) => setTimeout(r, 5));
+    const out = await origMap(input);
+    active--;
+    return out;
+  };
+  await runPainPipeline({ assessmentId: "a", reviews, provider, chunkSize: 25, concurrency: 2, log: () => {} });
+  assert.equal(maxActive, 2, "tối đa 2 lô đồng thời");
+
+  // mặc định 4: 3 lô có thể chạy cùng lúc
+  let maxDefault = 0;
+  let active2 = 0;
+  const p2 = new MockLlmProvider();
+  const orig2 = p2.mapPainChunk.bind(p2);
+  p2.mapPainChunk = async (input) => {
+    active2++;
+    maxDefault = Math.max(maxDefault, active2);
+    await new Promise((r) => setTimeout(r, 5));
+    const out = await orig2(input);
+    active2--;
+    return out;
+  };
+  await runPainPipeline({ assessmentId: "a", reviews, provider: p2, chunkSize: 25, log: () => {} });
+  assert.equal(maxDefault, 3);
+});
+
 test("pipeline: không có review → reduce trên mẫu rỗng trả analysis rỗng, trụ null", async () => {
   const result = await runPainPipeline({
     assessmentId: "a",

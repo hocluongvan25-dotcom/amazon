@@ -35,6 +35,8 @@ export type PainPipelineOptions = {
   reviews: AnalysisReview[];
   provider: LlmProvider;
   chunkSize?: number;
+  /** số lô map gọi LLM song song (mặc định 4, kẹp 1..8) */
+  concurrency?: number;
   createdBy?: "ai" | "human_regen";
   now?: Date;
   /** bối cảnh ngách gửi kèm mỗi lô map */
@@ -112,13 +114,24 @@ export async function runPainPipeline(
   let totalCostUsd = 0;
 
   // ------------------------------ MAP ------------------------------
+  // Chạy các lô SONG SONG theo batch (concurrency, mặc định 4) để 500 review
+  // (~20 lô) không vượt thời gian giới hạn của cron/serverless; kết quả gom
+  // lại theo đúng chunkIndex, lô lỗi vẫn ghi llm_runs rồi mới ném ra ngoài.
   const observations: PainObservation[] = [];
   const chunks = chunk(reviews, chunkSize);
+  const concurrency = Math.min(Math.max(opts.concurrency ?? 4, 1), 8);
   let preDropped = 0;
   let preQuotesDropped = 0;
-  opts.log?.(`[llm] map: ${reviews.length} review chia ${chunks.length} lô (≤${chunkSize})`);
+  opts.log?.(
+    `[llm] map: ${reviews.length} review chia ${chunks.length} lô (≤${chunkSize}, song song ${concurrency})`,
+  );
 
-  for (let i = 0; i < chunks.length; i++) {
+  type MapOutcome =
+    | { ok: true; rec: LlmRunRecord; obs: PainObservation[]; dropped: number; quotesDropped: number }
+    | { ok: false; rec: LlmRunRecord };
+  const outcomes = new Array<MapOutcome>(chunks.length);
+
+  const runChunk = async (i: number): Promise<void> => {
     const input: MapChunkInput = {
       assessmentId: opts.assessmentId,
       chunkIndex: i,
@@ -133,12 +146,6 @@ export async function runPainPipeline(
       // và xác thực nguyên văn câu trích NGAY ở bước map để không rác sang reduce.
       const inChunk = (res.data.observations ?? []).filter((o) => chunkIds.has(o.reviewId));
       const checked = validateObservations(inChunk, chunks[i]);
-      observations.push(...checked.valid.map((v) => v.obs));
-      preDropped += checked.dropped;
-      preQuotesDropped += checked.quotesDropped;
-      totalTokensIn += res.usage.promptTokens;
-      totalTokensOut += res.usage.outputTokens;
-      totalCostUsd += cost;
       const rec: LlmRunRecord = {
         assessmentId: opts.assessmentId,
         sectionKey: "pain_map",
@@ -156,7 +163,13 @@ export async function runPainPipeline(
         createdBy,
         createdAt: now,
       };
-      llmRuns.push(rec);
+      outcomes[i] = {
+        ok: true,
+        rec,
+        obs: checked.valid.map((v) => v.obs),
+        dropped: checked.dropped,
+        quotesDropped: checked.quotesDropped,
+      };
       await record(rec, opts);
     } catch (e) {
       const err = e instanceof Error ? e.message : String(e);
@@ -177,10 +190,32 @@ export async function runPainPipeline(
         createdBy,
         createdAt: now,
       };
-      llmRuns.push(rec);
+      outcomes[i] = { ok: false, rec };
       await record(rec, opts);
-      throw new Error(`MAP lô ${i} thất bại: ${err}`);
     }
+  };
+
+  for (let base = 0; base < chunks.length; base += concurrency) {
+    const batch: number[] = [];
+    for (let i = base; i < Math.min(base + concurrency, chunks.length); i++) batch.push(i);
+    await Promise.all(batch.map(runChunk));
+  }
+
+  // Gom theo thứ tự lô; lô hỏng → dừng sau khi mọi nhật ký đã được ghi.
+  const failed = outcomes.find((o) => !o?.ok);
+  for (const o of outcomes) {
+    llmRuns.push(o.rec);
+    if (o.ok) {
+      observations.push(...o.obs);
+      preDropped += o.dropped;
+      preQuotesDropped += o.quotesDropped;
+      totalTokensIn += o.rec.tokensIn;
+      totalTokensOut += o.rec.tokensOut;
+      totalCostUsd += o.rec.costUsd;
+    }
+  }
+  if (failed) {
+    throw new Error(`MAP lô ${failed.rec.chunkIndex} thất bại: ${failed.rec.error}`);
   }
 
   // ----------------------------- REDUCE -----------------------------
