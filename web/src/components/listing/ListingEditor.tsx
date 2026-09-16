@@ -7,7 +7,7 @@
  * server khi lưu — snapshot `validation` trong DB là cổng chặn của trigger 0014.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { Chip, Panel } from "@/components/ui";
@@ -27,6 +27,7 @@ import {
   getTextAttribute,
   getTextList,
   getVariationTheme,
+  isHttpsImageUrl,
   isImageAttribute,
   setFulfillment,
   setImageUrls,
@@ -433,6 +434,82 @@ function IssueRow({ issue }: { issue: ValidationIssue }) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Ảnh xem trước bên phải ô nhập link ảnh                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Ảnh nhỏ cạnh ô nhập link (yêu cầu 16/09/2026): dán link vào là thấy ngay ảnh
+ * thật — khỏi mở tab khác mới biết mình vừa dán đúng ảnh nào.
+ *
+ *    • link rỗng            → không hiện gì (ô nhập vẫn gọn như cũ)
+ *    • link không phải https → hiện chip "URL?" (cùng luật với cổng validation)
+ *    • link https nhưng tải lỗi (404, chặn hotlink, không phải file ảnh)
+ *                           → hiện chip "lỗi" + tooltip, KHÔNG hiện icon ảnh vỡ
+ *    • tải được             → thumbnail 48×48, bấm vào mở ảnh gốc ở tab mới
+ *
+ * `key` ở nơi gọi được đặt theo URL ⇒ đổi link là component mới, trạng thái "lỗi"
+ * của link cũ tự được xoá (không cần useEffect).
+ */
+function ImagePreview({ url, label }: { url: string; label: string }) {
+  const [failed, setFailed] = useState(false);
+  const clean = url.trim();
+  // Đợi người dùng gõ/paste xong 0,5s mới thử tải: tránh việc vừa gõ nửa link đã
+  // nháy chip "lỗi", mà vẫn thấy ảnh gần như tức thì khi dán link hoàn chỉnh.
+  const [attempt, setAttempt] = useState(clean);
+  useEffect(() => {
+    if (clean === attempt) return;
+    const timer = setTimeout(() => {
+      setFailed(false);
+      setAttempt(clean);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [clean, attempt]);
+
+  if (clean === "") return null;
+  if (clean !== attempt) return null; // đang gõ → chưa kết luận gì
+
+  if (!isHttpsImageUrl(clean)) {
+    return (
+      <span
+        title={`Link ảnh phải bắt đầu bằng https:// — đang là: ${clean}`}
+        className="mt-1 grid h-12 w-12 shrink-0 place-items-center rounded-[9px] border border-dashed border-red-400 text-[10px] font-extrabold text-[#a01717]"
+      >
+        URL?
+      </span>
+    );
+  }
+
+  if (failed) {
+    return (
+      <span
+        title={`Không tải được ảnh từ link này (404 / chặn hotlink / không phải file ảnh): ${clean}`}
+        className="mt-1 grid h-12 w-12 shrink-0 place-items-center rounded-[9px] border border-dashed border-amber text-[10px] font-extrabold text-[#8a5602]"
+      >
+        lỗi
+      </span>
+    );
+  }
+
+  return (
+    <a
+      href={clean}
+      target="_blank"
+      rel="noreferrer"
+      title={`${label} — bấm để mở ảnh gốc ở tab mới\n${clean}`}
+      className="mt-1 block h-12 w-12 shrink-0"
+    >
+      <img
+        src={clean}
+        alt={`Xem trước ${label}`}
+        loading="lazy"
+        onError={() => setFailed(true)}
+        className="h-12 w-12 rounded-[9px] border border-line bg-white object-contain"
+      />
+    </a>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Điều khiển từng trường                                             */
 /* ------------------------------------------------------------------ */
 
@@ -569,23 +646,28 @@ function FieldControl({
           <div className="flex flex-col gap-2">
             {attributes.map((attribute) => {
               const urls = getImageUrls(payload, attribute);
+              const url = urls[0] ?? "";
+              const label = attribute === "main_product_image_locator" ? "Ảnh chính" : `Ảnh ${attribute.split("_").pop()}`;
               return (
                 <div key={attribute} className="flex items-start gap-2">
-                  <span className="mt-2 w-[92px] text-[11px] font-semibold text-soft">
-                    {attribute === "main_product_image_locator" ? "Ảnh chính" : `Ảnh ${attribute.split("_").pop()}`}
-                  </span>
+                  <span className="mt-2 w-[92px] shrink-0 text-[11px] font-semibold text-soft">{label}</span>
                   <input
-                    className={inputCls}
+                    className={`${inputCls} min-w-0 flex-1`}
                     disabled={disabled}
                     placeholder="https://m.media-amazon.com/images/I/....jpg"
-                    value={urls[0] ?? ""}
+                    value={url}
                     onChange={(e) => onChange(setImageUrls(payload, attribute, e.target.value ? [e.target.value] : []))}
                   />
+                  {/* Ảnh xem trước: dán link vào là thấy ngay ảnh thật ở bên phải ô nhập */}
+                  <ImagePreview url={url} label={label} />
                 </div>
               );
             })}
           </div>
-          <div className="mt-1 text-[11px] text-soft">{field.help}</div>
+          <div className="mt-1 text-[11px] text-soft">
+            {field.help} Dán link ảnh (https) vào ô — ảnh xem trước hiện ngay bên phải ô đó; bấm vào ảnh để mở
+            tab mới xem kích thước thật.
+          </div>
         </div>
       );
     }

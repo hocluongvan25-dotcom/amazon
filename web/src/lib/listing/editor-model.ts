@@ -270,6 +270,14 @@ export const IMAGE_KEYS = [
   ...Array.from({ length: MAX_IMAGES - 1 }, (_, i) => `other_product_image_locator_${i + 1}`),
 ];
 
+/**
+ * URL ảnh hợp lệ: https, không khoảng trắng. Dùng CHUNG cho cổng validation (gửi
+ * Amazon) và cho ảnh xem trước trong form — một luật, một chỗ sửa.
+ */
+export function isHttpsImageUrl(url: string): boolean {
+  return /^https:\/\/[^\s]+$/i.test(url.trim());
+}
+
 export function isImageAttribute(attribute: string): boolean {
   return attribute === "main_product_image_locator" || /^other_product_image_locator_\d+$/.test(attribute);
 }
@@ -841,7 +849,7 @@ export function validateListingDraft(input: ValidateInput): ValidationReport {
   }
   for (const attribute of imageAttributes) {
     for (const url of getImageUrls(payload, attribute)) {
-      if (!/^https:\/\/[^\s]+$/i.test(url)) {
+      if (!isHttpsImageUrl(url)) {
         err("VEXIM-IMAGE-URL", attribute, `Ảnh "${url.slice(0, 60)}" không phải URL https hợp lệ`, {
           hint: "URL ảnh phải là https và trỏ trực tiếp tới file JPEG/PNG/GIF.",
         });

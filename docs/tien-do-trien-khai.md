@@ -1316,3 +1316,17 @@ Chi tiết đầy đủ + checklist API + SQL kiểm tra: **`docs/bao-cao-loi-te
 **Kiểm chứng:** `web npm test` **379/379** (11 test mới `tests/listing-editor-access.test.ts`) · `web tsc --noEmit` sạch · `next build` OK · `supabase npm test` **TẤT CẢ PASS** (không đổi DB) · `worker npm test` **481/481**.
 
 **VEXIM cần làm:** chỉ cần **Redeploy web** (không có migration mới). Nếu vẫn không thấy shop: kiểm tra tài khoản đăng nhập có vai trò `super_admin` chưa — tài khoản không phải super_admin mà không được gán shop sẽ chỉ thấy shop trong tổ chức của mình (RLS `iam.can_read_seller_account`), và form sẽ hiện banner nói rõ.
+
+---
+
+## 16/09/2026 (lần 3) — Trình soạn listing: ảnh xem trước ngay cạnh ô nhập link ảnh
+
+**Yêu cầu (chủ dự án):** ở khối Hình ảnh (Ảnh chính * + Ảnh 1..8), khi dán link vào ô thì **ảnh nhỏ hiện ngay bên phải ô nhập đó** để biết đã dán đúng ảnh chưa.
+
+**Đã làm (thuần giao diện, không cần migration):**
+- Mỗi ô link ảnh giờ có thumbnail **48×48** ở bên phải: dán link `https://…` là ảnh hiện ngay; bấm vào ảnh mở ảnh gốc ở tab mới (kèm tooltip URL đầy đủ).
+- Chống nháy khi đang gõ: chờ 0,5 giây sau khi ngừng gõ/paste mới thử tải — gõ nửa link không hiện chip lỗi.
+- Link sai định dạng → chip đỏ **URL?**; link https nhưng tải lỗi (404 / chặn hotlink / không phải file ảnh) → chip vàng **lỗi** kèm tooltip, **không** hiện icon ảnh vỡ của trình duyệt. Ô trống thì không hiện gì (giữ form gọn).
+- Luật URL dùng CHUNG một chỗ: `isHttpsImageUrl()` trong `editor-model.ts` — cổng validation gửi Amazon và ảnh xem trước không thể lệch nhau.
+
+**Kiểm chứng:** `web npm test` **381/381** (thêm 2 test: luật URL https + lưu/xoá link theo từng ô) · `tsc` sạch · `next build` OK · `supabase npm test` TẤT CẢ PASS · `worker` 481/481. Preview demo (port 3000) đã dựng sẵn để thử: bản nháp demo có sẵn 1 link ở “Ảnh chính” nên thumbnail hiện ngay khi mở trang.

@@ -27,9 +27,12 @@ import {
   countByStatus,
   createEmptyDraftPayload,
   diffPayload,
+  getImageUrls,
   getOffer,
   getParentageLevel,
   getTextAttribute,
+  isHttpsImageUrl,
+  setImageUrls,
   isEditable,
   MAX_FEED_MESSAGES,
   parsePrice,
@@ -550,4 +553,39 @@ test("helper truy cập payload + tổng hợp bản nháp", () => {
   assert.equal(counts.draft, 2);
   assert.equal(counts.published, 1);
   assert.equal(counts.approved, 0);
+});
+
+/* ------------------------------------------------------------------ */
+/* Ảnh — luật dùng chung cho cổng validation VÀ ảnh xem trước          */
+/* ------------------------------------------------------------------ */
+
+test("ảnh: chỉ link https mới coi là hợp lệ (đúng luật Amazon + luật ảnh xem trước)", () => {
+  assert.equal(isHttpsImageUrl("https://m.media-amazon.com/images/I/71abc.jpg"), true);
+  assert.equal(isHttpsImageUrl("  https://m.media-amazon.com/images/I/71abc.png  "), true); // tự cắt khoảng trắng
+  assert.equal(isHttpsImageUrl("http://m.media-amazon.com/images/I/71abc.jpg"), false); // http thường bị Amazon từ chối
+  assert.equal(isHttpsImageUrl(""), false);
+  assert.equal(isHttpsImageUrl("   "), false);
+  assert.equal(isHttpsImageUrl("javascript:alert(1)"), false);
+  assert.equal(isHttpsImageUrl("https://m.media-amazon.com/a b.jpg"), false); // có khoảng trắng giữa
+  assert.equal(isHttpsImageUrl("m.media-amazon.com/71abc.jpg"), false); // thiếu scheme
+});
+
+test("ảnh: lưu/xoá link theo từng ô (ảnh chính, ảnh 1..8) và ảnh xem trước đọc lại đúng", () => {
+  let payload = createEmptyDraftPayload({ marketplaceId: "ATVPDKIKX0DER", locale: "en_US" });
+  payload = setImageUrls(payload, "main_product_image_locator", ["https://m.media-amazon.com/images/I/main.jpg"]);
+  payload = setImageUrls(payload, "other_product_image_locator_1", ["https://m.media-amazon.com/images/I/p1.jpg"]);
+  // dán lại link khác vào cùng ô ⇒ ô chỉ giữ 1 link (không nhân bản)
+  payload = setImageUrls(payload, "other_product_image_locator_1", ["https://m.media-amazon.com/images/I/p1-new.jpg"]);
+
+  assert.deepEqual(getImageUrls(payload, "main_product_image_locator"), [
+    "https://m.media-amazon.com/images/I/main.jpg",
+  ]);
+  assert.deepEqual(getImageUrls(payload, "other_product_image_locator_1"), [
+    "https://m.media-amazon.com/images/I/p1-new.jpg",
+  ]);
+  assert.deepEqual(getImageUrls(payload, "other_product_image_locator_2"), []);
+
+  // xoá link ⇒ ô biến mất khỏi payload (không gửi chuỗi rỗng lên Amazon)
+  payload = setImageUrls(payload, "other_product_image_locator_1", []);
+  assert.equal("other_product_image_locator_1" in payload, false);
 });
