@@ -1,6 +1,6 @@
 # TIẾN ĐỘ TRIỂN KHAI — VEXIM OPS
 
-> Cập nhật: 16/09/2026 (quản lý shop Module 0 · tên shop Amazon) · G1+G2 Module 8 · Thứ tự build đã chốt: **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** (21 màn Đợt 1)
+> Cập nhật: 16/09/2026 (Module 5 PPC/Ads: rà soát API + chẩn đoán kết nối · quản lý shop Module 0 · tên shop Amazon) · G1+G2 Module 8 · Thứ tự build đã chốt: **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** (21 màn Đợt 1)
 
 ## Cập nhật 15/09 — MODULE 8 GIAI ĐOẠN 3: tập trung thị trường CR3/CR5/HHI, Amazon 1P, velocity (migration 0027)
 
@@ -1318,6 +1318,45 @@ Chi tiết đầy đủ + checklist API + SQL kiểm tra: **`docs/bao-cao-loi-te
 **VEXIM cần làm:** chỉ cần **Redeploy web** (không có migration mới). Nếu vẫn không thấy shop: kiểm tra tài khoản đăng nhập có vai trò `super_admin` chưa — tài khoản không phải super_admin mà không được gán shop sẽ chỉ thấy shop trong tổ chức của mình (RLS `iam.can_read_seller_account`), và form sẽ hiện banner nói rõ.
 
 ---
+
+## 16/09/2026 (lần 4) — Module 5 (Quảng cáo/PPC): rà soát Amazon Ads API, sửa 2 lỗi hợp đồng, màn hình tự chẩn đoán vì sao trống
+
+**Yêu cầu (chủ dự án):** "Quảng cáo (PPC) — Chưa có dữ liệu Amazon Ads. Team tiếp tục đọc tài liệu API của Ads Amazon và repo chính thức (https://github.com/amzn/ads-advanced-tools-docs) để phân tích xem module này đã kết nối, hoạt động đúng chưa?"
+
+**Kết luận rà soát:** tầng HTTP `web/src/lib/worker/amazon/ads.ts` **khớp Postman chính thức** (token
+`api.amazon.com/auth/o2/token`, 3 header `Bearer` + `Amazon-Advertising-API-ClientId` +
+`Amazon-Advertising-API-Scope`, `/sp/*/list`, `/reporting/reports` v3 bất đồng bộ + tải file GZIP,
+host theo vùng NA/EU/FE, phân loại 401/429) — **không sửa**. Màn trống là vì **thiếu credential Ads
+trên Vercel** (`AMAZON_ADS_CLIENT_ID/_SECRET/_REFRESH_TOKEN`) ⇒ `cfg.ads = null` ⇒ mọi job Ads trả
+`skipped` (đúng thiết kế, không phải lỗi) và **chưa từng** có lần chạy nào.
+
+**2 lỗi thật đã sửa** trong `web/src/lib/worker/ads/registry.ts` (sai hợp đồng API ⇒ sẽ ăn 400 khi bật credential):
+- `spPurchasedProduct`: `groupBy ["purchasedAsin"]` → **`["asin"]`** (`purchasedAsin` là của Sponsored Brands; issue #324 + manifest Airbyte dùng `asin`).
+- `spTargeting`: cột `"targetingExpression"` → **`"targeting"`** và thêm `"keywordType"` (SP không có `targetingExpression`). Bảng groupBy chuẩn đã ghi ngay trong doc block của file kèm nguồn.
+
+**Chống tái phát:** mục 6 mới trong `worker/tests/ads-engine.test.ts` — "HỢP ĐỒNG VỚI TÀI LIỆU AMAZON"
+(`DOC_GROUP_BY` cho 5 `reportTypeId`, `DOC_COLUMNS` danh sách cột hợp lệ sinh từ tài liệu). Bằng chứng
+test có giá trị: bình thường **19/19 pass**; khi **tiêm lại 2 lỗi cũ** → **17 pass / 2 fail** đúng 2 test
+mới, sau đó khôi phục bản gốc (grep lại `groupBy: ["asin"]`).
+
+**Màn `/ppc` tự chẩn đoán 5 cổng** (`web/src/lib/data/ads-health.ts` + `ads-health-model.ts` thuần,
+`web/src/components/ppc/AdsDiagnostics.tsx`): credential → profile Ads → cấu trúc campaign → metrics →
+lần xin report gần nhất. Cổng trước chưa mở thì cổng sau ở trạng thái "chờ" (không dọa bằng lỗi dây
+chuyền); lỗi Amazon hiện **nguyên văn** từ `vexim_report_requests.last_error` (đây chính là chỗ phơi ra
+lỗi 400 groupBy/cột trước đây bị chôn trong log cron). Credential chỉ đọc **có/không**, không bao giờ
+trả giá trị token. Thêm nút **"▶ Chạy đồng bộ Amazon Ads ngay"** (`web/src/app/(app)/ppc/actions.ts`,
+chỉ `ceo`/`op_ppc`, chế độ Supabase — chạy sync→pull ngay, in nhật ký) và `maxDuration = 60`.
+
+**Bật dữ liệu thật (3 bước):** (1) thêm 3 biến `AMAZON_ADS_*` (+`AMAZON_ADS_REGION`) cho Production +
+Preview trên Vercel rồi **Redeploy** — Ads là app đăng ký **riêng**, không dùng chung app SP-API;
+(2) bấm nút chạy ngay trên `/ppc`, hoặc `npm run worker:ads-sync` / `worker:ads-pull` trong `web/`,
+hoặc chờ cron `/api/cron/report-pull`; (3) report v3 **bất đồng bộ** — lần đầu có thể `PENDING`, bấm lại
+sau 1–2 phút (job có resume + cooldown 4 h nên không xin trùng).
+
+**Kiểm chứng:** `web npm test` **390/390** (+9 test `web/tests/ads-health.test.ts`) · `tsc` sạch ·
+`next build` OK (`/ppc` 1.07 kB) · `worker` **483/483** · `supabase` TẤT CẢ PASS · test tiêm lỗi đã chạy.
+**Báo cáo đầy đủ:** `docs/bao-cao-module-ppc-ads.md` (đối chiếu từng hạng mục với Postman, chuỗi nhân
+quả màn trống, 5 cổng, 3 bước bật thật, giới hạn "chưa chứng minh bằng call API thật vì chưa có credential").
 
 ## 16/09/2026 (lần 3) — Trình soạn listing: ảnh xem trước ngay cạnh ô nhập link ảnh
 

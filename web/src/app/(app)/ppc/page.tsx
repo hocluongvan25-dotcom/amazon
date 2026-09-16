@@ -24,6 +24,7 @@ import {
   type AdsCampaignRaw,
   type AdsKpiRaw,
 } from "@/lib/data/ppc-model";
+import { readAdsDiagnostics } from "@/lib/data/ads-health";
 import {
   readAdsBudgetEvents,
   readAdsCampaigns,
@@ -31,9 +32,13 @@ import {
   readPendingSuggestionCount,
   readProductRevenue,
 } from "@/lib/data/ppc";
+import { AdsDiagnosticsPanel } from "@/components/ppc/AdsDiagnostics";
 import type { PersonaKey } from "@/lib/roles";
 
 const ALLOWED: PersonaKey[] = ["ceo", "op_ppc"];
+
+/** Nút "Chạy đồng bộ ngay" chạy job Ads trong server action ⇒ cần trần như cron. */
+export const maxDuration = 60;
 
 const stateChip: Record<string, { label: string; tone: "green" | "amber" | "gray" | "red" }> = {
   ENABLED: { label: "Đang chạy", tone: "green" },
@@ -170,27 +175,6 @@ function BudgetEventTable({ rows }: { rows: AdsBudgetEventRaw[] }) {
   );
 }
 
-function EmptyAds() {
-  return (
-    <Panel title="Chưa có dữ liệu Amazon Ads" hint="chạy 2 lệnh dưới đây (hoặc chờ cron 03:00 UTC)">
-      <div className="flex flex-col gap-2 text-[13px]">
-        <div className="rounded-[10px] border border-dashed border-line px-3 py-2.5">
-          <div className="font-bold">1. Đồng bộ cấu trúc (profile → campaign → ad group → từ khoá)</div>
-          <code className="text-[12px] text-soft">npm run worker:ads-sync</code>
-        </div>
-        <div className="rounded-[10px] border border-dashed border-line px-3 py-2.5">
-          <div className="font-bold">2. Kéo 5 report metrics (Reporting API v3)</div>
-          <code className="text-[12px] text-soft">npm run worker:ads-pull</code>
-        </div>
-        <div className="text-soft">
-          Cần credential riêng của Amazon Ads (AMAZON_ADS_CLIENT_ID · AMAZON_ADS_CLIENT_SECRET ·
-          AMAZON_ADS_REFRESH_TOKEN) — Ads là đăng ký riêng, KHÔNG dùng chung app SP-API.
-        </div>
-      </div>
-    </Panel>
-  );
-}
-
 async function LivePpc() {
   let kpis: AdsKpiRaw[] = [];
   let campaigns: AdsCampaignRaw[] = [];
@@ -207,6 +191,15 @@ async function LivePpc() {
     ]);
   } catch (e) {
     loadError = (e as Error).message;
+  }
+
+  // Chẩn đoán 5 cổng (credential → profile → cấu trúc → metrics → report).
+  // Đọc riêng để lỗi chẩn đoán KHÔNG làm sập phần KPI.
+  let diagnostics: Awaited<ReturnType<typeof readAdsDiagnostics>> | null = null;
+  try {
+    diagnostics = await readAdsDiagnostics();
+  } catch {
+    diagnostics = null;
   }
 
   const mainKpi = kpis.slice().sort((a, b) => (b.spend_7d ?? 0) - (a.spend_7d ?? 0))[0];
@@ -256,7 +249,16 @@ async function LivePpc() {
       ) : null}
 
       {cards.length === 0 ? (
-        <EmptyAds />
+        diagnostics ? (
+          <AdsDiagnosticsPanel data={diagnostics} />
+        ) : (
+          <Panel title="Chưa có dữ liệu Amazon Ads" hint="không đọc được trạng thái kết nối">
+            <p className="text-[13px] text-muted">
+              Chưa có số liệu và cũng không đọc được trạng thái kết nối. Kiểm tra migration 0019/0020 và
+              credential Amazon Ads trên Vercel.
+            </p>
+          </Panel>
+        )
       ) : (
         <>
           <Grid2>
@@ -302,6 +304,22 @@ async function LivePpc() {
               </li>
             </ul>
           </Panel>
+
+          {/* Có số liệu rồi nhưng vẫn cho xem cổng nào đang lỗi (ví dụ 1 report
+              trong 5 bị Amazon từ chối) + nút chạy lại ngay. */}
+          <details className="rounded-[13px] border border-line bg-card px-4 py-3">
+            <summary className="cursor-pointer text-[13px] font-bold">
+              Chẩn đoán kết nối Amazon Ads
+              {diagnostics?.firstBlocked ? ` — tắc ở ${diagnostics.firstBlocked.label}` : ""}
+            </summary>
+            <div className="mt-3">
+              {diagnostics ? (
+                <AdsDiagnosticsPanel data={diagnostics} />
+              ) : (
+                <p className="text-[13px] text-muted">Không đọc được trạng thái kết nối.</p>
+              )}
+            </div>
+          </details>
         </>
       )}
     </>

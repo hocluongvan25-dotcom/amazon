@@ -432,3 +432,151 @@ test("ads: bảng đăng ký khớp reportTypeId ↔ kind (khoá để cron khô
   assert.equal(isAdsReportKind("spSearchTerm"), false, "isAdsReportKind nhận KIND nội bộ, không phải reportTypeId");
   assert.equal(Object.keys(ADS_REPORT_SPECS).length, 5);
 });
+
+
+// ============================================================================
+// 6. HỢP ĐỒNG VỚI TÀI LIỆU AMAZON (chống 400 im lặng)
+// ============================================================================
+// Vì sao có mục này: một report sai `groupBy` hoặc sai tên cột thì Amazon trả
+// 400 ngay lúc tạo report — job chỉ ghi `failed`, màn A1/A2/A3 trắng và KHÔNG ai
+// biết vì sao. Ngày 16/09/2026 đã dính ĐÚNG 2 lỗi như vậy:
+//   • spTargeting xin cột `targetingExpression` (tên đó thuộc report Sponsored
+//     Display) → phải là `targeting`
+//   • spPurchasedProduct dùng groupBy `purchasedAsin` (giá trị của
+//     sbPurchasedProduct) → phải là `asin`
+//
+// Nguồn đối chiếu (16/09/2026):
+//   • Reporting v3 report types — advertising.amazon.com/API/docs/en-us/guides/
+//     reporting/v3/report-types/{campaign,targeting,search-term,
+//     advertised-product,purchased-product}
+//   • Postman collection chính thức: github.com/amzn/ads-advanced-tools-docs
+//     (postman/Amazon_Ads_API.postman_collection.json — mẫu spCampaigns:
+//     groupBy ["campaign","adGroup"], columns [impressions, clicks, cost…])
+//   • Đối chiếu chéo với connector đang chạy thật (airbyte source-amazon-ads).
+
+/** groupBy hợp lệ của từng report type — CHỈ những giá trị này. */
+const DOC_GROUP_BY: Record<string, string[]> = {
+  spCampaigns: ["campaign", "adGroup", "campaignPlacement"],
+  spTargeting: ["targeting"],
+  spSearchTerm: ["searchTerm"],
+  spAdvertisedProduct: ["advertiser"],
+  spPurchasedProduct: ["asin"],
+};
+
+/**
+ * Cột hợp lệ theo tài liệu (base metrics + additional metrics của đúng report
+ * type). Muốn thêm cột mới ⇒ thêm vào đây TRƯỚC, kèm link tài liệu trong PR.
+ */
+const DOC_COLUMNS: Record<string, string[]> = {
+  spCampaigns: [
+  "adGroupId", "adGroupName", "adStatus", "addToList", "attributedSalesSameSku14d",
+  "attributedSalesSameSku1d", "attributedSalesSameSku30d", "attributedSalesSameSku7d",
+  "campaignApplicableBudgetRuleId", "campaignApplicableBudgetRuleName",
+  "campaignBiddingStrategy", "campaignBudgetAmount", "campaignBudgetCurrencyCode",
+  "campaignBudgetType", "campaignId", "campaignName", "campaignRuleBasedBudgetAmount",
+  "campaignStatus", "clickThroughRate", "clicks", "cost", "costPerClick", "date",
+  "impressions", "kindleEditionNormalizedPagesRead14d",
+  "kindleEditionNormalizedPagesRoyalties14d", "placementClassification", "purchases14d",
+  "purchases1d", "purchases30d", "purchases7d", "purchasesSameSku14d", "purchasesSameSku1d",
+  "purchasesSameSku30d", "purchasesSameSku7d", "qualifiedBorrows", "royaltyQualifiedBorrows",
+  "sales14d", "sales1d", "sales30d", "sales7d", "spend", "startDate",
+  "topOfSearchImpressionShare", "unitsSoldClicks14d", "unitsSoldClicks1d",
+  "unitsSoldClicks30d", "unitsSoldClicks7d", "unitsSoldSameSku14d", "unitsSoldSameSku1d",
+  "unitsSoldSameSku30d", "unitsSoldSameSku7d",
+  ],
+  spTargeting: [
+  "acosClicks14d", "acosClicks7d", "adGroupId", "adGroupName", "adKeywordStatus", "addToList",
+  "attributedSalesSameSku14d", "attributedSalesSameSku1d", "attributedSalesSameSku30d",
+  "attributedSalesSameSku7d", "campaignBudgetAmount", "campaignBudgetCurrencyCode",
+  "campaignBudgetType", "campaignId", "campaignName", "campaignStatus", "clickThroughRate",
+  "clicks", "cost", "costPerClick", "date", "impressions", "keyword", "keywordBid",
+  "keywordId", "keywordType", "kindleEditionNormalizedPagesRead14d",
+  "kindleEditionNormalizedPagesRoyalties14d", "matchType", "portfolioId", "purchases14d",
+  "purchases1d", "purchases30d", "purchases7d", "purchasesSameSku14d", "purchasesSameSku1d",
+  "purchasesSameSku30d", "purchasesSameSku7d", "qualifiedBorrows", "roasClicks14d",
+  "roasClicks7d", "royaltyQualifiedBorrows", "sales14d", "sales1d", "sales30d", "sales7d",
+  "salesOtherSku7d", "startDate", "targeting", "topOfSearchImpressionShare",
+  "unitsSoldClicks14d", "unitsSoldClicks1d", "unitsSoldClicks30d", "unitsSoldClicks7d",
+  "unitsSoldOtherSku7d", "unitsSoldSameSku14d", "unitsSoldSameSku1d", "unitsSoldSameSku30d",
+  "unitsSoldSameSku7d",
+  ],
+  spSearchTerm: [
+  "acosClicks14d", "acosClicks7d", "adGroupId", "adGroupName", "adKeywordStatus", "addToList",
+  "attributedSalesSameSku14d", "attributedSalesSameSku1d", "attributedSalesSameSku30d",
+  "attributedSalesSameSku7d", "campaignBudgetAmount", "campaignBudgetCurrencyCode",
+  "campaignBudgetType", "campaignId", "campaignName", "campaignStatus", "clickThroughRate",
+  "clicks", "cost", "costPerClick", "date", "impressions", "keyword", "keywordBid",
+  "keywordId", "keywordType", "kindleEditionNormalizedPagesRead14d",
+  "kindleEditionNormalizedPagesRoyalties14d", "matchType", "portfolioId", "purchases14d",
+  "purchases1d", "purchases30d", "purchases7d", "purchasesSameSku14d", "purchasesSameSku1d",
+  "purchasesSameSku30d", "purchasesSameSku7d", "qualifiedBorrows", "roasClicks14d",
+  "roasClicks7d", "royaltyQualifiedBorrows", "sales14d", "sales1d", "sales30d", "sales7d",
+  "salesOtherSku7d", "searchTerm", "startDate", "targeting", "unitsSoldClicks14d",
+  "unitsSoldClicks1d", "unitsSoldClicks30d", "unitsSoldClicks7d", "unitsSoldOtherSku7d",
+  "unitsSoldSameSku14d", "unitsSoldSameSku1d", "unitsSoldSameSku30d", "unitsSoldSameSku7d",
+  ],
+  spAdvertisedProduct: [
+  "acosClicks14d", "acosClicks7d", "adGroupId", "adGroupName", "adId", "addToList",
+  "advertisedAsin", "advertisedSku", "attributedSalesSameSku14d", "attributedSalesSameSku1d",
+  "attributedSalesSameSku30d", "attributedSalesSameSku7d", "campaignBudgetAmount",
+  "campaignBudgetCurrencyCode", "campaignBudgetType", "campaignId", "campaignName",
+  "campaignStatus", "clickThroughRate", "clicks", "cost", "costPerClick", "date",
+  "impressions", "kindleEditionNormalizedPagesRead14d",
+  "kindleEditionNormalizedPagesRoyalties14d", "portfolioId", "purchases14d", "purchases1d",
+  "purchases30d", "purchases7d", "purchasesSameSku14d", "purchasesSameSku1d",
+  "purchasesSameSku30d", "purchasesSameSku7d", "qualifiedBorrows", "roasClicks14d",
+  "roasClicks7d", "royaltyQualifiedBorrows", "sales14d", "sales1d", "sales30d", "sales7d",
+  "salesOtherSku7d", "spend", "startDate", "unitsSoldClicks14d", "unitsSoldClicks1d",
+  "unitsSoldClicks30d", "unitsSoldClicks7d", "unitsSoldOtherSku7d", "unitsSoldSameSku14d",
+  "unitsSoldSameSku1d", "unitsSoldSameSku30d", "unitsSoldSameSku7d",
+  ],
+  spPurchasedProduct: [
+  "adGroupId", "adGroupName", "addToList", "addToListFromClicks", "advertisedAsin",
+  "advertisedSku", "campaignBudgetCurrencyCode", "campaignId", "campaignName", "date",
+  "keyword", "keywordId", "keywordType", "kindleEditionNormalizedPagesRead14d",
+  "kindleEditionNormalizedPagesRoyalties14d", "matchType", "portfolioId", "purchasedAsin",
+  "purchases14d", "purchases1d", "purchases30d", "purchases7d", "purchasesOtherSku14d",
+  "purchasesOtherSku1d", "purchasesOtherSku30d", "purchasesOtherSku7d", "qualifiedBorrows",
+  "qualifiedBorrowsFromClicks", "royaltyQualifiedBorrows", "royaltyQualifiedBorrowsFromClicks",
+  "sales14d", "sales1d", "sales30d", "sales7d", "salesOtherSku14d", "salesOtherSku1d",
+  "salesOtherSku30d", "salesOtherSku7d", "startDate", "unitsSoldClicks14d",
+  "unitsSoldClicks1d", "unitsSoldClicks30d", "unitsSoldClicks7d", "unitsSoldOtherSku14d",
+  "unitsSoldOtherSku1d", "unitsSoldOtherSku30d", "unitsSoldOtherSku7d",
+  ],
+};
+
+test("ads: groupBy của từng report type khớp tài liệu Amazon (spPurchasedProduct = asin)", () => {
+  for (const kind of ADS_ALL_KINDS) {
+    const spec = adsSpecOf(kind);
+    const allowed = DOC_GROUP_BY[spec.reportTypeId];
+    assert.ok(allowed, `thiếu bảng groupBy cho ${spec.reportTypeId}`);
+    for (const g of spec.groupBy) {
+      assert.ok(
+        allowed.includes(g),
+        `${spec.reportTypeId}: groupBy "${g}" không có trong tài liệu (hợp lệ: ${allowed.join(", ")})`,
+      );
+    }
+    assert.ok(spec.groupBy.length > 0, `${spec.reportTypeId}: phải có groupBy`);
+  }
+  // Khoá riêng ca đã từng sai để không ai "sửa lại" thành giá trị cũ
+  assert.deepEqual(adsSpecOf("purchased-products").groupBy, ["asin"]);
+  assert.ok(
+    !adsSpecOf("targeting").columns.includes("targetingExpression"),
+    "spTargeting KHÔNG có cột targetingExpression — cột đúng là \"targeting\"",
+  );
+  assert.ok(adsSpecOf("targeting").columns.includes("targeting"));
+});
+
+test("ads: mọi cột của mọi report đều nằm trong danh sách tài liệu (không xin cột lạ)", () => {
+  for (const kind of ADS_ALL_KINDS) {
+    const spec = adsSpecOf(kind);
+    const allowed = DOC_COLUMNS[spec.reportTypeId];
+    assert.ok(allowed, `thiếu bảng cột cho ${spec.reportTypeId}`);
+    for (const col of spec.columns) {
+      assert.ok(
+        allowed.includes(col),
+        `${spec.reportTypeId}: cột "${col}" không có trong tài liệu Amazon → sẽ 400`,
+      );
+    }
+  }
+});
