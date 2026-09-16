@@ -5249,11 +5249,152 @@ await ex("reset role; rollback;");
 await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
 
 // ============================================================================
-console.log("\n=== BƯỚC 30: repair/recreate_research_public_views.sql (18 view gồm G4+G5) ===");
-await ex(rd("repair/recreate_research_public_views.sql"), "repair views G5");
-await cmp("repair: đủ 18 view public.vexim_research_*",
+console.log("\n=== BƯỚC 30: 0030 — Module 8 G7 (lịch sử BSR/mùa vụ + credit status) ===");
+await ex(rd("migrations/0030_module_8_g7_bsr_seasonality.sql"), "0030 lần 1");
+ok(true, "0030 chạy sạch (bảng bsr_history, 3 RPC worker/status, 1 view)");
+await ex(rd("migrations/0030_module_8_g7_bsr_seasonality.sql"), "0030 lần 2");
+ok(true, "0030 idempotent");
+
+await ex("begin");
+const a30Analyst  = "eeee0000-0000-4000-8000-00000000a301";
+const a30ClientA  = "dddd0000-0000-4000-8000-00000000a301";
+const a30ClientB  = "dddd0000-0000-4000-8000-00000000a302";
+const org30A = "cccc0000-0000-4000-8000-00000000a301";
+const org30B = "cccc0000-0000-4000-8000-00000000a302";
+await ex(`
+  insert into iam.organizations(id,name,slug) values
+    ('${org30A}','Khách G7 A','khach-g7-a'),('${org30B}','Khách G7 B','khach-g7-b');
+  insert into auth.users(id,email) values
+    ('${a30Analyst}','analyst-g7@vexim.vn'),
+    ('${a30ClientA}','khach-g7a@example.test'),
+    ('${a30ClientB}','khach-g7b@example.test');
+  insert into iam.user_profiles(id,display_name,email,vexim_employee,org_id,status) values
+    ('${a30Analyst}','Hải Anh','analyst-g7@vexim.vn',true,null,'active'),
+    ('${a30ClientA}','Chủ A','khach-g7a@example.test',false,'${org30A}','active'),
+    ('${a30ClientB}','Chủ B','khach-g7b@example.test',false,'${org30B}','active');
+  insert into iam.role_assignments(user_id,role) values ('${a30Analyst}','analyst');
+`);
+await ex(`set local role authenticated; select set_config('request.jwt.claim.sub','${a30Analyst}',true);`);
+const created30 = (
+  await db.query("select public.vexim_research_create_assessment($1::jsonb) as r", [
+    JSON.stringify({
+      engineVersion: "x", orgId: org30A,
+      assumptions: {
+        title: "Ngách G7", keywords: ["rack"],
+        prices: { pessimistic: 24.99, base: 29.99, optimistic: 34.99 },
+        cogsPerUnit: 6, inboundFreightPerUnit: 1.5,
+        packDims: { lengthIn: 10, widthIn: 6, heightIn: 0.5, weightLb: 0.75 },
+      },
+      result: {
+        scorecard: { verdict: "insufficient_data", overallScore: null, pillars: [], vetoes: [] },
+        financial: { feeTableVersion: "x", currentPackaging: { tier: "small_standard" },
+          scenarios: { base: { netMarginPct: 18 } } },
+        roadmap: {},
+      },
+    }),
+  ])
+).rows[0].r;
+ok(created30?.ok, `0030: hồ sơ G7 sẵn sàng — ${created30?.code}`);
+const id30 = created30.id;
+
+// seed snapshot Rainforest 2 ngày khác nhau + trùng ngày (phải dedup lấy mới nhất)
+await ex("reset role; select set_config('request.jwt.claim.sub','',false); set role service_role;");
+await ex(`
+  insert into research.collection_runs(assessment_id,kind,status,provider,started_at,finished_at,created_at)
+  values ('${id30}','serp','done','rainforest', now()-interval '20 days', now()-interval '20 days', now()-interval '20 days'),
+         ('${id30}','products','done','rainforest', now()-interval '2 hours', now()-interval '2 hours', now()-interval '2 hours'),
+         ('${id30}','products','done','rainforest', now()-interval '1 hour', now()-interval '1 hour', now()-interval '1 hour');
+  insert into research.competitor_snapshots
+    (assessment_id,run_id,position,is_sponsored,asin,currency,bsr_rank,created_at)
+  values
+    ('${id30}', (select id from research.collection_runs where assessment_id='${id30}' and kind='serp' order by created_at limit 1),
+      1,false,'B0G701','USD',9000, now()-interval '20 days'),
+    ('${id30}', (select id from research.collection_runs where assessment_id='${id30}' and kind='products' order by created_at limit 1),
+      1,false,'B0G701','USD',8000, now()-interval '2 hours'),
+    ('${id30}', (select id from research.collection_runs where assessment_id='${id30}' and kind='products' order by created_at desc limit 1),
+      1,false,'B0G701','USD',7999, now()-interval '1 hour'),
+    ('${id30}', (select id from research.collection_runs where assessment_id='${id30}' and kind='products' order by created_at desc limit 1),
+      2,false,'B0G702','USD',15000, now()-interval '1 hour'),
+    ('${id30}', (select id from research.collection_runs where assessment_id='${id30}' and kind='products' order by created_at desc limit 1),
+      3,false,'B0G703','USD',null, now()-interval '1 hour');
+`);
+const refresh1 = (await one(
+  "select public.vexim_research_worker_refresh_bsr_from_snapshots('"+id30+"') r")).r;
+ok(refresh1?.points === 3, `0030: gộp BSR từ snapshot = 3 điểm (nhận ${refresh1?.points ?? refresh1?.error})`);
+const refresh2 = (await one(
+  "select public.vexim_research_worker_refresh_bsr_from_snapshots('"+id30+"') r")).r;
+ok(refresh2?.points === 3, `0030: refresh lần 2 idempotent = 3 (nhận ${refresh2?.points ?? refresh2?.error})`);
+await cmp("0030: điểm trùng ngày lấy lần quét muộn nhất (rank 7999)",
+  `select bsr_rank n from research.bsr_history
+    where asin='B0G701' and observed_at=current_date and source='rainforest'`, 7999);
+await cmp("0030: điểm BSR null bị bỏ",
+  `select count(*) n from research.bsr_history where asin='B0G703'`, 0);
+
+// upsert điểm Keepa (gồm rank null), chạy 2 lần không nhân đôi
+const keepaPoints = JSON.stringify([
+  { asin: "B0G701", observedAt: new Date().toISOString(), bsrRank: 5000, source: "keepa", assessmentId: id30 },
+  { asin: "B0G704", observedAt: new Date(Date.now()-86400000).toISOString(), bsrRank: 12000, source: "keepa" },
+  { asin: "B0G704", observedAt: new Date().toISOString(), bsrRank: null, source: "keepa" },
+]).replace(/'/g, "''");
+const up1 = (await one(
+  "select public.vexim_research_worker_upsert_bsr_points('"+org30A+"','"+keepaPoints+"')::jsonb r")).r;
+ok(up1?.points === 3, `0030: upsert 3 điểm Keepa (nhận ${up1?.points ?? up1?.error})`);
+await one("select public.vexim_research_worker_upsert_bsr_points('"+org30A+"','"+keepaPoints+"')::jsonb r");
+await cmp("0030: tổng điểm lịch sử (3 rain + 3 keepa, không nhân đôi)",
+  `select count(*) n from research.bsr_history where org_id='${org30A}'`, 6);
+
+// phiên đăng nhập KHÔNG gọi được RPC worker
+await ex(`reset role; set local role authenticated; select set_config('request.jwt.claim.sub','${a30ClientA}',true);`);
+await mustBlock(`select public.vexim_research_worker_upsert_bsr_points('${org30A}','[]'::jsonb)`);
+await mustBlock(`select public.vexim_research_worker_refresh_bsr_from_snapshots('${id30}')`);
+
+// RLS view: khách org B thấy 0, khách org A thấy đủ 6
+await ex(`reset role; set local role authenticated; select set_config('request.jwt.claim.sub','${a30ClientB}',true);`);
+await cmp("0030 RLS: khách org B thấy 0 điểm BSR của org A",
+  `select count(*) n from public.vexim_research_bsr_history where org_id='${org30A}'`, 0);
+await cmp("0030 RLS: khách org B thấy 0 điểm BSR toàn bảng",
+  `select count(*) n from public.vexim_research_bsr_history`, 0);
+await ex(`reset role; set local role authenticated; select set_config('request.jwt.claim.sub','${a30ClientA}',true);`);
+await cmp("0030 RLS: khách org A thấy 6 điểm BSR",
+  `select count(*) n from public.vexim_research_bsr_history where org_id='${org30A}'`, 6);
+
+// sổ cái credit + RPC trạng thái
+await ex("reset role; select set_config('request.jwt.claim.sub','',false); set role service_role;");
+await ex(`
+  insert into research.credit_ledger(org_id,run_id,delta,reason,balance_after)
+  select '${org30A}', id, -1, 'serp', -1 from research.collection_runs
+    where assessment_id='${id30}' and kind='serp';
+  insert into research.credit_ledger(org_id,run_id,delta,reason,balance_after)
+  select '${org30A}', id, -3, 'products', -4 from research.collection_runs
+    where assessment_id='${id30}' and kind='products' order by created_at limit 1;
+`);
+const csWorker = (await one(
+  "select public.vexim_research_credit_status('"+org30A+"'::uuid) r")).r;
+ok(csWorker?.creditsSpent === 4, `0030: worker xem credit tháng = 4 (nhận ${csWorker?.creditsSpent})`);
+
+await ex(`reset role; set local role authenticated; select set_config('request.jwt.claim.sub','${a30ClientA}',true);`);
+const csA = (await one(
+  "select public.vexim_research_credit_status('"+org30A+"'::uuid) r")).r;
+ok(csA?.creditsSpent === 4, `0030: khách org A xem credit của mình = 4 (nhận ${csA?.creditsSpent})`);
+await ex(`reset role; set local role authenticated; select set_config('request.jwt.claim.sub','${a30ClientB}',true);`);
+await mustBlock(`select public.vexim_research_credit_status('${org30A}')`);
+const csB = (await one("select public.vexim_research_credit_status() r")).r;
+ok(csB?.creditsSpent === 0 && csB?.orgId === org30B,
+  `0030: khách org B mặc định xem org mình = 0 (nhận ${JSON.stringify(csB)})`);
+await ex(`reset role; set local role authenticated; select set_config('request.jwt.claim.sub','${a30Analyst}',true);`);
+const csEmp = (await one(
+  "select public.vexim_research_credit_status('"+org30B+"'::uuid) r")).r;
+ok(csEmp?.ok === true, `0030: nhân viên xem được credit org B (nhận ${JSON.stringify(csEmp)})`);
+
+await ex("reset role; rollback;");
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+
+// ============================================================================
+console.log("\n=== BƯỚC 31: repair/recreate_research_public_views.sql (19 view gồm G4+G5+G7) ===");
+await ex(rd("repair/recreate_research_public_views.sql"), "repair views G7");
+await cmp("repair: đủ 19 view public.vexim_research_*",
   `select count(*) n from information_schema.views
-    where table_schema='public' and table_name like 'vexim_research_%'`, 18);
+    where table_schema='public' and table_name like 'vexim_research_%'`, 19);
 
 console.log(`\n${"=".repeat(70)}`);
 console.log(fails === 0 ? "TẤT CẢ PASS" : `${fails} MỤC FAIL`);

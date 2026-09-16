@@ -12,6 +12,7 @@ import type { PersonaKey } from "@/lib/roles";
 import { readAssessmentDetail, readCollectionData, type CompetitorRowView } from "@/lib/data/research";
 import { readPainData } from "@/lib/data/research-pain";
 import { readPrintData } from "@/lib/data/research-report";
+import { readBsrHistory } from "@/lib/data/research-seasonality";
 import { analyzeConcentration, type CompetitorInput } from "@/lib/research/domain";
 import { PrintReport } from "@/components/research/print-report";
 import { PrintToolbar } from "@/components/research/print-toolbar";
@@ -42,6 +43,7 @@ export default async function ResearchReportPrintPage({
     readPrintData(id),
   ]);
   if (!detail || !collection || !report || !pain) notFound();
+  const bsr = await readBsrHistory(id, collection.competitors).catch(() => null);
 
   const competitors: CompetitorRowView[] = collection.competitors;
   const input: CompetitorInput[] = competitors.map((c) => ({
@@ -99,6 +101,7 @@ export default async function ResearchReportPrintPage({
             competitors={competitors}
             concentration={concentration}
             pain={pain.items.length ? pain : null}
+            bsrPoints={bsr?.points ?? []}
           />
         </div>
       </div>

@@ -5,8 +5,14 @@
  */
 
 import React from "react";
-import type { AssessmentResult } from "@/lib/research/domain";
-import type { ConcentrationResult } from "@/lib/research/domain";
+import {
+  computeSeasonality,
+  restockAdvice,
+  summarizeBsr,
+  type AssessmentResult,
+  type BsrPoint,
+  type ConcentrationResult,
+} from "@/lib/research/domain";
 import type { PainData } from "@/lib/data/research-pain";
 import type { CompetitorRowView } from "@/lib/data/research";
 import type { VetoAckRow } from "@/lib/data/research-report";
@@ -354,6 +360,59 @@ export function PrintPain({ pain }: { pain: PainData | null }) {
               <td className="pr-num">{i.frequency} ({pct(i.frequencyPct, 0)})</td>
               <td>{i.factoryRequirement ?? "—"}</td>
               <td>{i.acceptanceStandard ?? "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/* ----------------------------- MÙA VỤ BSR ------------------------------- */
+
+export function PrintSeasonality({ points }: { points: BsrPoint[] }) {
+  const season = points.length ? computeSeasonality(points) : null;
+  const advice = points.length ? restockAdvice(points, { leadWeeks: 8 }) : null;
+  const monthName = (m: number | null) =>
+    m === null ? "—" : ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"][m - 1];
+
+  const byAsin = new Map<string, import("@/lib/research/domain").BsrPoint[]>();
+  for (const p of points) {
+    const arr = byAsin.get(p.asin) ?? [];
+    arr.push(p);
+    byAsin.set(p.asin, arr);
+  }
+  const top = [...byAsin.entries()]
+    .map(([asin, pts]) => ({ asin, t: summarizeBsr(pts) }))
+    .sort((a, b) => (a.t.latestBsr ?? 1e9) - (b.t.latestBsr ?? 1e9))
+    .slice(0, 8);
+
+  return (
+    <div className="pr-block">
+      <BlockTitle>Lịch sử BSR &amp; mùa vụ (dữ liệu Rainforest tích lũy / Keepa)</BlockTitle>
+      {!season ? (
+        <p className="pr-missing">— Chưa đủ cơ sở nhận diện mùa vụ (cần ≥12 điểm trải ≥8 tuần) —</p>
+      ) : (
+        <table className="pr-table pr-kv">
+          <tbody>
+            <tr><th>Tháng cao điểm / chậm nhất</th><td>tháng {monthName(season.peakMonth)} / tháng {monthName(season.troughMonth)}</td></tr>
+            <tr><th>Độ sâu mùa vụ (BSR đỉnh/đáy)</th><td>{season.peakTroughRatio === null ? "—" : `${(season.peakTroughRatio * 100).toFixed(0)}%`} · độ tin cậy {season.confidence} ({season.yearsCovered} năm)</td></tr>
+            {advice && <tr><th>Khuyến nghị chốt đơn xưởng (lead 8 tuần)</th><td>tháng {monthName(advice.orderByMonth)}</td></tr>}
+          </tbody>
+        </table>
+      )}
+      <table className="pr-table pr-compact">
+        <thead>
+          <tr><th>ASIN</th><th className="pr-num">BSR hiện tại</th><th className="pr-num">TB 30 ngày</th><th className="pr-num">TB 90 ngày</th><th className="pr-num">Số điểm</th></tr>
+        </thead>
+        <tbody>
+          {top.map(({ asin, t }) => (
+            <tr key={asin}>
+              <td>{asin}</td>
+              <td className="pr-num">{t.latestBsr === null ? "—" : Math.round(t.latestBsr).toLocaleString("en-US")}</td>
+              <td className="pr-num">{t.medianBsr30d === null ? "—" : Math.round(t.medianBsr30d).toLocaleString("en-US")}</td>
+              <td className="pr-num">{t.medianBsr90d === null ? "—" : Math.round(t.medianBsr90d).toLocaleString("en-US")}</td>
+              <td className="pr-num">{t.points}</td>
             </tr>
           ))}
         </tbody>

@@ -97,7 +97,15 @@ export async function POST(req: Request) {
       scoring = { scored: false, message: `chấm tập trung lỗi: ${(e as Error).message}` };
     }
 
-    return NextResponse.json({ ok: true, rows: written, scoring });
+    // G7: gộp BSR của collection vào lịch sử (0 credit); lỗi không chặn webhook.
+    let bsrPoints: number | null = null;
+    try {
+      bsrPoints = await port.refreshBsrHistory?.(run.assessment_id) ?? null;
+    } catch {
+      bsrPoints = null;
+    }
+
+    return NextResponse.json({ ok: true, rows: written, scoring, bsrPoints });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     try {

@@ -19,12 +19,14 @@ import type {
   VetoFlag,
 } from "../../research/domain/index.ts";
 import {
+  decideCreditBudget,
   parseProductBundle,
   parseReviewsPage,
   parseSearchPage,
   scoreCompetitionFromSnapshots,
   scoreDemandFromSnapshots,
   summarizeCompetitors,
+  type BsrPoint,
 } from "../../research/domain/index.ts";
 import type {
   CollectionEntry,
@@ -97,6 +99,14 @@ export type ResearchWorkerPort = {
   demandVelocitySnapshots(
     assessmentId: string,
   ): Promise<{ prev: VelocitySnapshot[]; current: VelocitySnapshot[] }>;
+
+  /* ------------------------------- G7: budget + BSR --------------------- */
+  /** credit đã tiêu của org trong tháng (RPC vexim_research_credit_status). */
+  creditStatus?(orgId: string): Promise<{ creditsSpent: number }>;
+  /** gộp BSR từ competitor_snapshots vào bsr_history (0 credit). */
+  refreshBsrHistory?(assessmentId: string): Promise<number>;
+  /** nạp điểm BSR backfill (Keepa) vào bsr_history. */
+  upsertBsrPoints?(orgId: string, points: BsrPoint[], assessmentId: string | null): Promise<number>;
 };
 
 /** Payload JSON cho RPC vexim_research_worker_save_pain_analysis (0028). */
@@ -288,6 +298,28 @@ export async function collectProducts(
     scoringMsg = ` · ${scoring.message}`;
   } catch (e) {
     scoringMsg = ` · chấm tập trung lỗi: ${(e as Error).message}`;
+  }
+
+  // G7: gộp BSR vào lịch sử (0 credit) rồi tùy chọn backfill Keepa (có khóa
+  // KEEPA_API_KEY + cờ RESEARCH_KEEPA_BACKFILL=1 mới bật).
+  try {
+    const points = await port.refreshBsrHistory?.(run.assessmentId);
+    if (typeof points === "number") scoringMsg += ` · ${points} điểm BSR`;
+    if (process.env.KEEPA_API_KEY && process.env.RESEARCH_KEEPA_BACKFILL === "1" && port.upsertBsrPoints) {
+      const { getKeepaProvider } = await import("../../intelligence/keepa/index.ts");
+      const keepa = getKeepaProvider(process.env);
+      if (keepa.configured) {
+        const hist = await keepa.provider.fetchBsrHistory({
+          asins,
+          marketplace: domain,
+          sinceDays: 365,
+        });
+        const upserted = await port.upsertBsrPoints(run.orgId, hist.points, run.assessmentId);
+        scoringMsg += ` · keepa ${upserted} điểm (${hist.asinsFound} ASIN)`;
+      }
+    }
+  } catch (e) {
+    scoringMsg += ` · lịch sử BSR lỗi: ${(e as Error).message}`;
   }
 
   return {
@@ -573,6 +605,34 @@ export const RESEARCH_COLLECTORS = {
 } as const;
 
 /** Nhận lần lượt mọi run queued của các loại cho phép đến khi hết. */
+/** Ước credits cho MỘT run (bi quan), dùng chặn trước khi tiêu. */
+async function estimateRunCost(run: ClaimedRun, port: ResearchWorkerPort): Promise<number> {
+  const explicit = asStringArray(run.params.asins);
+  switch (run.kind) {
+    case "serp":
+      return 1;
+    case "products":
+    case "offers":
+    case "sales": {
+      // product+offers+sales = 3 request/ASIN (cộng 1 search cho chắc)
+      const n = explicit.length || (await port.latestSerpAsins(run.assessmentId, 30)).length;
+      return n ? 1 + n * 3 : 0;
+    }
+    case "reviews": {
+      const n = explicit.length || (await port.latestSerpAsins(run.assessmentId, 10)).length;
+      const pages = Math.max(1, asNumber(run.params.reviewPages, 2));
+      return n * pages;
+    }
+    default:
+      return 0; // fees (SP-API), analyze (LLM) không tốn credit Rainforest
+  }
+}
+
+function envInt(name: string, fallback: number): number {
+  const v = Number(process.env[name]);
+  return Number.isFinite(v) && v > 0 ? v : fallback;
+}
+
 export async function drainResearchQueue(
   provider: IntelligenceProvider,
   port: ResearchWorkerPort,
@@ -599,6 +659,35 @@ export async function drainResearchQueue(
       await port.finishRun({ runId: run.id, status: "failed", error: `loại run chưa hỗ trợ: ${run.kind}` });
       continue;
     }
+
+    // G7 — CHẶN NGÂN SÁCH trước khi tiêu credit (cảnh báo thì cho chạy,
+    // vượt trần cứng thì đánh failed, không gọi Rainforest).
+    if (port.creditStatus) {
+      try {
+        const cost = await estimateRunCost(run, port);
+        const { creditsSpent } = await port.creditStatus(run.orgId);
+        const decision = decideCreditBudget({
+          spentMonth: creditsSpent,
+          estimatedNextCost: cost,
+          softBudget: envInt("RESEARCH_CREDIT_BUDGET_MONTHLY", 2_000),
+          hardCap: envInt("RESEARCH_CREDIT_HARD_CAP_MONTHLY", 10_000),
+        });
+        if (decision.level === "warn") {
+          opts.log?.(`[research] CẢNH BÁO ngân sách credits: ${decision.reasons.join(" ")}`);
+        }
+        if (decision.level === "block") {
+          const reason = `[budget] ${decision.reasons.join(" ")}`;
+          await port.finishRun({ runId: run.id, status: "failed", error: reason });
+          outcomes.push({ runId: run.id, kind: run.kind, status: "failed", creditsUsed: 0, message: reason });
+          opts.log?.(`[research] ${run.kind} ${run.id.slice(0, 8)} → BLOCKED budget`);
+          continue;
+        }
+      } catch (e) {
+        // Không vì lỗi đọc sổ cái mà dừng thu thập; chỉ log.
+        opts.log?.(`[research] bỏ qua kiểm tra ngân sách: ${(e as Error).message}`);
+      }
+    }
+
     try {
       const outcome =
         run.kind === "analyze"

@@ -17,6 +17,7 @@ import { getIntelligenceProvider } from "../intelligence/index.ts";
 import { getLlmProvider } from "../ai/index.ts";
 import type {
   AnalysisReview,
+  BsrPoint,
   CompetitorRow,
   CriticalReviewRow,
   VetoFlag,
@@ -263,6 +264,39 @@ export class SupabaseResearchPort implements ResearchWorkerPort {
       return (v.finished_at ?? new Date().toISOString()).slice(0, 10);
     };
     return { current: toSnap(byRun[0], dateOf(0)), prev: toSnap(byRun[1], dateOf(1)) };
+  }
+
+  /* ------------------------------- G7: budget + BSR --------------------- */
+
+  async creditStatus(orgId: string): Promise<{ creditsSpent: number }> {
+    const data = await this.rpc<{ creditsSpent: number }>(
+      "vexim_research_credit_status",
+      { p_org: orgId },
+    );
+    return { creditsSpent: Number(data.creditsSpent ?? 0) };
+  }
+
+  async refreshBsrHistory(assessmentId: string): Promise<number> {
+    const data = await this.rpc<{ points: number }>(
+      "vexim_research_worker_refresh_bsr_from_snapshots",
+      { p_assessment: assessmentId },
+    );
+    return Number(data.points ?? 0);
+  }
+
+  async upsertBsrPoints(orgId: string, points: BsrPoint[], assessmentId: string | null): Promise<number> {
+    const payload = points.map((p) => ({
+      asin: p.asin,
+      observedAt: p.observedAt,
+      bsrRank: p.bsrRank,
+      source: p.source,
+      assessmentId,
+    }));
+    const data = await this.rpc<{ points: number }>("vexim_research_worker_upsert_bsr_points", {
+      p_org: orgId,
+      p_points: payload,
+    });
+    return Number(data.points ?? 0);
   }
 }
 

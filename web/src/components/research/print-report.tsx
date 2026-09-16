@@ -7,7 +7,7 @@
 
 import React from "react";
 import { SECTION_REGISTRY } from "@/lib/research/domain";
-import type { AssessmentResult, ConcentrationResult } from "@/lib/research/domain";
+import type { AssessmentResult, BsrPoint, ConcentrationResult } from "@/lib/research/domain";
 import type { PainData } from "@/lib/data/research-pain";
 import type { CompetitorRowView } from "@/lib/data/research";
 import type { PrintReportData } from "@/lib/data/research-report";
@@ -21,6 +21,7 @@ import {
   PrintPnl,
   PrintRoadmap,
   PrintScorecard,
+  PrintSeasonality,
   PrintSignoff,
   PrintVetoAcks,
 } from "./print-blocks";
@@ -45,8 +46,9 @@ export function PrintReport(props: {
   competitors: CompetitorRowView[];
   concentration: ConcentrationResult;
   pain: PainData | null;
+  bsrPoints: BsrPoint[];
 }) {
-  const { kind, meta, report, result, competitors, concentration, pain } = props;
+  const { kind, meta, report, result, competitors, concentration, pain, bsrPoints } = props;
   const sec = (key: string) => report.sections[key];
 
   const Narrative = ({ k, pageBreak = false }: { k: string; pageBreak?: boolean }) => {
@@ -144,6 +146,7 @@ export function PrintReport(props: {
         <Narrative k="mkt_share" />
         <PrintConcentration c={concentration} />
         <Narrative k="mkt_structure" />
+        <PrintSeasonality points={bsrPoints} />
         <Narrative k="mkt_conclusion" />
       </section>
 

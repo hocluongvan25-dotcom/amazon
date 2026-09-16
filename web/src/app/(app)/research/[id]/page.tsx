@@ -14,6 +14,9 @@ import { createClient } from "@/lib/supabase/server";
 import { CollectionPanel } from "./CollectionPanel";
 import { MarketConcentrationPanel } from "./MarketConcentrationPanel";
 import { PainPanel } from "./PainPanel";
+import { SeasonalityPanel } from "./SeasonalityPanel";
+import { CreditBudgetPanel } from "./CreditBudgetPanel";
+import { readBsrHistory, readCreditMonth } from "@/lib/data/research-seasonality";
 import {
   STATUS_LABEL,
   VERDICT_LABEL,
@@ -33,15 +36,17 @@ export default async function ResearchDetailPage({
   if (!ALLOWED.includes(session.persona)) return <NoAccess />;
 
   const { id } = await params;
-  const [detail, collection, pain, db] = await Promise.all([
+  const [detail, collection, pain, db, creditMonth] = await Promise.all([
     readAssessmentDetail(id),
     readCollectionData(id),
     readPainData(id),
     createClient(),
+    readCreditMonth().catch(() => []),
   ]);
   if (!detail) notFound();
   if (!collection) notFound();
   if (!pain) notFound();
+  const bsr = await readBsrHistory(id, collection.competitors).catch(() => null);
   const { row, result } = detail;
 
   return (
@@ -74,6 +79,14 @@ export default async function ResearchDetailPage({
 
       <div className="mt-4">
         <MarketConcentrationPanel competitors={collection.competitors} velocity={collection.velocity} />
+      </div>
+
+      <div className="mt-4">
+        <SeasonalityPanel data={bsr} />
+      </div>
+
+      <div className="mt-4">
+        <CreditBudgetPanel rows={creditMonth ?? []} />
       </div>
 
       <div className="mt-4">

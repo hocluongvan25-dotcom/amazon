@@ -183,12 +183,19 @@ select k.assessment_id, a.code, k.version_no, k.rule_code,
   from research.veto_acknowledgements k
   join research.assessments a on a.id = k.assessment_id;
 
+-- G7 (0030): lịch sử BSR cho engine mùa vụ
+create or replace view public.vexim_research_bsr_history
+with (security_invoker = true) as
+select h.id, h.assessment_id, h.org_id, h.asin, h.observed_at,
+       h.bsr_rank, h.source, h.created_at
+  from research.bsr_history h;
+
 grant select on
   public.vexim_research_pain_clusters, public.vexim_research_pain_items,
   public.vexim_research_pain_quotes, public.vexim_research_improvement_specs,
   public.vexim_research_llm_runs,
   public.vexim_research_report_versions, public.vexim_research_report_sections,
-  public.vexim_research_veto_acks
+  public.vexim_research_veto_acks, public.vexim_research_bsr_history
   to authenticated, anon, service_role;
 
 -- Bắt PostgREST nạp lại schema cache (bắt buộc sau khi tạo view thủ công)

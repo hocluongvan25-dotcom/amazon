@@ -142,7 +142,8 @@ create policy rls_read_research_credit on research.credit_ledger
   for select using (exists (
     select 1 from iam.user_profiles up
      where up.id = auth.uid()
-       and (iam.has_role(array['super_admin']) or up.vexim_employee = true or up.org_id = org_id)));
+       and (iam.has_role(array['super_admin']) or up.vexim_employee = true
+            or up.org_id = credit_ledger.org_id)));
 
 grant select on research.competitor_snapshots, research.reviews_raw, research.credit_ledger
   to authenticated;
