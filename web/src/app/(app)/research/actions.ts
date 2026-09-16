@@ -311,20 +311,29 @@ export async function lookupOfficialFeesAction(
     return { ok: false, message: "Cần Giá CƠ SỞ > 0 — Amazon ước phí theo mức giá này (bấm Lấy dữ liệu ASIN để tự điền)." };
   }
 
-  const res = await lookupSpApiFeesForAsin({ asin, price: priceBase });
+  const res = await lookupSpApiFeesForAsin({
+    asin,
+    price: priceBase,
+    // Luồng thẩm định đang US-only (cùng thị trường với Revenue Calculator):
+    // GHIM marketplace US thay vì chọn "shop đầu tiên trong DB" — sự cố
+    // 16/09/2026: shops[0] trúng shop CA (A2EUQ1WTGCTBG2) mà giá là USD →
+    // Amazon trả ClientError "Please verify your inputs" (lệch cặp marketplace/tiền).
+    marketplaceId: "ATVPDKIKX0DER",
+    currency: "USD",
+  });
+  const scope = `marketplace ${res.marketplaceId ?? "?"}${res.shopName ? ` · shop ${res.shopName}` : ""}`;
   if (!res.ok || !res.estimate || !res.estimate.ok) {
     return {
       ok: false,
       message:
-        res.reason ??
-        (res.estimate?.errorMessage ?? "Không lấy được phí chuẩn SP-API — nhập tay ô Referral % và Phí FBA thực."),
+        (res.reason ??
+          res.estimate?.errorMessage ??
+          "Không lấy được phí chuẩn SP-API — nhập tay ô Referral % và Phí FBA thực.") +
+        ` [${scope} @ $${priceBase.toFixed(2)}]`,
     };
   }
 
   const e = res.estimate;
-  const scope = res.marketplaceFallback
-    ? "marketplace US mặc định (chưa có shop production trong DB)"
-    : `${res.shopName ?? "shop"} · ${res.marketplaceId}`;
   const parts: string[] = [];
   if (e.referralFee !== null) parts.push(`giới thiệu $${e.referralFee.toFixed(2)}`);
   if (e.fulfillmentFee !== null) parts.push(`FBA $${e.fulfillmentFee.toFixed(2)}`);

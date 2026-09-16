@@ -279,3 +279,34 @@ test("runner: có shop production → dùng marketplace của shop; client mock 
   assert.equal(res.estimate?.referralFee, 0.79);
   assert.equal(res.estimate?.fulfillmentFee, 3.91);
 });
+
+test("runner: marketplaceId chỉ định ưu tiên hơn shop — shop CA trong DB vẫn gọi marketplace US (sự cố 16/09/2026)", async () => {
+  // DB có shop CA đứng đầu; giá nghiên cứu là USD → KHÔNG được gửi sang
+  // A2EUQ1WTGCTBG2 (Amazon sẽ trả ClientError "Please verify your inputs").
+  const shop = {
+    id: "shop-2",
+    sellerId: "SELLER",
+    marketplace: "A2EUQ1WTGCTBG2",
+    displayName: "P2 · CA",
+    leadDays: 32,
+    safetyDays: 14,
+  };
+  const seen: Array<{ marketplaceId: string; currency?: string }> = [];
+  const client = {
+    estimateForAsin: async (input: { marketplaceId: string; currency?: string }) => {
+      seen.push(input);
+      return mapFeesEstimateResponse(FEES_OK_PAYLOAD);
+    },
+  } as unknown as never;
+  const res = await lookupSpApiFeesForAsin(
+    { asin: "B074VBLKSL", price: 9.89, marketplaceId: "ATVPDKIKX0DER", currency: "USD" },
+    { client: client as never, shops: [shop] },
+  );
+  assert.equal(res.ok, true);
+  assert.equal(res.marketplaceId, "ATVPDKIKX0DER");
+  assert.equal(res.marketplaceFallback, false);
+  assert.equal(res.shopName, "P2 · CA"); // shop vẫn hiển thị trong scope
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0]?.marketplaceId, "ATVPDKIKX0DER"); // KHÔNG gọi CA
+  assert.equal(seen[0]?.currency, "USD");
+});

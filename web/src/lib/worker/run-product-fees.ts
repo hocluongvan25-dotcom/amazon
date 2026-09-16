@@ -37,6 +37,13 @@ export async function lookupSpApiFeesForAsin(
     price: number;
     currency?: string;
     sellerAccountId?: string | null;
+    /**
+     * Marketplace của NGHIÊN CỨU — ưu tiên tuyệt đối so với shop trong DB.
+     * Sự cố 16/09/2026: runner tự chọn shops[0], trúng shop CA (A2EUQ1WTGCTBG2)
+     * trong khi giá là USD → Amazon trả ClientError "Please verify your inputs".
+     * Luồng thẩm định đang US-only nên action ghim ATVPDKIKX0DER + USD.
+     */
+    marketplaceId?: string | null;
   },
   deps: {
     stdout?: { write: (s: string) => void };
@@ -68,9 +75,12 @@ export async function lookupSpApiFeesForAsin(
   const shop = input.sellerAccountId
     ? shops.find((s) => s.id === input.sellerAccountId) ?? null
     : shops[0] ?? null;
-  const marketplaceId = shop?.marketplace ?? US_MARKETPLACE;
-  const marketplaceFallback = shop === null;
-  if (marketplaceFallback) {
+  const explicitMarketplace = String(input.marketplaceId ?? "").trim();
+  const marketplaceId = explicitMarketplace || shop?.marketplace || US_MARKETPLACE;
+  const marketplaceFallback = !explicitMarketplace && shop === null;
+  if (explicitMarketplace) {
+    log(`[product-fees] marketplace nghiên cứu: ${marketplaceId} (chỉ định — không phụ thuộc thứ tự shop trong DB).\n`);
+  } else if (marketplaceFallback) {
     log("[product-fees] chưa có shop production trong DB → ước phí trên marketplace US (ATVPDKIKX0DER).\n");
   } else if (shop) {
     log(`[product-fees] dùng marketplace ${marketplaceId} của shop ${shop.displayName}.\n`);
