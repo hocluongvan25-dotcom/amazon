@@ -7,13 +7,14 @@
  * được giữ trong sessionStorage.
  */
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Panel } from "@/components/ui";
 import type { ResearchFormRaw } from "@/lib/data/research-model";
 import { CheckField, FieldGroup, NumField, TextField } from "./controls";
+import { lookupSeedAsinAction, type AsinLookupState } from "../actions";
 import {
-  DEFAULTS,
+  BLANK_FORM,
   SECTION_LABEL,
   errorsBySection,
   saveDraft,
@@ -23,9 +24,15 @@ import {
 const sectionErrCls =
   "mb-3 rounded-[10px] border border-red/40 bg-red-soft px-3 py-2 text-[12px] font-semibold text-[#a01717]";
 
+/** Số → chuỗi nhập liệu gọn (tối đa 2 chữ số thập phân, không số 0 thừa). */
+const fmtNum = (n: number): string => String(Math.round(n * 100) / 100);
+
 export function NewResearchForm() {
-  const [form, setForm] = useState<ResearchFormRaw>(DEFAULTS);
+  // Form TRẮNG: không điền sẵn số demo — số liệu là của user hoặc từ ASIN.
+  const [form, setForm] = useState<ResearchFormRaw>(BLANK_FORM);
   const [submitted, setSubmitted] = useState(false);
+  const [lookup, setLookup] = useState<AsinLookupState | null>(null);
+  const [lookupPending, startLookup] = useTransition();
   const router = useRouter();
   const refs = {
     nganh: useRef<HTMLDivElement>(null),
@@ -34,6 +41,38 @@ export function NewResearchForm() {
     velocity: useRef<HTMLDivElement>(null),
   };
   const set = (patch: Partial<ResearchFormRaw>) => setForm((f) => ({ ...f, ...patch }));
+
+  /** Bấm "Lấy dữ liệu ASIN": server cào Rainforest (≈1 credit) → auto-điền. */
+  const fetchAsinData = () => {
+    const asin = (form.seedAsin ?? "").trim();
+    if (!asin) {
+      setLookup({ ok: false, message: "Nhập ASIN hạt nhân vào ô bên trên trước đã." });
+      return;
+    }
+    setLookup(null);
+    startLookup(async () => {
+      const r = await lookupSeedAsinAction(asin);
+      setLookup(r);
+      if (!r.ok || !r.autofill) return;
+      const a = r.autofill;
+      setForm((f) => {
+        const patch: Partial<ResearchFormRaw> = {};
+        // Số đo đọc từ listing: luôn ưu tiên hơn số gõ tay trước đó.
+        if (a.lengthIn !== null) patch.lengthIn = fmtNum(a.lengthIn);
+        if (a.widthIn !== null) patch.widthIn = fmtNum(a.widthIn);
+        if (a.heightIn !== null) patch.heightIn = fmtNum(a.heightIn);
+        if (a.weightLb !== null) patch.weightLb = fmtNum(a.weightLb);
+        if (a.price !== null) patch.priceBase = fmtNum(a.price);
+        // 3 kịch bản giá GỢI Ý ±10% quanh giá đối thủ — chỉ điền ô còn trống,
+        // không đè kịch bản user đã tự đặt.
+        if (a.suggestedPrices) {
+          if (!f.pricePessimistic.trim()) patch.pricePessimistic = fmtNum(a.suggestedPrices.pessimistic);
+          if (!f.priceOptimistic.trim()) patch.priceOptimistic = fmtNum(a.suggestedPrices.optimistic);
+        }
+        return { ...f, ...patch };
+      });
+    });
+  };
 
   const { errors, bySection } = useMemo(() => errorsBySection(form), [form]);
   const showErrors = submitted && errors.length > 0;
@@ -66,13 +105,14 @@ export function NewResearchForm() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {/* 1 — NGÁCH */}
         <div ref={refs.nganh} className="lg:col-span-2 scroll-mt-4">
-          <Panel title="1. Ngách & từ khóa" hint="xác định sản phẩm và truy vấn quét SERP ở G2">
+          <Panel title="1. Ngách & từ khóa" hint="nhập ASIN đối thủ để tự điền kích thước · khối lượng · giá — bạn chỉ cần gõ giá vốn & cước">
             {showErrors && errBox("nganh")}
             <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
               <TextField
                 label="Tên ngách / sản phẩm *"
                 value={form.title}
                 onChange={(v) => set({ title: v })}
+                placeholder="vd: giá đỡ inox nhà bếp"
               />
               <TextField
                 label="Từ khóa ngách (phẩy cách nhau) *"
@@ -85,9 +125,32 @@ export function NewResearchForm() {
                 label="ASIN hạt nhân (tùy chọn)"
                 value={form.seedAsin ?? ""}
                 onChange={(v) => set({ seedAsin: v })}
-                hint="G2 quét lan từ ASIN này; trống cũng được."
+                placeholder="vd: B0GZN6YMHS"
+                hint="Nhập ASIN đối thủ rồi bấm nút dưới để tự điền thông số; G2 cũng quét lan từ ASIN này."
               />
             </div>
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={fetchAsinData}
+                disabled={lookupPending}
+                className="rounded-[9px] border border-[#1f3a5f]/40 bg-white px-3.5 py-2 text-[12px] font-extrabold text-[#1f3a5f] hover:bg-[#eef4ff] disabled:opacity-40"
+              >
+                {lookupPending ? "Đang cào dữ liệu ASIN…" : "Lấy dữ liệu ASIN (kích thước · khối lượng · giá) — ≈1 credit"}
+              </button>
+              <span className="text-[11px] text-muted">
+                Giá vốn tận xưởng &amp; cước vận chuyển vẫn do bạn nhập — đó là 2 ô duy nhất cần gõ.
+              </span>
+            </div>
+            {lookup && (
+              <p
+                className={`mt-2 rounded-[9px] px-3 py-2 text-[12px] font-semibold ${
+                  lookup.ok ? "bg-green/10 text-[#14532d]" : "bg-red-soft text-[#a01717]"
+                }`}
+              >
+                {lookup.message}
+              </p>
+            )}
           </Panel>
         </div>
 
@@ -98,27 +161,27 @@ export function NewResearchForm() {
             <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
               <FieldGroup title="Kịch bản giá bán">
                 <div className="grid grid-cols-3 gap-2.5 xl:grid-cols-1">
-                  <NumField label="Giá BI QUAN *" value={form.pricePessimistic} onChange={(v) => set({ pricePessimistic: v })} suffix="$" hint="xấu nhất" />
-                  <NumField label="Giá CƠ SỞ *" value={form.priceBase} onChange={(v) => set({ priceBase: v })} suffix="$" />
-                  <NumField label="Giá QUAN TÂM *" value={form.priceOptimistic} onChange={(v) => set({ priceOptimistic: v })} suffix="$" hint="tốt nhất" />
+                  <NumField label="Giá BI QUAN *" value={form.pricePessimistic} onChange={(v) => set({ pricePessimistic: v })} suffix="$" placeholder="vd: 34.99" hint="xấu nhất — lấy ASIN sẽ gợi ý = giá đối thủ −10%" />
+                  <NumField label="Giá CƠ SỞ *" value={form.priceBase} onChange={(v) => set({ priceBase: v })} suffix="$" placeholder="vd: 39.99" hint="lấy ASIN sẽ tự điền giá đối thủ" />
+                  <NumField label="Giá QUAN TÂM *" value={form.priceOptimistic} onChange={(v) => set({ priceOptimistic: v })} suffix="$" placeholder="vd: 44.99" hint="tốt nhất — lấy ASIN sẽ gợi ý = giá đối thủ +10%" />
                 </div>
               </FieldGroup>
 
               <FieldGroup title="Chi phí mỗi đơn vị">
                 <div className="grid grid-cols-2 gap-2.5">
-                  <NumField label="Giá vốn tận xưởng *" value={form.cogsPerUnit} onChange={(v) => set({ cogsPerUnit: v })} suffix="$" />
-                  <NumField label="Cước VN→FBA/đơn *" value={form.inboundFreightPerUnit} onChange={(v) => set({ inboundFreightPerUnit: v })} suffix="$" />
-                  <NumField label="Chi phí khác/đơn" value={form.otherPerUnit ?? ""} onChange={(v) => set({ otherPerUnit: v })} suffix="$" hint="bao bì, dán nhãn…" />
-                  <NumField label="Referral %" value={form.referralRate ?? ""} onChange={(v) => set({ referralRate: v })} suffix="%" hint="mặc định 15%" />
-                  <NumField label="Phí FBA thực (SP-API)" value={form.fbaFeeOverride ?? ""} onChange={(v) => set({ fbaFeeOverride: v })} suffix="$" hint="trống = ước lượng bảng 2026" />
-                  <NumField label="Tỉ lệ trả hàng" value={form.returnRatePct ?? ""} onChange={(v) => set({ returnRatePct: v })} suffix="%" hint="mặc định 4%" />
+                  <NumField label="Giá vốn tận xưởng *" value={form.cogsPerUnit} onChange={(v) => set({ cogsPerUnit: v })} suffix="$" placeholder="vd: 6" hint="1 trong 2 ô BẮT BUỘC phải gõ tay" />
+                  <NumField label="Cước VN→FBA/đơn *" value={form.inboundFreightPerUnit} onChange={(v) => set({ inboundFreightPerUnit: v })} suffix="$" placeholder="vd: 1.5" hint="1 trong 2 ô BẮT BUỘC phải gõ tay" />
+                  <NumField label="Chi phí khác/đơn" value={form.otherPerUnit ?? ""} onChange={(v) => set({ otherPerUnit: v })} suffix="$" placeholder="vd: 0.5" hint="bao bì, dán nhãn… — trống = 0" />
+                  <NumField label="Referral %" value={form.referralRate ?? ""} onChange={(v) => set({ referralRate: v })} suffix="%" placeholder="vd: 15" hint="trống = mặc định 15%" />
+                  <NumField label="Phí FBA thực (SP-API)" value={form.fbaFeeOverride ?? ""} onChange={(v) => set({ fbaFeeOverride: v })} suffix="$" hint="trống = ước lượng bảng 2026 từ kích thước" />
+                  <NumField label="Tỉ lệ trả hàng" value={form.returnRatePct ?? ""} onChange={(v) => set({ returnRatePct: v })} suffix="%" placeholder="vd: 4" hint="trống = mặc định 4%" />
                 </div>
               </FieldGroup>
 
               <FieldGroup title="Quảng cáo & chuyển đổi">
                 <div className="grid grid-cols-2 gap-2.5">
-                  <NumField label="CPC giả định" value={form.cpc ?? ""} onChange={(v) => set({ cpc: v })} suffix="$/click" hint="chưa biết thì để trống" />
-                  <NumField label="Tỉ lệ chuyển đổi" value={form.conversionRatePct ?? ""} onChange={(v) => set({ conversionRatePct: v })} suffix="%" hint="vd: 10 — trống = chuẩn 10%" />
+                  <NumField label="CPC giả định" value={form.cpc ?? ""} onChange={(v) => set({ cpc: v })} suffix="$/click" placeholder="vd: 0.8" hint="Để trống để engine tự tính Ngưỡng chịu đựng & Lưới độ nhạy" />
+                  <NumField label="Tỉ lệ chuyển đổi" value={form.conversionRatePct ?? ""} onChange={(v) => set({ conversionRatePct: v })} suffix="%" placeholder="vd: 10" hint="Để trống để engine tự tính Ngưỡng chịu đựng & Lưới độ nhạy (chuẩn 10%)" />
                 </div>
                 <p className="mt-2 text-[11px] leading-snug text-muted">
                   Chưa biết CPC/CR thật? Để trống — bước 2 sẽ tính <b>CPC tối đa chịu được</b> và
@@ -156,14 +219,14 @@ export function NewResearchForm() {
           <Panel title="4. Velocity & lô test" hint="kịch bản BI QUAN quyết định GO/NO-GO">
             <FieldGroup title="Đơn lượng & số ngày phủ">
               <div className="grid grid-cols-2 gap-2.5">
-                <NumField label="Đơn/ngày BI QUAN" value={form.pessimisticUnitsPerDay ?? ""} onChange={(v) => set({ pessimisticUnitsPerDay: v })} suffix="đơn/ngày" hint="chưa biết thì để trống — bước 2 có bảng chọn theo vốn; G2 điền số thật." />
-                <NumField label="Số ngày phủ lô test" value={form.testCoverDays ?? ""} onChange={(v) => set({ testCoverDays: v })} suffix="ngày" hint="30–45, mặc định 45" />
+                <NumField label="Đơn/ngày BI QUAN" value={form.pessimisticUnitsPerDay ?? ""} onChange={(v) => set({ pessimisticUnitsPerDay: v })} suffix="đơn/ngày" placeholder="vd: 3" hint="Để trống để engine tự tính Ngưỡng chịu đựng & Lưới độ nhạy — bước 2 có bảng chọn theo vốn, G2 điền số thật" />
+                <NumField label="Số ngày phủ lô test" value={form.testCoverDays ?? ""} onChange={(v) => set({ testCoverDays: v })} suffix="ngày" placeholder="vd: 45" hint="30–45, trống = mặc định 45" />
               </div>
             </FieldGroup>
             <FieldGroup title="Ngân sách ads chạy thử">
               <div className="mt-3 grid grid-cols-2 gap-2.5">
-                <NumField label="Ngân sách ads/ngày" value={form.adsBudgetPerDay ?? ""} onChange={(v) => set({ adsBudgetPerDay: v })} suffix="$" hint="trống = engine tự gợi ý" />
-                <NumField label="Số ngày chạy ads test" value={form.adsTestDays ?? ""} onChange={(v) => set({ adsTestDays: v })} suffix="ngày" />
+                <NumField label="Ngân sách ads/ngày" value={form.adsBudgetPerDay ?? ""} onChange={(v) => set({ adsBudgetPerDay: v })} suffix="$" placeholder="vd: 20" hint="Để trống để engine tự tính Ngưỡng chịu đựng & tự gợi ý từ velocity × PPC/đơn" />
+                <NumField label="Số ngày chạy ads test" value={form.adsTestDays ?? ""} onChange={(v) => set({ adsTestDays: v })} suffix="ngày" placeholder="vd: 45" hint="trống = mặc định 45" />
               </div>
             </FieldGroup>
           </Panel>

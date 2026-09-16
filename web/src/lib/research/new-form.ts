@@ -47,6 +47,40 @@ export const DEFAULTS: ResearchFormRaw = {
   patentRisk: false,
 };
 
+/**
+ * Form TRẮNG — trạng thái khởi đầu thật của /research/new từ 16/09/2026.
+ * KHÔNG điền sẵn số demo nữa: số liệu là của user (hoặc auto-fill từ ASIN hạt
+ * nhân), engine không bao giờ phân tích nhầm sản phẩm mẫu. `DEFAULTS` ở trên
+ * chỉ còn là MẪU hợp lệ cho test/demo tham chiếu, KHÔNG dùng để pre-fill.
+ */
+export const BLANK_FORM: ResearchFormRaw = {
+  title: "",
+  keywords: "",
+  seedAsin: "",
+  pricePessimistic: "",
+  priceBase: "",
+  priceOptimistic: "",
+  cogsPerUnit: "",
+  inboundFreightPerUnit: "",
+  lengthIn: "",
+  widthIn: "",
+  heightIn: "",
+  weightLb: "",
+  referralRate: "",
+  fbaFeeOverride: "",
+  cpc: "",
+  conversionRatePct: "",
+  returnRatePct: "",
+  otherPerUnit: "",
+  pessimisticUnitsPerDay: "",
+  testCoverDays: "",
+  adsBudgetPerDay: "",
+  adsTestDays: "",
+  fragile: false,
+  certificationRequired: false,
+  patentRisk: false,
+};
+
 export function saveDraft(form: ResearchFormRaw): void {
   if (typeof window === "undefined") return;
   window.sessionStorage.setItem(DRAFT_KEY, JSON.stringify(form));
@@ -57,7 +91,7 @@ export function loadDraft(): ResearchFormRaw | null {
   const raw = window.sessionStorage.getItem(DRAFT_KEY);
   if (!raw) return null;
   try {
-    return { ...DEFAULTS, ...(JSON.parse(raw) as Partial<ResearchFormRaw>) } as ResearchFormRaw;
+    return { ...BLANK_FORM, ...(JSON.parse(raw) as Partial<ResearchFormRaw>) } as ResearchFormRaw;
   } catch {
     return null;
   }

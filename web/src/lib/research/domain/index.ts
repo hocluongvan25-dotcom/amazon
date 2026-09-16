@@ -79,3 +79,4 @@ export * from "./report.ts";
 export * from "./narrative-context.ts";
 export * from "./credit-budget.ts";
 export * from "./seasonality.ts";
+export * from "./asin-autofill.ts";

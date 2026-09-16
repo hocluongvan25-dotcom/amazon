@@ -16,6 +16,7 @@ export function NumField({
   suffix,
   step = "any",
   hint,
+  placeholder,
 }: {
   label: string;
   value: string;
@@ -23,6 +24,7 @@ export function NumField({
   suffix?: string;
   step?: string;
   hint?: string;
+  placeholder?: string;
 }) {
   return (
     <label className="block">
@@ -35,6 +37,7 @@ export function NumField({
           className={inputCls}
           value={value}
           onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
         />
         {suffix ? <span className="whitespace-nowrap text-[11.5px] text-soft">{suffix}</span> : null}
       </div>

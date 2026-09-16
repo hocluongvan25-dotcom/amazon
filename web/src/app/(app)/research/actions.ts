@@ -8,9 +8,12 @@
  */
 
 import { revalidatePath } from "next/cache";
+import { getAppSession } from "@/lib/auth/session";
+import { getIntelligenceProvider } from "@/lib/intelligence";
 import {
   RESEARCH_ENGINE_VERSION,
   computeAssessment,
+  parseAsinAutofill,
   validateAssumptions,
 } from "@/lib/research/domain";
 import { createClient } from "@/lib/supabase/server";
@@ -163,4 +166,104 @@ export async function updatePainItemAction(
   if (error) return { ok: false, message: error.message };
   revalidatePath(`/research/${assessmentId}`);
   return { ok: true, message: `Đã cập nhật pain "${itemKey}".` };
+}
+
+/* ===================== G1 — AUTO-ĐIỀN TỪ ASIN HẠT NHÂN ===================== */
+
+export type AsinLookupAutofill = {
+  title: string | null;
+  brand: string | null;
+  lengthIn: number | null;
+  widthIn: number | null;
+  heightIn: number | null;
+  weightLb: number | null;
+  price: number | null;
+  suggestedPrices: { pessimistic: number; base: number; optimistic: number } | null;
+  missing: string[];
+};
+
+export type AsinLookupState = {
+  ok: boolean;
+  message: string;
+  /** 'rainforest' = số thật; 'mock' = demo deterministic (chưa có API key). */
+  dataSource?: "rainforest" | "mock";
+  autofill?: AsinLookupAutofill;
+};
+
+/**
+ * Bấm "Lấy dữ liệu ASIN" ở form G1: gọi Rainforest product (1 credit) rồi trả
+ * bộ auto-điền (kích thước, khối lượng, giá buybox + 3 kịch bản giá gợi ý
+ * ±10%). CHỈ trả dữ liệu mock khi chưa có RAINFOREST_API_KEY và gắn nhãn rõ —
+ * không bao giờ âm thầm dùng số giả như số thật. Chạy phía server (KHÔNG gọi
+ * Rainforest từ trình duyệt — lộ API key).
+ */
+export async function lookupSeedAsinAction(asinRaw: string): Promise<AsinLookupState> {
+  const session = await getAppSession();
+  if (!session) return { ok: false, message: "Chưa đăng nhập." };
+  if (session.persona !== "ceo") {
+    return { ok: false, message: "Màn thẩm định ngách chỉ dành cho persona CEO." };
+  }
+
+  const asin = asinRaw.trim().toUpperCase();
+  if (!/^[A-Z0-9]{10}$/.test(asin)) {
+    return { ok: false, message: "ASIN phải gồm đúng 10 ký tự chữ/số (vd: B0GZN6YMHS)." };
+  }
+
+  const { provider, configured } = getIntelligenceProvider();
+  let json: unknown;
+  try {
+    json = await provider.product(asin, "amazon.com");
+  } catch (e) {
+    const msg = (e as Error).message.split("\n")[0];
+    return {
+      ok: false,
+      message: configured
+        ? `Rainforest từ chối truy vấn ASIN ${asin}: ${msg} (kiểm tra gói credit / định dạng ASIN).`
+        : `DEMO MODE: provider mock lỗi (${msg}). Thêm RAINFOREST_API_KEY để tra ASIN thật.`,
+    };
+  }
+
+  const parsed = parseAsinAutofill(json);
+  if (!parsed) {
+    return {
+      ok: false,
+      message:
+        configured
+          ? `Không tìm thấy listing cho ASIN ${asin} trên amazon.com — kiểm tra lại mã ASIN.`
+          : `DEMO MODE: mock chỉ biết các ASIN mẫu B0MOCK001..B0MOCK030. Thêm RAINFOREST_API_KEY để tra ASIN thật.`,
+    };
+  }
+
+  const filled: string[] = [];
+  if (parsed.lengthIn !== null && parsed.widthIn !== null && parsed.heightIn !== null) {
+    filled.push(`kích thước ${parsed.lengthIn}×${parsed.widthIn}×${parsed.heightIn} in`);
+  }
+  if (parsed.weightLb !== null) filled.push(`khối lượng ${parsed.weightLb} lb`);
+  if (parsed.price !== null) filled.push(`giá đối thủ $${parsed.price} → gợi ý giá cơ sở`);
+  if (filled.length === 0) {
+    return {
+      ok: false,
+      message: `Listing ${asin} không công bố kích thước/khối lượng/giá — phải nhập tay các ô này.`,
+    };
+  }
+
+  return {
+    ok: true,
+    dataSource: configured ? "rainforest" : "mock",
+    message:
+      (configured ? "" : "⚠ DEMO — số liệu MOCK, không phải dữ liệu thật. ") +
+      `Đã đọc ${parsed.title ? `“${parsed.title}”` : asin}: ${filled.join(", ")}.` +
+      (parsed.missing.length ? ` Còn thiếu: ${parsed.missing.join("; ")}.` : ""),
+    autofill: {
+      title: parsed.title,
+      brand: parsed.brand,
+      lengthIn: parsed.lengthIn,
+      widthIn: parsed.widthIn,
+      heightIn: parsed.heightIn,
+      weightLb: parsed.weightLb,
+      price: parsed.price,
+      suggestedPrices: parsed.suggestedPrices,
+      missing: parsed.missing,
+    },
+  };
 }
