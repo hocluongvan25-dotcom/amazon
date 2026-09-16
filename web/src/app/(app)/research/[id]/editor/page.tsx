@@ -46,7 +46,7 @@ export default async function ReportEditorPage({
   return (
     <>
       <div className="mb-2">
-        <Link href={`/research/${id}`} className="text-[12.5px] font-bold text-soft hover:text-ink">
+        <Link href={`/research/${id}`} className="text-[12.5px] font-bold text-soft transition hover:text-ink active:opacity-60">
           ← Về trang phân tích {row.code}
         </Link>
       </div>

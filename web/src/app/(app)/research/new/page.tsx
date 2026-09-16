@@ -19,7 +19,7 @@ export default async function NewResearchPage() {
   return (
     <>
       <div className="mb-2">
-        <Link href="/research" className="text-[12.5px] font-bold text-soft hover:text-ink">
+        <Link href="/research" className="text-[12.5px] font-bold text-soft transition hover:text-ink active:opacity-60">
           ← Danh sách hồ sơ thẩm định
         </Link>
       </div>

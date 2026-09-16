@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { NavProgress } from "@/components/nav-progress";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -24,7 +25,10 @@ export default function RootLayout({
           rel="stylesheet"
         />
       </head>
-      <body>{children}</body>
+      <body>
+        {children}
+        <NavProgress />
+      </body>
     </html>
   );
 }

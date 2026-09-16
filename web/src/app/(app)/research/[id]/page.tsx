@@ -57,12 +57,12 @@ export default async function ResearchDetailPage({
   return (
     <>
       <div className="mb-2 flex items-center justify-between">
-        <Link href="/research" className="text-[12.5px] font-bold text-soft hover:text-ink">
+        <Link href="/research" className="text-[12.5px] font-bold text-soft transition hover:text-ink active:opacity-60">
           ← Danh sách hồ sơ thẩm định
         </Link>
         <Link
           href={`/research/${id}/editor`}
-          className="rounded-lg bg-blue-700 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-blue-800"
+          className="rounded-lg bg-blue-700 px-3 py-1.5 text-[13px] font-medium text-white transition hover:bg-blue-800 active:scale-[0.97]"
         >
           ✍️ Mở Report Canvas
         </Link>

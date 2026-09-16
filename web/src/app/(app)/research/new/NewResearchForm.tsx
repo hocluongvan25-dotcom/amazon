@@ -31,6 +31,7 @@ export function NewResearchForm() {
   // Form TRẮNG: không điền sẵn số demo — số liệu là của user hoặc từ ASIN.
   const [form, setForm] = useState<ResearchFormRaw>(BLANK_FORM);
   const [submitted, setSubmitted] = useState(false);
+  const [opening, setOpening] = useState(false);
   const [lookup, setLookup] = useState<AsinLookupState | null>(null);
   const [feesLookup, setFeesLookup] = useState<OfficialFeesState | null>(null);
   const [lookupPending, startLookup] = useTransition();
@@ -112,6 +113,7 @@ export function NewResearchForm() {
       return;
     }
     saveDraft(form);
+    setOpening(true); // phản hồi tức thì trong lúc router.push tải trang phân tích
     router.push("/research/new/phan-tich");
   };
 
@@ -291,9 +293,17 @@ export function NewResearchForm() {
           <button
             type="button"
             onClick={goAnalysis}
-            className="rounded-[10px] bg-[#1f3a5f] px-5 py-2 text-[13px] font-extrabold text-white hover:bg-[#274b78]"
+            disabled={opening}
+            className="rounded-[10px] bg-[#1f3a5f] px-5 py-2 text-[13px] font-extrabold text-white transition hover:bg-[#274b78] active:scale-[0.98] disabled:opacity-70"
           >
-            Xem kết quả phân tích →
+            {opening ? (
+              <span className="inline-flex items-center gap-2">
+                <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                Đang mở kết quả…
+              </span>
+            ) : (
+              "Xem kết quả phân tích →"
+            )}
           </button>
         </div>
       </div>
