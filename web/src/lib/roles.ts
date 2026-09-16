@@ -136,6 +136,7 @@ export const NAV: { group: string; items: NavItem[] }[] = [
       { href: "/finance/costs", label: "Giá vốn (F3/F4/P1)", icon: "🏷️", personas: ["ceo"] },
       { href: "/finance/claims", label: "Bồi hoàn FBA (F3)", icon: "🧾", personas: ["ceo"] },
       { href: "/finance/profit", label: "Lợi nhuận SKU (F4)", icon: "💹", personas: ["ceo"] },
+      { href: "/research", label: "Thẩm định R&D (M8)", icon: "🔬", personas: ["ceo"] },
     ],
   },
   {

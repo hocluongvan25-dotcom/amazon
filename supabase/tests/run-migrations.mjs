@@ -4200,6 +4200,1202 @@ ok(tamper, "0022 CHẶN: người thường KHÔNG sửa được hồ sơ ngư�
 await ex("rollback");
 await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
 
+// ===========================================================================
+console.log("\n=== BƯỚC 24: 0025 — Module 8 Product Research (G1: tài chính + scorecard) ===");
+// ===========================================================================
+ok(
+  await ex(rd("migrations/0025_module_8_research_core.sql"), "0025_module_8_research_core.sql"),
+  "0025 chạy sạch (schema research · 7 bảng · RPC · 6 view · enum m8_research)",
+);
+ok(await ex(rd("migrations/0025_module_8_research_core.sql"), "0025 lần 2"), "0025 idempotent");
+await cmp(
+  "0025: đủ 7 bảng trong schema research",
+  "select count(*) n from information_schema.tables where table_schema='research'",
+  7,
+);
+await cmp(
+  "0025: đủ 6 view vexim_research_* trong public",
+  `select count(*) n from information_schema.views where table_schema='public'
+     and table_name in ('vexim_research_assessments','vexim_research_scorecards',
+       'vexim_research_vetoes','vexim_research_roadmap','vexim_research_inputs','vexim_research_pnl')`,
+  6,
+);
+await cmp(
+  "0025: view list bật security_invoker (RLS org vẫn áp)",
+  `select count(*) n from pg_class c join pg_namespace n on n.oid=c.relnamespace
+    where n.nspname='public' and c.relname like 'vexim_research_%'
+      and 'security_invoker=true'=any(c.reloptions)`,
+  6,
+);
+await cmp(
+  "0025: audit có mã module m8_research",
+  `select count(*) n from pg_enum e join pg_type t on t.oid=e.enumtypid
+    where t.typname='module_code' and e.enumlabel='m8_research'`,
+  1,
+);
+
+function m8Payload(over = {}) {
+  return {
+    title: over.title ?? "Ngách test R&D",
+    marketplace: "US",
+    currency: "USD",
+    keywords: ["kitchen organizer"],
+    orgId: over.orgId ?? null,
+    engineVersion: "research-engine-0.1.0+FBA-US-2026-approx",
+    assumptions: {
+      title: "Ngách test R&D",
+      prices: { pessimistic: 24.99, base: 29.99, optimistic: 34.99 },
+      cogsPerUnit: 6,
+      inboundFreightPerUnit: 1.5,
+    },
+    result: {
+      scorecard: {
+        verdict: "insufficient_data",
+        overallScore: null,
+        pillars: [
+          { pillar: "finance", weight: 0.25, score: 3, confidence: "medium", reason: "biên cơ sở 18.1%" },
+          { pillar: "competition", weight: 0.25, score: null, confidence: null, reason: "chưa thu thập" },
+          { pillar: "demand", weight: 0.2, score: null, confidence: null, reason: "chưa thu thập" },
+          { pillar: "differentiation", weight: 0.2, score: null, confidence: null, reason: "chưa thu thập" },
+          { pillar: "logistics", weight: 0.1, score: 10, confidence: "medium", reason: "small standard" },
+        ],
+        vetoes: [
+          { code: "margin_below_20", severity: "red", title: "Biên dưới 20%", detail: "biên bi quan 5.4%", evidence: { pessimisticMarginPct: 5.4 } },
+        ],
+      },
+      financial: {
+        feeTableVersion: "FBA-US-2026-approx",
+        currentPackaging: { tier: "small_standard" },
+        scenarios: {
+          pessimistic: { netMarginPct: 5.4 },
+          base: { netMarginPct: 18.1 },
+          optimistic: { netMarginPct: 27.0 },
+        },
+      },
+      roadmap: {
+        testOrderQty: 135, coverDays: 45, lotCapital: 1012.5, adsBudgetPerDay: 24,
+        adsTestDays: 45, adsTestSpend: 1080, breakEvenAcosPct: 53.8, maxLossAmount: 1080,
+        gates: [], killCriteria: [], notes: [],
+      },
+    },
+  };
+}
+async function rpcM8(over = {}) {
+  try {
+    const r = await db.query(
+      "select public.vexim_research_create_assessment($1::jsonb) as r",
+      [JSON.stringify(m8Payload(over))],
+    );
+    return r.rows[0].r;
+  } catch (e) {
+    return { error: e.message.split("\n")[0] };
+  }
+}
+
+await ex("begin");
+// Hai org khách + 2 user khách + 1 analyst nhân viên VEXIM + 1 người vô vai trò.
+// Dùng id MỚI (outsiderId ở bước 23 đã được gán org_admin cho test khác).
+const analystM8 = "eeee0000-0000-4000-8000-00000000a001";
+const noRoleM8 = "eeee0000-0000-4000-8000-00000000a002";
+const clientA = "dddd0000-0000-4000-8000-0000000000a1";
+const clientB = "dddd0000-0000-4000-8000-0000000000b2";
+const orgA = "cccc0000-0000-4000-8000-0000000000a1";
+const orgB = "cccc0000-0000-4000-8000-0000000000b2";
+await ex(`
+  insert into iam.organizations(id,name,slug) values
+    ('${orgA}','Khách A','khach-a-m8'),
+    ('${orgB}','Khách B','khach-b-m8');
+  insert into auth.users(id,email) values
+    ('${analystM8}','analyst-m8@vexim.vn'),
+    ('${noRoleM8}','norole-m8@vexim.vn'),
+    ('${clientA}','khach-a@example.test'),
+    ('${clientB}','khach-b@example.test');
+  insert into iam.user_profiles(id,display_name,email,vexim_employee,org_id,status) values
+    ('${analystM8}','Chuyên viên R&D','analyst-m8@vexim.vn',true,null,'active'),
+    ('${noRoleM8}','Người vô vai trò','norole-m8@vexim.vn',true,null,'active'),
+    ('${clientA}','Chủ khách A','khach-a@example.test',false,'${orgA}','active'),
+    ('${clientB}','Chủ khách B','khach-b@example.test',false,'${orgB}','active');
+  insert into iam.role_assignments(user_id,role) values
+    ('${analystM8}','analyst'),
+    ('${clientA}','client_viewer');
+`);
+
+// Bọc ca KỲ VỌNG BỊ CHẶN trong DO-block để lỗi không làm hỏng transaction ngoài
+// (đúng pattern các bước RLS trước: lỗi nằm trong subtransaction plpgsql).
+async function expectRpcDenied(label) {
+  const json = JSON.stringify(m8Payload({ orgId: orgA })).replace(/'/g, "''");
+  return ex(
+    `do $$
+     begin
+       perform public.vexim_research_create_assessment('${json}'::jsonb);
+       raise exception '[test] LẼ RA PHẢI BỊ CHẶN';
+     exception
+       when others then
+         if sqlerrm not like '%không được tạo hồ sơ%' then
+           raise exception '[test] chặn sai lý do: %', sqlerrm;
+         end if;
+     end $$;`,
+    label,
+  );
+}
+
+// (1) người không vai trò không tạo được hồ sơ
+await ex(`set local role authenticated; select set_config('request.jwt.claim.sub','${noRoleM8}',true);`);
+ok(
+  await expectRpcDenied("user vô vai trò gọi RPC (kỳ vọng FAIL)"),
+  "0025 CHẶN: user vô vai trò không tạo được hồ sơ",
+);
+
+// (2) client_viewer (khách) cũng không tạo được
+await ex(`select set_config('request.jwt.claim.sub','${clientA}',true);`);
+ok(
+  await expectRpcDenied("client_viewer gọi RPC (kỳ vọng FAIL)"),
+  "0025 CHẶN: client_viewer không tạo được hồ sơ (chỉ nhận báo cáo)",
+);
+
+// (3) analyst nhân viên VEXIM tạo cho org khách A
+await ex(`select set_config('request.jwt.claim.sub','${analystM8}',true);`);
+const created = await rpcM8({ orgId: orgA, title: "Giá đỡ inox" });
+ok(created?.ok === true && /^PR-\d{6}-\d{4}$/.test(created?.code), `0025: analyst tạo hồ sơ, mã ${created?.code}`);
+const created2 = await rpcM8({ orgId: orgA, title: "Hộp cơm" });
+ok(
+  created2?.code && created2.code !== created?.code && created2.code.endsWith("-0002"),
+  `0025: mã hồ sơ tuần tự trong org/tháng — ${created.code}, ${created2.code}`,
+);
+
+// (4) GHI TRỰC TIẾP bị chặn (authenticated chỉ có SELECT; còn RLS cũng không có policy ghi)
+const directInsert = await ex(
+  `do $$
+   begin
+     insert into research.assessments(org_id,code,title) values
+       ('${orgA}','PR-X-9','Ghi lén');
+     raise exception '[test] LẼ RA PHẢI BỊ CHẶN';
+   exception
+     when others then
+       if sqlerrm not like '%permission denied%'
+          and sqlerrm not like '%row-level security%' then
+         raise exception '[test] chặn sai lý do: %', sqlerrm;
+       end if;
+   end $$;`,
+  "ghi trực tiếp bảng research.assessments (kỳ vọng FAIL)",
+);
+ok(directInsert, "0025 CHẶN: authenticated không INSERT trực tiếp, bắt buộc qua RPC");
+
+// (5) dữ liệu engine được lưu đủ: scorecard 5 trụ (2 trụ điểm, 3 trụ null), veto, roadmap, pnl, inputs, audit
+const aId = created.id;
+await cmp("0025: lưu đủ 5 trụ điểm", `select count(*) n from public.vexim_research_scorecards where assessment_id='${aId}'`, 5);
+await cmp(
+  "0025: G1 chỉ 2 trụ có điểm (finance + logistics), 3 trụ chưa đủ cơ sở",
+  `select count(*) n from public.vexim_research_scorecards where assessment_id='${aId}' and score is not null`,
+  2,
+);
+await cmp(
+  "0025: 1 veto đỏ margin_below_20",
+  `select count(*) n from public.vexim_research_vetoes where assessment_id='${aId}' and severity='red'`,
+  1,
+);
+const listRow = await one(`select code,status,verdict,base_margin_pct,pess_margin_pct,size_tier,veto_count,red_veto_count
+  from public.vexim_research_assessments where id='${aId}'`);
+ok(
+  listRow?.verdict === "insufficient_data" &&
+    Number(listRow.base_margin_pct) === 18.1 &&
+    Number(listRow.pess_margin_pct) === 5.4 &&
+    listRow.size_tier === "small_standard" &&
+    Number(listRow.red_veto_count) === 1,
+  `0025: view list tóm tắt đúng — ${JSON.stringify(listRow)}`,
+);
+const rm = await one(`select * from public.vexim_research_roadmap where assessment_id='${aId}'`);
+ok(
+  Number(rm?.test_order_qty) === 135 && Number(rm?.ads_test_spend) === 1080 && Number(rm?.max_loss_amount) === 1080,
+  "0025: roadmap lưu đủ lô test/ngân sách ads/mức lỗ tối đa",
+);
+await cmp("0025: inputs version 1", `select count(*) n from public.vexim_research_inputs where assessment_id='${aId}' and version=1`, 1);
+await cmp("0025: pnl snapshot 1 dòng", `select count(*) n from public.vexim_research_pnl where assessment_id='${aId}'`, 1);
+// Nhật ký audit chỉ admin đọc được (RLS) → kiểm bằng super_admin.
+await ex(`reset role; select set_config('request.jwt.claim.sub','${adminId}',false);`);
+await cmp(
+  "0025: audit ghi assessment.create với module m8_research",
+  `select count(*) n from iam.audit_logs where entity='${created.code}' and action='assessment.create' and module='m8_research'`,
+  1,
+);
+// Quay lại vai trò authenticated cho các phép thử RLS khách hàng
+await ex(`set local role authenticated;`);
+
+// (6) RLS theo org: khách A thấy hồ sơ của mình; khách B KHÔNG thấy
+await ex(`select set_config('request.jwt.claim.sub','${clientB}',true);`);
+await cmp(
+  "0025 CHẶN RLS: khách B không thấy hồ sơ org A",
+  `select count(*) n from public.vexim_research_assessments where org_id='${orgA}'`,
+  0,
+);
+await cmp(
+  "0025 CHẶN RLS: khách B không thấy cả pnl snapshot (bảng con theo assessment)",
+  `select count(*) n from public.vexim_research_pnl where assessment_id='${aId}'`,
+  0,
+);
+await ex(`select set_config('request.jwt.claim.sub','${clientA}',true);`);
+await cmp(
+  "0025: khách A thấy đúng 2 hồ sơ của org mình",
+  `select count(*) n from public.vexim_research_assessments where org_id='${orgA}'`,
+  2,
+);
+await cmp(
+  "0025: khách A không thấy bảng cờ veto nội bộ chưa phát hành? (G1 vẫn cho đọc trong org)",
+  `select count(*) n from public.vexim_research_vetoes where assessment_id='${aId}'`,
+  1,
+);
+await ex("reset role; rollback;");
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+
+// ============================================================================
+console.log("\n=== BƯỚC 25: 0026 — Module 8 G2 (thu thập đối thủ/review + credit ledger) ===");
+await ex(rd("migrations/0026_module_8_research_collection.sql"));
+console.log("   ran: 0026_module_8_research_collection.sql");
+ok(true, "0026 chạy sạch (3 bảng G2 + RPC enqueue/worker + 4 view)");
+await ex(rd("migrations/0026_module_8_research_collection.sql"));
+ok(true, "0026 idempotent");
+await cmp(
+  "0026: đủ 3 bảng G2 trong schema research",
+  `select count(*) n from information_schema.tables where table_schema='research'
+    and table_name in ('competitor_snapshots','reviews_raw','credit_ledger')`,
+  3,
+);
+await cmp(
+  "0026: đủ 4 view công khai security_invoker",
+  `select count(*) n from pg_class c join pg_namespace ns on ns.oid=c.relnamespace
+    where ns.nspname='public'
+      and c.relname in ('vexim_research_runs','vexim_research_competitors',
+                        'vexim_research_reviews','vexim_research_credit_monthly')
+      and 'security_invoker=true'=any(c.reloptions)`,
+  4,
+);
+await cmp(
+  "0026: 4 RPC worker security definer, authenticated KHÔNG execute được, service_role thì được",
+  `select count(*) n from pg_proc p join pg_namespace ns on ns.oid=p.pronamespace
+    where ns.nspname='public'
+      and p.proname in ('vexim_research_worker_claim_run',
+                        'vexim_research_worker_finish_run',
+                        'vexim_research_worker_upsert_competitors',
+                        'vexim_research_worker_upsert_reviews')
+      and p.prosecdef
+      and not has_function_privilege('authenticated', p.oid, 'EXECUTE')
+      and has_function_privilege('service_role', p.oid, 'EXECUTE')`,
+  4,
+);
+
+await ex("begin");
+const a25Analyst = "eeee0000-0000-4000-8000-00000000a251";
+const a25NoRole = "eeee0000-0000-4000-8000-00000000a252";
+const a25ClientA = "dddd0000-0000-4000-8000-00000000a251";
+const a25ClientB = "dddd0000-0000-4000-8000-00000000a252";
+const orgA25 = "cccc0000-0000-4000-8000-00000000a251";
+const orgB25 = "cccc0000-0000-4000-8000-00000000a252";
+await ex(`
+  insert into iam.organizations(id,name,slug) values
+    ('${orgA25}','Khách A G2','khach-a-g2'),
+    ('${orgB25}','Khách B G2','khach-b-g2');
+  insert into auth.users(id,email) values
+    ('${a25Analyst}','analyst-g2@vexim.vn'),
+    ('${a25NoRole}','norole-g2@vexim.vn'),
+    ('${a25ClientA}','khach-a-g2@example.test'),
+    ('${a25ClientB}','khach-b-g2@example.test');
+  insert into iam.user_profiles(id,display_name,email,vexim_employee,org_id,status) values
+    ('${a25Analyst}','CV R&D G2','analyst-g2@vexim.vn',true,null,'active'),
+    ('${a25NoRole}','Vô vai trò G2','norole-g2@vexim.vn',true,null,'active'),
+    ('${a25ClientA}','Chủ A G2','khach-a-g2@example.test',false,'${orgA25}','active'),
+    ('${a25ClientB}','Chủ B G2','khach-b-g2@example.test',false,'${orgB25}','active');
+  insert into iam.role_assignments(user_id,role) values
+    ('${a25Analyst}','analyst'),
+    ('${a25ClientA}','client_viewer');
+`);
+
+// Tạo hồ sơ qua RPC G1 (analyst, vai service mặc định postgres ở fixture? phải set authenticated)
+await ex(`set local role authenticated; select set_config('request.jwt.claim.sub','${a25Analyst}',true);`);
+const m8Payload25 = JSON.stringify({
+  engineVersion: "research-engine-0.1.0+FBA-US-2026-approx",
+  orgId: orgA25,
+  assumptions: {
+    title: "Ngách G2", keywords: ["kitchen shelf"], marketplace: "US",
+    prices: { pessimistic: 24.99, base: 29.99, optimistic: 34.99 },
+    cogsPerUnit: 6, inboundFreightPerUnit: 1.5,
+    packDims: { lengthIn: 10, widthIn: 6, heightIn: 0.5, weightLb: 0.75 },
+    cpc: 0.8, conversionRate: 0.1,
+  },
+  result: {
+    scorecard: { verdict: "insufficient_data", overallScore: null, pillars: [
+      { pillar: "finance", weight: 0.25, score: 6.2, confidence: "medium", reason: "tạm" },
+      { pillar: "competition", weight: 0.25, score: null, confidence: null, reason: "G2" },
+      { pillar: "demand", weight: 0.2, score: null, confidence: null, reason: "G2" },
+      { pillar: "differentiation", weight: 0.2, score: null, confidence: null, reason: "G2" },
+      { pillar: "logistics", weight: 0.1, score: 7, confidence: "medium", reason: "tạm" },
+    ], vetoes: [] },
+    financial: { scenarios: { base: { netMarginPct: 18 } },
+      currentPackaging: { tier: "small_standard" }, feeTableVersion: "x" },
+    roadmap: {},
+  },
+});
+const created25sql = "select public.vexim_research_create_assessment($1::jsonb) as r";
+const created25 = (await db.query(created25sql, [m8Payload25])).rows[0].r;
+ok(created25?.ok === true && created25?.id, `0026: analyst có hồ sơ để thu thập — ${created25?.code}`);
+const a25Id = created25.id;
+
+// (1) analyst xếp hàng quét serp
+const enq = await one(`select public.vexim_research_enqueue_run('${a25Id}','serp','{"pages":2}'::jsonb) as r`);
+ok(enq?.r?.ok === true && enq.r.run_id, "0026: analyst xếp hàng quét serp được");
+
+// (2) xếp trùng kind khi đang queued → chặn
+const enqDup = await ex(
+  `do $$ begin perform public.vexim_research_enqueue_run('${a25Id}','serp','{}'::jsonb);
+   exception when others then
+     if sqlerrm not like '%đang chờ/chạy%' then raise exception '[test] chặn sai: %', sqlerrm; end if;
+   end $$;`,
+  "xếp trùng serp (kỳ vọng FAIL)",
+);
+ok(enqDup, "0026 CHẶN: trùng lượt quét đang queued/running");
+
+// (3) user vô vai trò + client_viewer không xếp hàng được
+for (const [uid, label] of [[a25NoRole, "vô vai trò"], [a25ClientA, "client_viewer"]]) {
+  const blocked = await ex(
+    `do $$ begin
+       perform set_config('request.jwt.claim.sub','${uid}',true);
+       perform public.vexim_research_enqueue_run('${a25Id}','reviews','{}'::jsonb);
+       raise exception '[test] LẼ RA PHẢI CHẶN';
+     exception when others then
+       if sqlerrm not like '%không được xếp hàng%' then raise exception '[test] chặn sai: %', sqlerrm; end if;
+     end $$;`,
+    `${label} enqueue (kỳ vọng FAIL)`,
+  );
+  ok(blocked, `0026 CHẶN: ${label} không xếp hàng quét được`);
+}
+
+// (4) authenticated gọi RPC worker → permission denied
+await ex(`select set_config('request.jwt.claim.sub','${a25Analyst}',true);`);
+const workerDenied = await ex(
+  `do $$ begin perform public.vexim_research_worker_claim_run(null);
+   exception when others then
+     if sqlerrm not like '%permission denied%' then raise exception '[test] chặn sai: %', sqlerrm; end if;
+   end $$;`,
+  "authenticated gọi worker claim (kỳ vọng FAIL)",
+);
+ok(workerDenied, "0026 CHẶN: authenticated không gọi được RPC worker");
+
+// (5) worker (service_role, không jwt) nhận việc
+await ex("reset role; select set_config('request.jwt.claim.sub','',false); set role service_role;");
+const claim = await one(`select public.vexim_research_worker_claim_run('serp') as r`);
+ok(claim?.r?.ok === true && claim.r.run?.kind === "serp" && claim.r.run.assessmentId === a25Id,
+  "0026: worker claim được run serp kèm thông tin hồ sơ");
+const run25Id = claim.r.run.id;
+const claimEmpty = await one(`select public.vexim_research_worker_claim_run('serp') as r`);
+ok(claimEmpty?.r?.run === null, "0026: không còn run serp queued (claim 1 lần, skip locked)");
+
+const compRows = [
+  { position: 1, isSponsored: false, asin: "B0G2AAA001", brand: "KitchenPro", title: "Stainless steel shelf", price: 32.99, rating: 4.6, ratingsTotal: 12044, bsrRank: 412, bsrCategory: "Kitchen & Dining", estUnitsMonth: 9000, estRevenueMonth: 296910, isAmazon1p: false, variationCount: 3 },
+  { position: 2, isSponsored: true, asin: "B0G2AAA002", brand: "Amazon Basics", title: "Sponsored rack", price: 25.99, rating: 4.3, ratingsTotal: 8800, bsrRank: 900, estUnitsMonth: 4000, estRevenueMonth: 103960, isAmazon1p: true, buyboxSeller: "Amazon.com" },
+];
+const upComp = await one(`select public.vexim_research_worker_upsert_competitors('${run25Id}','${JSON.stringify(compRows).replace(/'/g, "''")}'::jsonb) as r`);
+ok(upComp?.r?.ok === true && upComp.r.rows === 2, `0026: worker upsert 2 đối thủ (${upComp?.r?.rows})`);
+// Idempotent: ghi lại vẫn 2 dòng
+const upComp2 = await one(`select public.vexim_research_worker_upsert_competitors('${run25Id}','${JSON.stringify(compRows).replace(/'/g, "''")}'::jsonb) as r`);
+await cmp("0026: upsert đối thủ idempotent (không nhân đôi)",
+  `select count(*) n from research.competitor_snapshots where run_id='${run25Id}'`, 2);
+ok(upComp2?.r?.rows === 2, "0026: chạy lại upsert trả 2, không phát sinh dòng");
+
+// (6) reviews: 2 review khác nhau + 1 trùng source_review_id + 1 dính PII (bị từ chối)
+const reviewRows = [
+  { asin: "B0G2AAA001", sourceReviewId: "R-G2-1", stars: 2, title: "Rust after a month", body: "Started rusting after one month near the sink.", reviewDate: "2026-08-01", helpfulCount: 33, verified: true, photosCount: 1, url: "https://example/r1" },
+  { asin: "B0G2AAA001", sourceReviewId: "R-G2-2", stars: 1, title: "Wobbles", body: "The rack wobbles with light weight.", reviewDate: "2026-07-12", helpfulCount: 9, verified: false, photosCount: 0, url: "https://example/r2" },
+  { asin: "B0G2AAA001", sourceReviewId: "R-G2-1", stars: 2, title: "dup", body: "dup", reviewDate: "2026-08-01" },
+];
+const upRev = await one(`select public.vexim_research_worker_upsert_reviews('${run25Id}','${JSON.stringify(reviewRows).replace(/'/g, "''")}'::jsonb) as r`);
+ok(upRev?.r?.inserted === 2 && upRev.r.duplicatesSkipped === 1,
+  `0026: review dedupe theo source_review_id (insert ${upRev?.r?.inserted}, skip ${upRev?.r?.duplicatesSkipped})`);
+const piiBlocked = await ex(
+  `do $$ begin perform public.vexim_research_worker_upsert_reviews('${run25Id}',
+     '[{"asin":"B0G2AAA001","sourceReviewId":"R-BAD","reviewerName":"John Doe","body":"x"}]'::jsonb);
+   exception when others then
+     if sqlerrm not like '%thông tin nhận dạng%' then raise exception '[test] chặn sai: %', sqlerrm; end if;
+   end $$;`,
+  "review dính tên reviewer (kỳ vọng FAIL)",
+);
+ok(piiBlocked, "0026 CHẶN: RPC từ chối review còn thông tin nhận dạng reviewer");
+
+// (7) finish run + credit ledger
+const fin = await one(`select public.vexim_research_worker_finish_run('${run25Id}','done',3,null,null,null) as r`);
+ok(fin?.r?.ok === true, "0026: worker finish serp với 3 credits");
+await cmp("0026: run status done, credits_used=3",
+  `select count(*) n from research.collection_runs where id='${run25Id}' and status='done' and credits_used=3`, 1);
+await cmp("0026: sổ cái ghi -3 và balance_after -3",
+  `select count(*) n from research.credit_ledger where org_id='${orgA25}' and delta=-3 and balance_after=-3`, 1);
+// Lượt sau tiêu thêm 2 → balance -5
+// Lượt thứ 2 do worker/hệ thống xếp trực tiếp (service_role được GRANT ALL bảng).
+await one(`insert into research.collection_runs(assessment_id,kind,status,provider,params)
+  values ('${a25Id}','reviews','queued','rainforest','{}'::jsonb)`);
+ok(true, "0026: xếp tiếp lượt reviews (service_role insert trực tiếp collection_runs)");
+const claim2 = await one(`select public.vexim_research_worker_claim_run('reviews') as r`);
+const fin2 = await one(`select public.vexim_research_worker_finish_run('${claim2.r.run.id}','no_data',2,null,'không đủ review 1-3 sao',null) as r`);
+await cmp("0026: credit lũy kế -5",
+  `select count(*) n from research.credit_ledger where org_id='${orgA25}' and delta=-2 and balance_after=-5`, 1);
+const creditRow = await one(`select credits_spent::int spent, runs_count::int runs from public.vexim_research_credit_monthly
+  where org_id='${orgA25}' and month=to_char(now(),'YYYY-MM')`);
+ok(Number(creditRow?.spent) === 5 && Number(creditRow?.runs) === 2,
+  `0026: view tổng hợp tháng — spent ${creditRow?.spent}, runs ${creditRow?.runs}`);
+
+// (8) RLS: khách B không thấy đối thủ/review của org A; khách A thấy
+await ex("reset role; set local role authenticated;");
+await ex(`select set_config('request.jwt.claim.sub','${a25ClientB}',true);`);
+await cmp("0026 CHẶN RLS: khách B không thấy đối thủ org A",
+  `select count(*) n from public.vexim_research_competitors where assessment_id='${a25Id}'`, 0);
+await cmp("0026 CHẶN RLS: khách B không thấy review org A",
+  `select count(*) n from public.vexim_research_reviews where assessment_id='${a25Id}'`, 0);
+await ex(`select set_config('request.jwt.claim.sub','${a25ClientA}',true);`);
+await cmp("0026: khách A thấy 2 đối thủ của hồ sơ mình",
+  `select count(*) n from public.vexim_research_competitors where assessment_id='${a25Id}'`, 2);
+await cmp("0026: khách A thấy 2 review",
+  `select count(*) n from public.vexim_research_reviews where assessment_id='${a25Id}'`, 2);
+await cmp("0026: khách A thấy 2 run trên màn tiến độ",
+  `select count(*) n from public.vexim_research_runs where assessment_id='${a25Id}'`, 2);
+
+await ex("reset role; rollback;");
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+
+// ============================================================================
+console.log("\n=== BƯỚC 26: 0027 — Module 8 G3 (worker ghi điểm trụ + veto tập trung) ===");
+await ex(rd("migrations/0027_module_8_research_scoring.sql"));
+console.log("   ran: 0027_module_8_research_scoring.sql");
+ok(true, "0027 chạy sạch (unique veto + 3 RPC worker chấm điểm)");
+await ex(rd("migrations/0027_module_8_research_scoring.sql"));
+ok(true, "0027 idempotent");
+await cmp(
+  "0027: unique index (assessment_id, rule_code) tồn tại",
+  `select count(*) n from pg_indexes where schemaname='research'
+    and tablename='veto_flags' and indexname='uq_research_veto_assessment_rule'`,
+  1,
+);
+await cmp(
+  "0027: 3 RPC worker chỉ service_role execute được",
+  `select count(*) n from pg_proc p join pg_namespace ns on ns.oid=p.pronamespace
+    where ns.nspname='public'
+      and p.proname in ('vexim_research_worker_set_pillar',
+                        'vexim_research_worker_add_veto',
+                        'vexim_research_worker_clear_vetoes')
+      and p.prosecdef
+      and not has_function_privilege('authenticated', p.oid, 'EXECUTE')
+      and has_function_privilege('service_role', p.oid, 'EXECUTE')`,
+  3,
+);
+
+await ex("begin");
+const a26Analyst = "eeee0000-0000-4000-8000-00000000a261";
+const a26Client = "dddd0000-0000-4000-8000-00000000a261";
+const orgA26 = "cccc0000-0000-4000-8000-00000000a261";
+await ex(`
+  insert into iam.organizations(id,name,slug) values ('${orgA26}','Khách G3','khach-g3');
+  insert into auth.users(id,email) values
+    ('${a26Analyst}','analyst-g3@vexim.vn'),
+    ('${a26Client}','khach-g3@example.test');
+  insert into iam.user_profiles(id,display_name,email,vexim_employee,org_id,status) values
+    ('${a26Analyst}','CV G3','analyst-g3@vexim.vn',true,null,'active'),
+    ('${a26Client}','Chủ G3','khach-g3@example.test',false,'${orgA26}','active');
+  insert into iam.role_assignments(user_id,role) values ('${a26Analyst}','analyst');
+`);
+await ex(`set local role authenticated; select set_config('request.jwt.claim.sub','${a26Analyst}',true);`);
+const created26 = (
+  await db.query("select public.vexim_research_create_assessment($1::jsonb) as r", [
+    JSON.stringify({
+      engineVersion: "x",
+      orgId: orgA26,
+      assumptions: {
+        title: "Ngách G3", keywords: ["rack"],
+        prices: { pessimistic: 24.99, base: 29.99, optimistic: 34.99 },
+        cogsPerUnit: 6, inboundFreightPerUnit: 1.5,
+        packDims: { lengthIn: 10, widthIn: 6, heightIn: 0.5, weightLb: 0.75 },
+      },
+      result: {
+        scorecard: {
+          verdict: "insufficient_data", overallScore: null,
+          pillars: [
+            { pillar: "finance", weight: 0.25, score: 5, confidence: "medium", reason: "tạm" },
+            { pillar: "competition", weight: 0.25, score: null, confidence: null, reason: "G3" },
+            { pillar: "demand", weight: 0.2, score: null, confidence: null, reason: "" },
+            { pillar: "differentiation", weight: 0.2, score: null, confidence: null, reason: "" },
+            { pillar: "logistics", weight: 0.1, score: 9, confidence: "medium", reason: "" },
+          ],
+          vetoes: [
+            { code: "margin_below_20", severity: "red", title: "Biên thấp", detail: "x", evidence: {} },
+          ],
+        },
+        financial: { feeTableVersion: "x", currentPackaging: { tier: "small_standard" },
+          scenarios: { base: { netMarginPct: 18 }, pessimistic: { netMarginPct: 5 } } },
+        roadmap: {},
+      },
+    }),
+  ])
+).rows[0].r;
+ok(created26?.ok, `0027: hồ sơ G3 sẵn sàng — ${created26?.code}`);
+
+// authenticated không gọi được RPC worker
+const denied26 = await ex(
+  `do $$ begin perform public.vexim_research_worker_set_pillar('${created26.id}','competition',2,'medium','x','{}'::jsonb);
+   exception when others then
+     if sqlerrm not like '%permission denied%' then raise exception '[test] chặn sai: %', sqlerrm; end if;
+   end $$;`,
+  "authenticated set_pillar (kỳ vọng FAIL)",
+);
+ok(denied26, "0027 CHẶN: authenticated không set được điểm trụ");
+
+// worker service_role chấm điểm
+await ex("reset role; select set_config('request.jwt.claim.sub','',false); set role service_role;");
+await ex(`select public.vexim_research_worker_set_pillar(
+  '${created26.id}','competition',2.0,'medium','CR3 72% · Amazon 1P top3',
+  '{"cr3Pct":72,"hhi":2500}'::jsonb)`);
+await cmp("0027: trụ competition được ghi điểm 2.0",
+  `select score::float n from research.scorecards where assessment_id='${created26.id}' and pillar='competition'`, 2);
+
+// add veto idempotent 2 lần → 1 dòng, bộ đếm veto đỏ = 2 (margin + cr3)
+await ex(`select public.vexim_research_worker_add_veto(
+  '${created26.id}','cr3_above_65','red','CR3 cao','72%','{"cr3Pct":72}'::jsonb)`);
+await ex(`select public.vexim_research_worker_add_veto(
+  '${created26.id}','cr3_above_65','red','CR3 cao','72%','{"cr3Pct":72}'::jsonb)`);
+await cmp("0027: add_veto idempotent theo (assessment, rule)",
+  `select count(*) n from research.veto_flags
+    where assessment_id='${created26.id}' and rule_code='cr3_above_65'`, 1);
+await cmp("0027: bộ đếm hồ sơ: tổng veto 2, đỏ 2",
+  `select veto_count n from research.assessments where id='${created26.id}'`, 2);
+await cmp("0027: red_veto_count = 2",
+  `select red_veto_count n from research.assessments where id='${created26.id}'`, 2);
+
+// điểm ngoài thang 1..10 bị chặn
+const badScore = await ex(
+  `do $$ begin perform public.vexim_research_worker_set_pillar('${created26.id}','demand',12,'high','x','{}'::jsonb);
+   exception when others then
+     if sqlerrm not like '%khoảng 1..10%' then raise exception '[test] chặn sai: %', sqlerrm; end if;
+   end $$;`,
+  "điểm 12 ngoài thang (kỳ vọng FAIL)",
+);
+ok(badScore, "0027 CHẶN: điểm trụ ngoài 1..10");
+
+// set điểm NULL (chưa đủ cơ sở) được chấp nhận
+await ex(`select public.vexim_research_worker_set_pillar('${created26.id}','demand',null,null,'chưa có sales estimate','{}'::jsonb)`);
+await cmp("0027: trụ demand giữ NULL khi chưa đủ cơ sở",
+  `select count(*) n from research.scorecards where assessment_id='${created26.id}' and pillar='demand' and score is null`, 1);
+
+// clear chỉ gỡ veto cạnh tranh, giữ veto tài chính G1
+await ex(`select public.vexim_research_worker_add_veto(
+  '${created26.id}','amazon1p_top3','red','1P top3','x','{}'::jsonb)`);
+await ex(`select public.vexim_research_worker_clear_vetoes('${created26.id}',null)`);
+await cmp("0027: clear gỡ CR3 + 1P",
+  `select count(*) n from research.veto_flags where assessment_id='${created26.id}'
+    and rule_code in ('cr3_above_65','amazon1p_top3')`, 0);
+await cmp("0027: clear GIỮ veto tài chính margin_below_20",
+  `select count(*) n from research.veto_flags where assessment_id='${created26.id}' and rule_code='margin_below_20'`, 1);
+await cmp("0027: bộ đếm cập nhật lại còn 1/1",
+  `select veto_count n from research.assessments where id='${created26.id}'`, 1);
+
+await ex("reset role; rollback;");
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+
+
+// ============================================================================
+console.log("\n=== BƯỚC 27: 0028 — Module 8 G4 (LLM pain clustering + truy vết quote) ===");
+await ex(rd("migrations/0028_module_8_research_llm_pain.sql"), "0028 lần 1");
+ok(true, "0028 chạy sạch (5 bảng, trigger quote, RPC worker/người dùng, 5 view)");
+await ex(rd("migrations/0028_module_8_research_llm_pain.sql"), "0028 lần 2");
+ok(true, "0028 idempotent");
+
+// 27.1 Đối chiếu nguyên văn câu trích ngay tại DB (lớp chặn thứ 2)
+await cmp("0028: quote nguyên văn (lệch hoa + dấu phẩy) khớp",
+ `select case when research.quote_matches_body(
+   'started rusting after three weeks, next to the sink',
+   'The shelf STARTED RUSTING after three weeks, next to the sink — bad.') then 1 else 0 end n`, 1);
+await cmp("0028: quote nhiều đoạn nối … khớp đúng thứ tự",
+ `select case when research.quote_matches_body(
+   'started rusting after three weeks … disappointing for stainless steel',
+   'The shelf started rusting after three weeks; disappointing for stainless steel quality.') then 1 else 0 end n`, 1);
+await cmp("0028: câu bịa (không có chữ trong body) bị từ chối",
+ `select case when research.quote_matches_body('battery exploded and caught fire today',
+   'The shelf started rusting after three weeks of normal use near the sink.') then 1 else 0 end n`, 0);
+await cmp("0028: sai thứ tự từ bị từ chối",
+ `select case when research.quote_matches_body('weeks three after rusting started shelf the',
+   'The shelf started rusting after three weeks of normal use near the sink.') then 1 else 0 end n`, 0);
+await cmp("0028: quote >25 từ bị từ chối",
+ `select case when research.quote_matches_body(
+   'one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty twentyone twentytwo twentythree twentyfour twentyfive twentysix',
+   'x one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty twentyone twentytwo twentythree twentyfour twentyfive twentysix y') then 1 else 0 end n`, 0);
+await cmp("0028: hai từ cách nhau quá nhiều chữ bị từ chối",
+ `select case when research.quote_matches_body('rusting sink',
+   'It started rusting, and sadly the chrome finish peeled all over before I ever reached the sink.') then 1 else 0 end n`, 0);
+
+// 27.2 Fixture: org, người dùng, hồ sơ
+await ex("begin");
+const a28Analyst = "eeee0000-0000-4000-8000-00000000a281";
+const a28ClientA = "dddd0000-0000-4000-8000-00000000a281";
+const a28ClientB = "dddd0000-0000-4000-8000-00000000a282";
+const org28A = "cccc0000-0000-4000-8000-00000000a281";
+const org28B = "cccc0000-0000-4000-8000-00000000a282";
+await ex(`
+  insert into iam.organizations(id,name,slug) values
+    ('${org28A}','Khách G4 A','khach-g4-a'),('${org28B}','Khách G4 B','khach-g4-b');
+  insert into auth.users(id,email) values
+    ('${a28Analyst}','analyst-g4@vexim.vn'),
+    ('${a28ClientA}','khach-g4a@example.test'),
+    ('${a28ClientB}','khach-g4b@example.test');
+  insert into iam.user_profiles(id,display_name,email,vexim_employee,org_id,status) values
+    ('${a28Analyst}','CV G4','analyst-g4@vexim.vn',true,null,'active'),
+    ('${a28ClientA}','Chủ A','khach-g4a@example.test',false,'${org28A}','active'),
+    ('${a28ClientB}','Chủ B','khach-g4b@example.test',false,'${org28B}','active');
+  insert into iam.role_assignments(user_id,role) values ('${a28Analyst}','analyst');
+`);
+await ex(`set local role authenticated; select set_config('request.jwt.claim.sub','${a28Analyst}',true);`);
+const created28 = (
+  await db.query("select public.vexim_research_create_assessment($1::jsonb) as r", [
+    JSON.stringify({
+      engineVersion: "x", orgId: org28A,
+      assumptions: {
+        title: "Ngách G4", keywords: ["dish rack"],
+        prices: { pessimistic: 24.99, base: 29.99, optimistic: 34.99 },
+        cogsPerUnit: 6, inboundFreightPerUnit: 1.5,
+        packDims: { lengthIn: 10, widthIn: 6, heightIn: 0.5, weightLb: 0.75 },
+      },
+      result: {
+        scorecard: { verdict: "insufficient_data", overallScore: null, pillars: [], vetoes: [] },
+        financial: { feeTableVersion: "x", currentPackaging: { tier: "small_standard" },
+          scenarios: { base: { netMarginPct: 18 } } },
+        roadmap: {},
+      },
+    }),
+  ])
+).rows[0].r;
+ok(created28?.ok, `0028: hồ sơ G4 sẵn sàng — ${created28?.code}`);
+const id28 = created28.id;
+
+// worker nạp reviews_raw
+await ex("reset role; select set_config('request.jwt.claim.sub','',false); set role service_role;");
+await ex(`
+  insert into research.collection_runs(assessment_id,kind,status,provider,started_at,finished_at)
+  values ('${id28}','reviews','done','rainforest',now(),now());
+  insert into research.reviews_raw
+    (assessment_id, run_id, asin, source_review_id, stars, title, body, review_date, url, verified, helpful_count)
+  values
+    ('${id28}', (select id from research.collection_runs where assessment_id='${id28}' and kind='reviews'),
+     'B001TESTG4', 'RV-1', 1.0, 'Rusted',
+     'The shelf started rusting after three weeks next to the sink, and rust spots appeared around the welds.',
+     '2026-09-01','https://www.amazon.test/dp/RV-1', true, 5),
+    ('${id28}', (select id from research.collection_runs where assessment_id='${id28}' and kind='reviews'),
+     'B001TESTG4', 'RV-2', 1.0, 'Missing screws',
+     'The hardware pack was missing four screws, so I could not finish assembly without a store trip.',
+     '2026-09-02','https://www.amazon.test/dp/RV-2', false, 1);
+`);
+
+// 27.3 worker ghi nhật ký LLM (map + reduce)
+const recMap = { assessmentId: id28, sectionKey: "pain_map", chunkIndex: 0, provider: "mock",
+  model: "mock-llm-1", promptHash: "a".repeat(64), inputRefs: { chunkIndex: 0 },
+  output: { observations: [] }, tokensIn: 120, tokensOut: 30, costUsd: 0,
+  status: "ok", error: null, createdBy: "ai", createdAt: "2026-09-16T00:00:00Z" };
+await db.query("select public.vexim_research_worker_record_llm_run($1::jsonb) as r", [JSON.stringify(recMap)]);
+const recReduce = { ...recMap, sectionKey: "pain_reduce", chunkIndex: null, tokensIn: 200, tokensOut: 180 };
+const reduceRow = (await db.query(
+  "select public.vexim_research_worker_record_llm_run($1::jsonb) as r", [JSON.stringify(recReduce)])).rows[0].r;
+await cmp("0028: llm_runs ghi 2 lượt",
+  `select count(*) n from research.llm_runs where assessment_id='${id28}'`, 2);
+
+// 27.4 worker lưu phân tích pain hợp lệ
+const payload28 = {
+  model: "mock-llm-1", quotesDropped: 0,
+  clusters: [{ code: "quality", sharePct: 50, reviewCount: 1, itemCount: 1, avgStars: 1.0,
+    narrative: "Gỉ sét là pain nổi bật nhất." }],
+  items: [{ itemKey: "rust-frame", cluster: "quality", title: "Khung gỉ sét sau vài tuần",
+    subLabel: "gỉ sét", frequency: 1, frequencyPct: 50, avgStars: 1.0, severity: 9,
+    impactScore: 9, effortScore: 4, priority: "must", effortHint: 3,
+    factoryRequirement: "Nâng vật liệu lên inox 304", listingFix: null,
+    quotes: [{ reviewId: "RV-1", quote: "shelf started rusting after three weeks next to the sink",
+      asin: "B001TESTG4", stars: 1, reviewDate: "2026-09-01",
+      url: "https://www.amazon.test/dp/RV-1", verified: true, helpfulCount: 5, photosCount: 0 }] }],
+  specs: [{ itemKey: "rust-frame", cluster: "quality", painTitle: "Khung gỉ sét sau vài tuần",
+    requirement: "inox 304 hoặc mạ điện phân", testMethod: "salt spray 48h ASTM B117",
+    acceptanceStandard: "không gỉ sau 48h phun muối", costImpactEstimate: "+0.5 USD" }],
+};
+await db.query("select public.vexim_research_worker_save_pain_analysis($1::uuid,$2::jsonb,$3::uuid) as r",
+  [id28, JSON.stringify(payload28), reduceRow.id]);
+await cmp("0028: pain_items = 1",
+  `select count(*) n from research.pain_items where assessment_id='${id28}'`, 1);
+await cmp("0028: pain_quotes = 1 (truy được review)",
+  `select count(*) n from research.pain_quotes where assessment_id='${id28}'`, 1);
+await cmp("0028: improvement_specs = 1",
+  `select count(*) n from research.improvement_specs where assessment_id='${id28}'`, 1);
+await cmp("0028: view quote mang đủ ASIN–sao–ngày–link",
+  `select case when count(*)=1 and bool_and(asin='B001TESTG4' and stars=1.0
+     and review_date='2026-09-01' and url like 'http%') then 1 else 0 end n
+   from public.vexim_research_pain_quotes where assessment_id='${id28}'`, 1);
+await cmp("0028: view llm_runs ẩn output nhưng đủ token/cost/model",
+  `select case when count(*)=2 and sum(tokens_in)=320 and bool_and(model='mock-llm-1') then 1 else 0 end n
+   from public.vexim_research_llm_runs where assessment_id='${id28}'`, 1);
+
+// 27.5 quote bịa khi lưu phải bị trigger chặn, dữ liệu cũ còn nguyên
+await mustBlock(`select public.vexim_research_worker_save_pain_analysis(
+  '${id28}',
+  jsonb_build_object('model','mock-llm-1','clusters','[]'::jsonb,'specs','[]'::jsonb,
+    'items', jsonb_build_array(jsonb_build_object(
+      'itemKey','fake','cluster','quality','title','x','frequency',0,'frequencyPct',0,
+      'severity',0,'impactScore',0,'effortScore',0,'priority','should',
+      'quotes', jsonb_build_array(jsonb_build_object(
+        'reviewId','RV-2','quote','battery exploded into flames on the counter',
+        'asin','B001TESTG4','stars',1,'reviewDate','2026-09-02','url','x',
+        'verified',false,'helpfulCount',0,'photosCount',0))))),
+  null)`);
+await cmp("0028: sau khi quote bịa bị chặn, pain cũ vẫn còn nguyên",
+  `select count(*) n from research.pain_items where assessment_id='${id28}'`, 1);
+
+// 27.6 người dùng thường KHÔNG gọi được RPC worker
+await ex(`reset role; set local role authenticated; select set_config('request.jwt.claim.sub','${a28ClientA}',true);`);
+await mustBlock(`select public.vexim_research_worker_record_llm_run('{}'::jsonb)`);
+await mustBlock(`select public.vexim_research_worker_save_pain_analysis('${id28}','{}'::jsonb,null)`);
+ok(true, "0028 CHẶN: authenticated không gọi được RPC worker LLM");
+
+// 27.7 analyst thẩm định lại pain item → human_confirmed
+await ex(`reset role; set local role authenticated; select set_config('request.jwt.claim.sub','${a28Analyst}',true);`);
+const upd28 = await ex(`select public.vexim_research_update_pain_item('${id28}','rust-frame','skip',
+   'Dùng inox 430 kiểm tra lại', null)`, 'update_pain_item analyst');
+ok(upd28, '0028: update_pain_item chạy không lỗi');
+await cmp("0028: analyst sửa được priority + requirement, gắn human_confirmed",
+  `select case when count(*)=1 and bool_and(priority='skip' and source='human_confirmed'
+     and factory_requirement like '%inox 430%') then 1 else 0 end n
+   from research.pain_items where assessment_id='${id28}' and item_key='rust-frame'`, 1);
+await cmp("0028: spec sheet đồng bộ nhãn human_confirmed",
+  `select case when count(*)=1 and bool_and(source='human_confirmed') then 1 else 0 end n
+   from research.improvement_specs where assessment_id='${id28}' and item_key='rust-frame'`, 1);
+
+// 27.8 khách org B không sửa được và không thấy dữ liệu pain
+await ex(`reset role; set local role authenticated; select set_config('request.jwt.claim.sub','${a28ClientB}',true);`);
+await mustBlock(`select public.vexim_research_update_pain_item('${id28}','rust-frame','must',null,null)`);
+await cmp("0028 RLS: khách org B thấy 0 pain item của org A",
+  `select count(*) n from public.vexim_research_pain_items where assessment_id='${id28}'`, 0);
+await cmp("0028 RLS: khách org B thấy 0 lượt LLM của org A",
+  `select count(*) n from public.vexim_research_llm_runs where assessment_id='${id28}'`, 0);
+await ex(`reset role; set local role authenticated; select set_config('request.jwt.claim.sub','${a28ClientA}',true);`);
+await cmp("0028 RLS: khách org A thấy pain của mình",
+  `select count(*) n from public.vexim_research_pain_items where assessment_id='${id28}'`, 1);
+
+// 27.9 xếp hàng phân tích 'analyze' (provider llm); kind lạ bị chặn
+await ex(`reset role; set local role authenticated; select set_config('request.jwt.claim.sub','${a28Analyst}',true);`);
+const enq28 = await ex(`select public.vexim_research_enqueue_run('${id28}','analyze','{}'::jsonb)`, 'enqueue analyze');
+  ok(enq28, '0028: enqueue analyze chạy không lỗi');
+await cmp("0028: enqueue 'analyze' tạo run provider=llm",
+  `select count(*) n from research.collection_runs
+    where assessment_id='${id28}' and kind='analyze' and provider='llm' and status='queued'`, 1);
+await mustBlock(`select public.vexim_research_enqueue_run('${id28}','phongthuy','{}'::jsonb)`);
+
+await ex("reset role; rollback;");
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+
+
+
+// ============================================================================
+console.log("\n=== BƯỚC 29: 0029 — Module 8 G5 (Report Canvas: version/lock/ký/guard) ===");
+await ex(rd("migrations/0029_module_8_report_canvas.sql"), "0029 lần 1");
+ok(true, "0029 chạy sạch (3 bảng, trigger bất biến, 9 RPC, 3 view)");
+await ex(rd("migrations/0029_module_8_report_canvas.sql"), "0029 lần 2");
+ok(true, "0029 idempotent");
+
+await ex("begin");
+const a29Analyst = "eeee0000-0000-4000-8000-00000000a291";
+const a29Analyst2 = "eeee0000-0000-4000-8000-00000000a292";
+const a29ClientA = "dddd0000-0000-4000-8000-00000000a291";
+const a29ClientB = "dddd0000-0000-4000-8000-00000000a292";
+const org29A = "cccc0000-0000-4000-8000-00000000a291";
+const org29B = "cccc0000-0000-4000-8000-00000000a292";
+await ex(`
+  insert into iam.organizations(id,name,slug) values
+    ('${org29A}','Khách G5 A','khach-g5-a'),('${org29B}','Khách G5 B','khach-g5-b');
+  insert into auth.users(id,email) values
+    ('${a29Analyst}','analyst-g5@vexim.vn'),
+    ('${a29Analyst2}','analyst2-g5@vexim.vn'),
+    ('${a29ClientA}','khach-g5a@example.test'),
+    ('${a29ClientB}','khach-g5b@example.test');
+  insert into iam.user_profiles(id,display_name,email,vexim_employee,org_id,status) values
+    ('${a29Analyst}','Hải Anh','analyst-g5@vexim.vn',true,null,'active'),
+    ('${a29Analyst2}','Minh Châu','analyst2-g5@vexim.vn',true,null,'active'),
+    ('${a29ClientA}','Chủ A','khach-g5a@example.test',false,'${org29A}','active'),
+    ('${a29ClientB}','Chủ B','khach-g5b@example.test',false,'${org29B}','active');
+  insert into iam.role_assignments(user_id,role) values
+    ('${a29Analyst}','analyst'),('${a29Analyst2}','analyst');
+`);
+await ex(`set local role authenticated; select set_config('request.jwt.claim.sub','${a29Analyst}',true);`);
+const created29 = (
+  await db.query("select public.vexim_research_create_assessment($1::jsonb) as r", [
+    JSON.stringify({
+      engineVersion: "x", orgId: org29A,
+      assumptions: {
+        title: "Ngách G5", keywords: ["rack"],
+        prices: { pessimistic: 24.99, base: 29.99, optimistic: 34.99 },
+        cogsPerUnit: 6, inboundFreightPerUnit: 1.5,
+        packDims: { lengthIn: 10, widthIn: 6, heightIn: 0.5, weightLb: 0.75 },
+      },
+      result: {
+        scorecard: { verdict: "insufficient_data", overallScore: null, pillars: [], vetoes: [] },
+        financial: { feeTableVersion: "x", currentPackaging: { tier: "small_standard" },
+          scenarios: { base: { netMarginPct: 18 } } },
+        roadmap: {},
+      },
+    }),
+  ])
+).rows[0].r;
+ok(created29?.ok, `0029: hồ sơ G5 sẵn sàng — ${created29?.code}`);
+const id29 = created29.id;
+
+// nạp review để thử đối chiếu quote chip (qua service_role)
+await ex("reset role; select set_config('request.jwt.claim.sub','',false); set role service_role;");
+await ex(`
+  insert into research.collection_runs(assessment_id,kind,status,provider,started_at,finished_at)
+  values ('${id29}','reviews','done','rainforest',now(),now());
+  insert into research.reviews_raw
+    (assessment_id, run_id, asin, source_review_id, stars, title, body, review_date, url)
+  values ('${id29}',
+    (select id from research.collection_runs where assessment_id='${id29}' and kind='reviews'),
+    'B0G5001', 'GRV-1', 1.0, 'Rust',
+    'The shelf started rusting after three weeks next to the sink, very bad.',
+    '2026-09-01','https://www.amazon.test/dp/GRV-1');
+  select public.vexim_research_worker_add_veto(
+    '${id29}','cr3_above_65','red','CR3 70%','70%','{}'::jsonb);
+`);
+
+await ex(`reset role; set local role authenticated; select set_config('request.jwt.claim.sub','${a29Analyst}',true);`);
+
+// 29.1 mở bản nháp (gọi 2 lần không nhân đôi draft)
+const open1 = (await db.query("select public.vexim_research_report_open_draft($1::uuid) as r", [id29])).rows[0].r;
+const open2 = (await db.query("select public.vexim_research_report_open_draft($1::uuid) as r", [id29])).rows[0].r;
+ok(open1?.ok && open1.versionNo === 1, `0029: mở draft v1 (${JSON.stringify(open1)})`);
+await cmp("0029: mở lại không tạo draft thứ 2",
+  `select count(*) n from research.report_versions where assessment_id='${id29}' and status='draft'`, 1);
+void open2;
+
+// 29.2 khách hàng (không có vai trò analyst) bị chặn mọi RPC report
+await ex(`reset role; set local role authenticated; select set_config('request.jwt.claim.sub','${a29ClientA}',true);`);
+await mustBlock(`select public.vexim_research_report_open_draft('${id29}')`);
+await mustBlock(`select public.vexim_research_report_section_save('${id29}',1,'exec_verdict',
+  '{"type":"doc","content":[{"type":"paragraph"}]}'::jsonb,'human',null)`);
+
+// 29.3 khóa bi quan: analyst1 giữ khóa → analyst2 không lưu được
+const validDoc = `{"type":"doc","content":[
+  {"type":"paragraph","content":[
+    {"type":"text","text":"Bằng chứng gỉ sét: "},
+    {"type":"quoteChip","attrs":{"reviewId":"GRV-1","asin":"B0G5001",
+     "quote":"shelf started rusting after three weeks","stars":1,
+     "reviewDate":"2026-09-01","url":"https://www.amazon.test/dp/GRV-1"}}]},
+  {"type":"paragraph","content":[
+    {"type":"metricToken","attrs":{"key":"base_margin_pct","label":"Biên cơ sở","value":"18.0%"}}]}]}`;
+await ex(`reset role; set local role authenticated; select set_config('request.jwt.claim.sub','${a29Analyst}',true);`);
+await ex(`select public.vexim_research_report_section_lock('${id29}',1,'exec_verdict',false)`);
+await ex(`reset role; set local role authenticated; select set_config('request.jwt.claim.sub','${a29Analyst2}',true);`);
+const lockOther = (await db.query(
+  `select public.vexim_research_report_section_lock($1::uuid,1,'exec_verdict',false) as r`, [id29])).rows[0].r;
+ok(lockOther?.ok === false && /Hải Anh/.test(String(lockOther?.message ?? "")),
+  `0029: khóa bi quan chặn analyst2 (${lockOther?.message})`);
+await mustBlock(`select public.vexim_research_report_section_save('${id29}',1,'exec_verdict',
+  '${validDoc.replace(/'/g, "''")}'::jsonb,'human',null)`);
+
+// 29.4 chủ khóa lưu được doc hợp lệ (metric + quote truy gốc)
+await ex(`reset role; set local role authenticated; select set_config('request.jwt.claim.sub','${a29Analyst}',true);`);
+await ex(`select public.vexim_research_report_section_save('${id29}',1,'exec_verdict',
+  '${validDoc.replace(/'/g, "''")}'::jsonb,'human',null)`);
+await cmp("0029: section hợp lệ (quote truy gốc + metric) lưu được",
+  `select count(*) n from research.report_sections
+    where assessment_id='${id29}' and report_version=1 and section_key='exec_verdict'
+      and status='drafted' and lock_owner_name='Hải Anh'`, 1);
+
+// 29.5 các doc vi phạm bị chặn ngay tại DB
+const badQuote = validDoc.replace("shelf started rusting after three weeks", "battery exploded into flames on the counter");
+await mustBlock(`select public.vexim_research_report_section_save('${id29}',1,'rd_clusters',
+  '${badQuote.replace(/'/g, "''")}'::jsonb,'human',null)`);
+ok(true, "0029 CHẶN: quote bịa không nguyên văn reviews_raw");
+const badAsin = validDoc.replace('"asin":"B0G5001"', '"asin":"B0KHAC009"');
+await mustBlock(`select public.vexim_research_report_section_save('${id29}',1,'rd_clusters',
+  '${badAsin.replace(/'/g, "''")}'::jsonb,'human',null)`);
+ok(true, "0029 CHẶN: quote gắn sai ASIN");
+await mustBlock(`select public.vexim_research_report_section_save('${id29}',1,'rd_clusters',
+  '{"type":"doc","content":[{"type":"image","attrs":{"src":"x"}}]}'::jsonb,'human',null)`);
+ok(true, "0029 CHẶN: node ngoài whitelist (image)");
+await mustBlock(`select public.vexim_research_report_section_save('${id29}',1,'rd_clusters',
+  '{"type":"doc","content":[{"type":"paragraph","content":[
+   {"type":"metricToken","attrs":{"key":"","value":""}}]}]}'::jsonb,'human',null)`);
+ok(true, "0029 CHẶN: metric chip rỗng");
+
+// 29.6 ký: section trống không ký được; ký doc có chữ thì verified
+await mustBlock(`select public.vexim_research_report_verify_section('${id29}',1,'fin_pnl',true)`);
+ok(true, "0029 CHẶN: ký section chưa có nội dung");
+
+// 29.7 gửi duyệt khi thiếu chữ ký → chặn liệt kê section thiếu
+const missingBlocked = await ex(`do $$ begin
+  perform public.vexim_research_report_submit('${id29}');
+exception when others then
+  if sqlerrm not like '%section bắt buộc chưa ký%' then raise exception '[test] chặn sai: %', sqlerrm; end if;
+end $$;`, "submit thiếu chữ ký (kỳ vọng FAIL)");
+ok(missingBlocked, "0029 CHẶN submit khi còn section bắt buộc chưa ký");
+
+// 29.8 nhật ký LLM narrative ghi được bằng phiên người dùng; section_key lạ bị chặn
+await db.query("select public.vexim_research_record_narrative_run($1::jsonb)", [
+  JSON.stringify({ assessmentId: id29, sectionKey: "narrative_exec_verdict",
+    provider: "openai", model: "gpt-4.1-mini", promptHash: "b".repeat(64),
+    inputRefs: {}, output: { markdown: "x" }, tokensIn: 10, tokensOut: 5,
+    costUsd: 0.00001, status: "ok", error: null }),
+]);
+await cmp("0029: llm_runs nhận narrative_exec_verdict",
+  `select count(*) n from research.llm_runs
+    where assessment_id='${id29}' and section_key='narrative_exec_verdict'`, 1);
+await mustBlock(`select public.vexim_research_record_narrative_run(
+  jsonb_build_object('assessmentId','${id29}','sectionKey','ket_xuyen_sach','status','ok'))`);
+ok(true, "0029 CHẶN section_key llm_runs không đúng định dạng");
+
+// 29.9 hoàn tất chữ ký cho cả 8 section bắt buộc (mỗi section 1 đoạn văn bản)
+const REQUIRED29 = ["exec_verdict","fin_pnl","mkt_conclusion","rd_clusters","rd_specsheet",
+                    "roadmap_gates","risk_register","appendix_signoff"];
+for (const k of REQUIRED29) {
+  const doc = `{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Nội dung đã đối chiếu cho ${k}."}]}]}`;
+  await ex(`select public.vexim_research_report_section_save('${id29}',1,'${k}',
+    '${doc}'::jsonb,'human',null)`);
+  await ex(`select public.vexim_research_report_verify_section('${id29}',1,'${k}',true)`);
+}
+await cmp("0029: đủ 8 section verified",
+  `select count(*) n from research.report_sections
+    where assessment_id='${id29}' and report_version=1 and status='verified'`, 8);
+
+// ký rồi mà sửa nội dung → tự hạ drafted (mất hiệu lực chữ ký cũ)
+const docEdited = `{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Nội dung ĐÃ SỬA sau ký exec."}]}]}`;
+await ex(`select public.vexim_research_report_section_save('${id29}',1,'exec_verdict',
+  '${docEdited}'::jsonb,'human',null)`);
+await cmp("0029: sửa section đã verified → tự hạ drafted",
+  `select count(*) n from research.report_sections
+    where assessment_id='${id29}' and report_version=1 and section_key='exec_verdict' and status='drafted'`, 1);
+await cmp("0029: chữ ký cũ bị gỡ sau khi sửa",
+  `select case when verified_at is null then 1 else 0 end n from research.report_sections
+    where assessment_id='${id29}' and report_version=1 and section_key='exec_verdict'`, 1);
+await ex(`select public.vexim_research_report_verify_section('${id29}',1,'exec_verdict',true)`);
+
+// 29.10 gửi duyệt thành công → version bất biến
+const submit29 = (await db.query("select public.vexim_research_report_submit($1::uuid) as r", [id29])).rows[0].r;
+ok(submit29?.status === "in_review", `0029: gửi duyệt v1 xong (${JSON.stringify(submit29)})`);
+await cmp("0029: snapshot chụp đủ 8 section",
+  `select jsonb_array_length(snapshot->'sections') n
+     from research.report_versions where assessment_id='${id29}' and version_no=1`, 8);
+await mustBlock(`select public.vexim_research_report_section_save('${id29}',1,'fin_pnl',
+  '${docEdited}'::jsonb,'human',null)`);
+ok(true, "0029 CHẶN sửa section của version đã gửi duyệt");
+await mustBlock(`select public.vexim_research_report_verify_section('${id29}',1,'fin_pnl',false)`);
+ok(true, "0029 CHẶN bỏ ký trên version đã gửi duyệt");
+await mustBlock(`delete from research.report_versions
+   where assessment_id='${id29}' and version_no=1`);
+ok(true, "0029 CHẶN xóa version đã gửi duyệt");
+
+// 29.11 phê duyệt khi chưa nhìn nhận veto đỏ → chặn
+await ex(`reset role; set local role authenticated; select set_config('request.jwt.claim.sub','${adminId}',true);`);
+await mustBlock(`select public.vexim_research_report_approve('${id29}')`);
+ok(true, "0029 CHẶN duyệt khi còn veto đỏ chưa nhìn nhận");
+
+// 29.12 yêu cầu sửa → nhân bản v2 (v1 giữ nguyên trạng thái changes_requested)
+const changes = (await db.query(
+  "select public.vexim_research_report_request_changes($1::uuid,$2::text) as r",
+  [id29, "bổ sung kill-criteria định lượng"])).rows[0].r;
+ok(changes?.newVersion === 2, `0029: request_changes nhân bản v2 (${JSON.stringify(changes)})`);
+await cmp("0029: v1 chuyển changes_requested",
+  `select count(*) n from research.report_versions
+    where assessment_id='${id29}' and version_no=1 and status='changes_requested'`, 1);
+await cmp("0029: v2 là draft và copy nội dung (chữ ký cũ bị bỏ)",
+  `select case when count(*)=8 and bool_and(status='drafted') then 1 else 0 end n
+     from research.report_sections
+    where assessment_id='${id29}' and report_version=2`, 1);
+
+// 29.13 ký lại v2, nhìn nhận veto, rồi phê duyệt
+await ex(`reset role; set local role authenticated; select set_config('request.jwt.claim.sub','${a29Analyst}',true);`);
+for (const k of REQUIRED29) {
+  await ex(`select public.vexim_research_report_verify_section('${id29}',2,'${k}',true)`);
+}
+const redVetoes = (await db.query(
+  `select rule_code from research.veto_flags where assessment_id='${id29}' and severity='red'`)).rows;
+for (const v of redVetoes) {
+  await ex(`select public.vexim_research_report_ack_veto('${id29}',2,'${v.rule_code}','đã họp ngày 16/09')`);
+}
+await cmp("0029: mọi veto đỏ đã ghi nhận trên v2",
+  `select count(*) n from research.veto_acknowledgements
+    where assessment_id='${id29}' and version_no=2`, redVetoes.length);
+const submit2 = (await db.query("select public.vexim_research_report_submit($1::uuid) as r", [id29])).rows[0].r;
+ok(submit2?.status === "in_review", `0029: gửi duyệt v2 (${JSON.stringify(submit2)})`);
+
+await ex(`reset role; set local role authenticated; select set_config('request.jwt.claim.sub','${adminId}',true);`);
+const approve = (await db.query("select public.vexim_research_report_approve($1::uuid) as r", [id29])).rows[0].r;
+ok(approve?.status === "approved", `0029: phê duyệt v2 (${JSON.stringify(approve)})`);
+await cmp("0029: hồ sơ chuyển approved theo phê duyệt báo cáo",
+  `select case when status='approved' then 1 else 0 end n
+     from research.assessments where id='${id29}'`, 1);
+await mustBlock(`update research.report_versions set title='sửa trái phép'
+   where assessment_id='${id29}' and version_no=2`);
+ok(true, "0029 CHẶN sửa version đã phê duyệt");
+
+// 29.14 RLS qua view: khách org B không thấy gì; khách org A xem được
+await ex(`reset role; set local role authenticated; select set_config('request.jwt.claim.sub','${a29ClientB}',true);`);
+await cmp("0029 RLS: khách org B thấy 0 version của org A",
+  `select count(*) n from public.vexim_research_report_versions
+    where assessment_id='${id29}'`, 0);
+await cmp("0029 RLS: khách org B thấy 0 section của org A",
+  `select count(*) n from public.vexim_research_report_sections
+    where assessment_id='${id29}'`, 0);
+await ex(`reset role; set local role authenticated; select set_config('request.jwt.claim.sub','${a29ClientA}',true);`);
+await cmp("0029 RLS: khách org A thấy 2 version (v1 changes_requested, v2 approved)",
+  `select count(*) n from public.vexim_research_report_versions
+    where assessment_id='${id29}'`, 2);
+await cmp("0029 RLS: khách org A thấy section của mình",
+  `select count(*) n from public.vexim_research_report_sections
+    where assessment_id='${id29}'`, 16);
+
+await ex("reset role; rollback;");
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+
+// ============================================================================
+console.log("\n=== BƯỚC 30: 0030 — Module 8 G7 (lịch sử BSR/mùa vụ + credit status) ===");
+await ex(rd("migrations/0030_module_8_g7_bsr_seasonality.sql"), "0030 lần 1");
+ok(true, "0030 chạy sạch (bảng bsr_history, 3 RPC worker/status, 1 view)");
+await ex(rd("migrations/0030_module_8_g7_bsr_seasonality.sql"), "0030 lần 2");
+ok(true, "0030 idempotent");
+
+await ex("begin");
+const a30Analyst  = "eeee0000-0000-4000-8000-00000000a301";
+const a30ClientA  = "dddd0000-0000-4000-8000-00000000a301";
+const a30ClientB  = "dddd0000-0000-4000-8000-00000000a302";
+const org30A = "cccc0000-0000-4000-8000-00000000a301";
+const org30B = "cccc0000-0000-4000-8000-00000000a302";
+await ex(`
+  insert into iam.organizations(id,name,slug) values
+    ('${org30A}','Khách G7 A','khach-g7-a'),('${org30B}','Khách G7 B','khach-g7-b');
+  insert into auth.users(id,email) values
+    ('${a30Analyst}','analyst-g7@vexim.vn'),
+    ('${a30ClientA}','khach-g7a@example.test'),
+    ('${a30ClientB}','khach-g7b@example.test');
+  insert into iam.user_profiles(id,display_name,email,vexim_employee,org_id,status) values
+    ('${a30Analyst}','Hải Anh','analyst-g7@vexim.vn',true,null,'active'),
+    ('${a30ClientA}','Chủ A','khach-g7a@example.test',false,'${org30A}','active'),
+    ('${a30ClientB}','Chủ B','khach-g7b@example.test',false,'${org30B}','active');
+  insert into iam.role_assignments(user_id,role) values ('${a30Analyst}','analyst');
+`);
+await ex(`set local role authenticated; select set_config('request.jwt.claim.sub','${a30Analyst}',true);`);
+const created30 = (
+  await db.query("select public.vexim_research_create_assessment($1::jsonb) as r", [
+    JSON.stringify({
+      engineVersion: "x", orgId: org30A,
+      assumptions: {
+        title: "Ngách G7", keywords: ["rack"],
+        prices: { pessimistic: 24.99, base: 29.99, optimistic: 34.99 },
+        cogsPerUnit: 6, inboundFreightPerUnit: 1.5,
+        packDims: { lengthIn: 10, widthIn: 6, heightIn: 0.5, weightLb: 0.75 },
+      },
+      result: {
+        scorecard: { verdict: "insufficient_data", overallScore: null, pillars: [], vetoes: [] },
+        financial: { feeTableVersion: "x", currentPackaging: { tier: "small_standard" },
+          scenarios: { base: { netMarginPct: 18 } } },
+        roadmap: {},
+      },
+    }),
+  ])
+).rows[0].r;
+ok(created30?.ok, `0030: hồ sơ G7 sẵn sàng — ${created30?.code}`);
+const id30 = created30.id;
+
+// seed snapshot Rainforest 2 ngày khác nhau + trùng ngày (phải dedup lấy mới nhất)
+await ex("reset role; select set_config('request.jwt.claim.sub','',false); set role service_role;");
+await ex(`
+  insert into research.collection_runs(assessment_id,kind,status,provider,started_at,finished_at,created_at)
+  values ('${id30}','serp','done','rainforest', now()-interval '20 days', now()-interval '20 days', now()-interval '20 days'),
+         ('${id30}','products','done','rainforest', now()-interval '2 hours', now()-interval '2 hours', now()-interval '2 hours'),
+         ('${id30}','products','done','rainforest', now()-interval '1 hour', now()-interval '1 hour', now()-interval '1 hour');
+  insert into research.competitor_snapshots
+    (assessment_id,run_id,position,is_sponsored,asin,currency,bsr_rank,created_at)
+  values
+    ('${id30}', (select id from research.collection_runs where assessment_id='${id30}' and kind='serp' order by created_at limit 1),
+      1,false,'B0G701','USD',9000, now()-interval '20 days'),
+    ('${id30}', (select id from research.collection_runs where assessment_id='${id30}' and kind='products' order by created_at limit 1),
+      1,false,'B0G701','USD',8000, now()-interval '2 hours'),
+    ('${id30}', (select id from research.collection_runs where assessment_id='${id30}' and kind='products' order by created_at desc limit 1),
+      1,false,'B0G701','USD',7999, now()-interval '1 hour'),
+    ('${id30}', (select id from research.collection_runs where assessment_id='${id30}' and kind='products' order by created_at desc limit 1),
+      2,false,'B0G702','USD',15000, now()-interval '1 hour'),
+    ('${id30}', (select id from research.collection_runs where assessment_id='${id30}' and kind='products' order by created_at desc limit 1),
+      3,false,'B0G703','USD',null, now()-interval '1 hour');
+`);
+const refresh1 = (await one(
+  "select public.vexim_research_worker_refresh_bsr_from_snapshots('"+id30+"') r")).r;
+ok(refresh1?.points === 3, `0030: gộp BSR từ snapshot = 3 điểm (nhận ${refresh1?.points ?? refresh1?.error})`);
+const refresh2 = (await one(
+  "select public.vexim_research_worker_refresh_bsr_from_snapshots('"+id30+"') r")).r;
+ok(refresh2?.points === 3, `0030: refresh lần 2 idempotent = 3 (nhận ${refresh2?.points ?? refresh2?.error})`);
+await cmp("0030: điểm trùng ngày lấy lần quét muộn nhất (rank 7999)",
+  `select bsr_rank n from research.bsr_history
+    where asin='B0G701' and observed_at=current_date and source='rainforest'`, 7999);
+await cmp("0030: điểm BSR null bị bỏ",
+  `select count(*) n from research.bsr_history where asin='B0G703'`, 0);
+
+// upsert điểm Keepa (gồm rank null), chạy 2 lần không nhân đôi
+const keepaPoints = JSON.stringify([
+  { asin: "B0G701", observedAt: new Date().toISOString(), bsrRank: 5000, source: "keepa", assessmentId: id30 },
+  { asin: "B0G704", observedAt: new Date(Date.now()-86400000).toISOString(), bsrRank: 12000, source: "keepa" },
+  { asin: "B0G704", observedAt: new Date().toISOString(), bsrRank: null, source: "keepa" },
+]).replace(/'/g, "''");
+const up1 = (await one(
+  "select public.vexim_research_worker_upsert_bsr_points('"+org30A+"','"+keepaPoints+"')::jsonb r")).r;
+ok(up1?.points === 3, `0030: upsert 3 điểm Keepa (nhận ${up1?.points ?? up1?.error})`);
+await one("select public.vexim_research_worker_upsert_bsr_points('"+org30A+"','"+keepaPoints+"')::jsonb r");
+await cmp("0030: tổng điểm lịch sử (3 rain + 3 keepa, không nhân đôi)",
+  `select count(*) n from research.bsr_history where org_id='${org30A}'`, 6);
+
+// phiên đăng nhập KHÔNG gọi được RPC worker
+await ex(`reset role; set local role authenticated; select set_config('request.jwt.claim.sub','${a30ClientA}',true);`);
+await mustBlock(`select public.vexim_research_worker_upsert_bsr_points('${org30A}','[]'::jsonb)`);
+await mustBlock(`select public.vexim_research_worker_refresh_bsr_from_snapshots('${id30}')`);
+
+// RLS view: khách org B thấy 0, khách org A thấy đủ 6
+await ex(`reset role; set local role authenticated; select set_config('request.jwt.claim.sub','${a30ClientB}',true);`);
+await cmp("0030 RLS: khách org B thấy 0 điểm BSR của org A",
+  `select count(*) n from public.vexim_research_bsr_history where org_id='${org30A}'`, 0);
+await cmp("0030 RLS: khách org B thấy 0 điểm BSR toàn bảng",
+  `select count(*) n from public.vexim_research_bsr_history`, 0);
+await ex(`reset role; set local role authenticated; select set_config('request.jwt.claim.sub','${a30ClientA}',true);`);
+await cmp("0030 RLS: khách org A thấy 6 điểm BSR",
+  `select count(*) n from public.vexim_research_bsr_history where org_id='${org30A}'`, 6);
+
+// sổ cái credit + RPC trạng thái
+await ex("reset role; select set_config('request.jwt.claim.sub','',false); set role service_role;");
+await ex(`
+  insert into research.credit_ledger(org_id,run_id,delta,reason,balance_after)
+  select '${org30A}', id, -1, 'serp', -1 from research.collection_runs
+    where assessment_id='${id30}' and kind='serp';
+  insert into research.credit_ledger(org_id,run_id,delta,reason,balance_after)
+  select '${org30A}', id, -3, 'products', -4 from research.collection_runs
+    where assessment_id='${id30}' and kind='products' order by created_at limit 1;
+`);
+const csWorker = (await one(
+  "select public.vexim_research_credit_status('"+org30A+"'::uuid) r")).r;
+ok(csWorker?.creditsSpent === 4, `0030: worker xem credit tháng = 4 (nhận ${csWorker?.creditsSpent})`);
+
+await ex(`reset role; set local role authenticated; select set_config('request.jwt.claim.sub','${a30ClientA}',true);`);
+const csA = (await one(
+  "select public.vexim_research_credit_status('"+org30A+"'::uuid) r")).r;
+ok(csA?.creditsSpent === 4, `0030: khách org A xem credit của mình = 4 (nhận ${csA?.creditsSpent})`);
+await ex(`reset role; set local role authenticated; select set_config('request.jwt.claim.sub','${a30ClientB}',true);`);
+await mustBlock(`select public.vexim_research_credit_status('${org30A}')`);
+const csB = (await one("select public.vexim_research_credit_status() r")).r;
+ok(csB?.creditsSpent === 0 && csB?.orgId === org30B,
+  `0030: khách org B mặc định xem org mình = 0 (nhận ${JSON.stringify(csB)})`);
+await ex(`reset role; set local role authenticated; select set_config('request.jwt.claim.sub','${a30Analyst}',true);`);
+const csEmp = (await one(
+  "select public.vexim_research_credit_status('"+org30B+"'::uuid) r")).r;
+ok(csEmp?.ok === true, `0030: nhân viên xem được credit org B (nhận ${JSON.stringify(csEmp)})`);
+
+await ex("reset role; rollback;");
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+
+// ============================================================================
+console.log("\n=== BƯỚC 31: repair/recreate_research_public_views.sql (19 view gồm G4+G5+G7) ===");
+await ex(rd("repair/recreate_research_public_views.sql"), "repair views G7");
+await cmp("repair: đủ 19 view public.vexim_research_*",
+  `select count(*) n from information_schema.views
+    where table_schema='public' and table_name like 'vexim_research_%'`, 19);
+
 console.log(`\n${"=".repeat(70)}`);
 console.log(fails === 0 ? "TẤT CẢ PASS" : `${fails} MỤC FAIL`);
 console.log("=".repeat(70));
