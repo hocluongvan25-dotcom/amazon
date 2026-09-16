@@ -264,23 +264,33 @@ export async function collectProducts(
     };
   }
 
+  // Chạy SONG SONG theo nhóm ASIN (mặc định 4, trần 8): bản tuần tự cũ mất
+  // ~6–9s/ASIN → 10 ASIN vượt trần 60s của Vercel (sự cố timeout 17/09/2026).
+  // Trong mỗi ASIN, product+offers+sales vẫn gọi song song như trước.
   const rows: CompetitorRow[] = [];
-  for (const asin of asins) {
-    const [product, offers, sales] = await Promise.all([
-      provider.product(asin, domain),
-      provider.offers(asin, domain),
-      provider.salesEstimate({ asin, amazonDomain: domain }),
-    ]);
-    const patch = parseProductBundle({ product, offers, sales });
-    rows.push({
-      position: 0,
-      isSponsored: false,
-      asin: asin.toUpperCase(),
-      currency: "USD",
-      isAmazon1p: false,
-      ...patch,
-      dataSource: src(provider),
-    });
+  const concurrency = Math.min(Math.max(asNumber(run.params.concurrency, 4), 1), 8);
+  for (let i = 0; i < asins.length; i += concurrency) {
+    const batch = asins.slice(i, i + concurrency);
+    const batchRows = await Promise.all(
+      batch.map(async (asin) => {
+        const [product, offers, sales] = await Promise.all([
+          provider.product(asin, domain),
+          provider.offers(asin, domain),
+          provider.salesEstimate({ asin, amazonDomain: domain }),
+        ]);
+        const patch = parseProductBundle({ product, offers, sales });
+        return {
+          position: 0,
+          isSponsored: false,
+          asin: asin.toUpperCase(),
+          currency: "USD",
+          isAmazon1p: false,
+          ...patch,
+          dataSource: src(provider),
+        } as CompetitorRow;
+      }),
+    );
+    rows.push(...batchRows);
   }
   const { rows: written } = await port.upsertCompetitors(run.id, rows);
   const withEstimate = rows.filter((r) => r.estUnitsMonth !== null && r.estUnitsMonth !== undefined).length;
@@ -400,23 +410,40 @@ export async function collectReviews(
   const seen = new Set<string>();
   let pagesFetched = 0;
 
-  for (const asin of asins) {
-    for (let page = 1; page <= maxPages; page++) {
-      const json = await provider.reviews({ asin, amazonDomain: domain, page, reviewStars: "all_critical" });
-      pagesFetched++;
-      const parsed = parseReviewsPage(json, asin, src(provider));
-      for (const rv of parsed.reviews) {
-        const badKey = FORBIDDEN_REVIEW_KEYS.find((k) => k in (rv as Record<string, unknown>));
-        if (badKey) throw new Error(`review còn khóa danh tính ${badKey} — dừng để tránh rò PII`);
+  // Song song THEO NHÓM ASIN (mặc định 4): bản tuần tự cũ ~5–8s/trang, lô
+  // 5 ASIN × nhiều trang dễ vượt trần 60s của Vercel. Trong mỗi ASIN các
+  // trang vẫn gọi TUẦN TỰ vì cần biết trang cuối/target để dừng sớm.
+  const concurrency = Math.min(Math.max(asNumber(run.params.concurrency, 4), 1), 8);
+  for (let i = 0; i < asins.length; i += concurrency) {
+    const batch = asins.slice(i, i + concurrency);
+    const batchResults = await Promise.all(
+      batch.map(async (asin) => {
+        const items: CriticalReviewRow[] = [];
+        let pages = 0;
+        for (let page = 1; page <= maxPages; page++) {
+          const json = await provider.reviews({ asin, amazonDomain: domain, page, reviewStars: "all_critical" });
+          pages++;
+          const parsed = parseReviewsPage(json, asin, src(provider));
+          for (const rv of parsed.reviews) {
+            const badKey = FORBIDDEN_REVIEW_KEYS.find((k) => k in (rv as Record<string, unknown>));
+            if (badKey) throw new Error(`review còn khóa danh tính ${badKey} — dừng để tránh rò PII`);
+            items.push(rv);
+          }
+          const noMore = parsed.totalPages !== null && page >= parsed.totalPages;
+          if (noMore || items.length >= targetPerAsin) break;
+        }
+        return { items, pages };
+      }),
+    );
+    for (const { items, pages } of batchResults) {
+      pagesFetched += pages;
+      for (const rv of items) {
         const key = `${rv.asin}:${rv.sourceReviewId}`;
         if (!seen.has(key)) {
           seen.add(key);
           all.push(rv);
         }
       }
-      const collectedForAsin = all.filter((r) => r.asin === asin.toUpperCase()).length;
-      const noMore = parsed.totalPages !== null && page >= parsed.totalPages;
-      if (noMore || collectedForAsin >= targetPerAsin) break;
     }
   }
 
