@@ -48,6 +48,9 @@ export function CollectionPanel({
   connected: boolean;
 }) {
   const [pending, startTransition] = useTransition();
+  // kind đang chạy — pending CHUNG từng khiến bấm SERP mà cả 3 nút cùng hiện
+  // "Đang chạy…" (hiểu nhầm là chạy cả 3). Nay chỉ nút được bấm đổi trạng thái.
+  const [runningKind, setRunningKind] = useState<string | null>(null);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const router = useRouter();
 
@@ -66,17 +69,21 @@ export function CollectionPanel({
     Math.min(Math.max(reviewsTopN || 1, 1), 20) *
     Math.min(Math.max(reviewPages || 1, 1), 10);
 
-  // MỖI NÚT = XẾP HÀNG + CHẠY NGAY trong request (không chờ cron). Cron chỉ
-  // chạy ngầm vét lượt sót / lượt bị Vercel cắt giữa chừng (migration 0034).
+  // MỖI NÚT = XẾP HÀNG + CHẠY NGAY TRONG REQUEST (chỉ tác vụ của chính nút đó;
+  // muốn quét loại khác phải bấm nút của loại đó). Cron chỉ chạy ngầm vét
+  // lượt sót / lượt bị Vercel cắt giữa chừng (migration 0034).
   const enqueue = (
     kind: "serp" | "products" | "reviews",
     params: Record<string, unknown>,
     credits: number,
   ) => {
+    if (runningKind) return; // đang có lượt chạy — tránh bấm chồng
+    setRunningKind(kind);
     startTransition(async () => {
       setMessage({ ok: true, text: `Đang chạy lượt "${kind}" (≈${credits} credits) — chờ chút…` });
       const r = await enqueueAndRunCollectionAction(assessmentId, kind, params);
       setMessage({ ok: r.ok, text: r.message });
+      setRunningKind(null);
       router.refresh();
     });
   };
@@ -84,7 +91,7 @@ export function CollectionPanel({
   return (
     <Panel
       title="Thu thập dữ liệu (G2 — Rainforest)"
-      hint="mỗi nút = xếp hàng + CHẠY NGAY trong request; cron chỉ chạy ngầm vét lượt sót; mỗi lượt ghi 1 collection_run + sổ cái credits"
+      hint="mỗi nút CHỈ chạy tác vụ của chính nó (SERP / Products / Reviews riêng rẽ) — bấm lần lượt từng nút; cron chỉ chạy ngầm vét lượt sót; mỗi lượt ghi 1 collection_run + sổ cái credits"
     >
       {!connected && (
         <div className="mb-3 rounded-[10px] bg-amber-soft px-3 py-2 text-[12.5px] font-semibold text-[#8a5602]">
@@ -113,7 +120,7 @@ export function CollectionPanel({
             }
             className="rounded-[9px] bg-blue px-3 py-1.5 text-[12px] font-extrabold text-white hover:bg-blue-800 disabled:opacity-40"
           >
-            {pending ? "Đang chạy…" : `▶ Chạy ngay: ${KIND_LABEL.serp}`}
+            {runningKind === "serp" ? "Đang chạy…" : `▶ Chạy ngay: ${KIND_LABEL.serp}`}
           </button>
           <span className="text-[11px] text-muted">≈ {serpCredits} credit</span>
         </div>
@@ -149,7 +156,7 @@ export function CollectionPanel({
             }
             className="rounded-[9px] bg-blue px-3 py-1.5 text-[12px] font-extrabold text-white hover:bg-blue-800 disabled:opacity-40"
           >
-            {pending ? "Đang chạy…" : `▶ Chạy ngay: ${KIND_LABEL.products}`}
+            {runningKind === "products" ? "Đang chạy…" : `▶ Chạy ngay: ${KIND_LABEL.products}`}
           </button>
           <span className="text-[11px] text-muted">
             ≈ {productsCredits} credits (3 request/ASIN
@@ -189,7 +196,7 @@ export function CollectionPanel({
             }
             className="rounded-[9px] bg-blue px-3 py-1.5 text-[12px] font-extrabold text-white hover:bg-blue-800 disabled:opacity-40"
           >
-            {pending ? "Đang chạy…" : `▶ Chạy ngay: ${KIND_LABEL.reviews}`}
+            {runningKind === "reviews" ? "Đang chạy…" : `▶ Chạy ngay: ${KIND_LABEL.reviews}`}
           </button>
           <span className="text-[11px] text-muted">
             ≤ {reviewsCredits} credits. G4 đủ mẫu: đặt 10 ASIN × 5 trang ≈ 500 review 1–3★.

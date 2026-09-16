@@ -51,7 +51,7 @@ export type ClaimedRun = {
 export type FinishStatus = "done" | "no_data" | "failed";
 
 export type ResearchWorkerPort = {
-  claimRun(kind: string): Promise<ClaimedRun | null>;
+  claimRun(kind: string, assessmentId?: string | null): Promise<ClaimedRun | null>;
   upsertCompetitors(runId: string, rows: CompetitorRow[]): Promise<{ rows: number }>;
   upsertReviews(runId: string, rows: CriticalReviewRow[]): Promise<{
     inserted: number;
@@ -669,6 +669,12 @@ export async function drainResearchQueue(
     log?: (s: string) => void;
     /** provider LLM cho run 'analyze' (bắt buộc khi kinds gồm 'analyze'). */
     llm?: LlmProvider;
+    /**
+     * Giới hạn claim trong MỘT hồ sơ (nút "Chạy ngay" trên UI). null/bỏ qua =
+     * vét toàn cục (cron/CLI). Sự cố 17/09/2026: không lọc hồ sơ nên nút hồ sơ
+     * này nhặt trúng lượt queued của hồ sơ khác.
+     */
+    assessmentId?: string | null;
   },
 ): Promise<CollectOutcome[]> {
   const kinds = opts.kinds ?? ["serp", "products", "reviews"];
@@ -677,7 +683,7 @@ export async function drainResearchQueue(
   for (let i = 0; i < max; i++) {
     let run: ClaimedRun | null = null;
     for (const kind of kinds) {
-      run = await port.claimRun(kind);
+      run = await port.claimRun(kind, opts.assessmentId ?? null);
       if (run) break;
     }
     if (!run) break;

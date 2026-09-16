@@ -171,10 +171,11 @@ export async function analyzePainNowAction(assessmentId: string): Promise<Enqueu
     return { ok: false, message: error.message };
   }
 
-  // 2) Chạy ngay lượt analyze vừa xếp trong chính request này.
+  // 2) Chạy ngay lượt analyze vừa xếp trong chính request này (đúng hồ sơ —
+  // không nhặt nhầm lượt queued của hồ sơ khác).
   let result: Awaited<ReturnType<typeof runResearchCollect>>;
   try {
-    result = await runResearchCollect({ kinds: ["analyze"], max: 1 });
+    result = await runResearchCollect({ kinds: ["analyze"], max: 1, assessmentId });
   } catch (e) {
     return { ok: false, message: `Lỗi khi chạy phân tích LLM: ${(e as Error).message.split("\n")[0]}` };
   }
@@ -234,10 +235,10 @@ export async function enqueueAndRunCollectionAction(
     return { ok: false, message: error.message };
   }
 
-  // 2) Chạy ngay lượt vừa xếp, GIỚI HẠN đúng kind của nút vừa bấm.
+  // 2) Chạy ngay lượt vừa xếp, GIỚI HẠN đúng kind của nút vừa bấm và đúng hồ sơ.
   let result: Awaited<ReturnType<typeof runResearchCollect>>;
   try {
-    result = await runResearchCollect({ kinds: [kind], max: 1 });
+    result = await runResearchCollect({ kinds: [kind], max: 1, assessmentId });
   } catch (e) {
     return { ok: false, message: `Lỗi khi chạy thu thập: ${(e as Error).message.split("\n")[0]}` };
   }
@@ -255,12 +256,20 @@ export async function enqueueAndRunCollectionAction(
       : result.mode === "demo"
         ? " ⚠️ chế độ demo (thiếu Supabase — không ghi DB)."
         : "";
+  const nextStep =
+    o.status === "done"
+      ? kind === "serp"
+        ? " Bước kế: bấm '▶ Chạy ngay: Product + Offers + Sales'."
+        : kind === "products"
+          ? " Bước kế: bấm '▶ Chạy ngay: Review 1–3★'."
+          : " Bước kế: bấm '▶ Phân tích pain bằng LLM' ở panel G4."
+      : "";
   return {
     ok: o.status !== "failed",
     message:
       `Chạy xong lượt "${o.kind}" (${o.runId.slice(0, 8)}): ${o.status}` +
       (o.creditsUsed > 0 ? ` · ${o.creditsUsed} credits Rainforest` : "") +
-      ` — ${o.message}${mockWarn}`,
+      ` — ${o.message}${mockWarn}${nextStep}`,
   };
 }
 

@@ -61,10 +61,10 @@ export class SupabaseResearchPort implements ResearchWorkerPort {
     return data as T;
   }
 
-  async claimRun(kind: string): Promise<ClaimedRun | null> {
+  async claimRun(kind: string, assessmentId?: string | null): Promise<ClaimedRun | null> {
     const data = await this.rpc<{ ok: boolean; run: ClaimedRun | null }>(
       "vexim_research_worker_claim_run",
-      { p_kind: kind },
+      { p_kind: kind, p_assessment: assessmentId ?? null },
     );
     return data?.run ?? null;
   }
@@ -316,8 +316,10 @@ export class NoopResearchPort implements ResearchWorkerPort {
   constructor(queued: ClaimedRun[] = []) {
     this.queue = [...queued];
   }
-  async claimRun(kind: string): Promise<ClaimedRun | null> {
-    const i = this.queue.findIndex((r) => r.kind === kind);
+  async claimRun(kind: string, assessmentId?: string | null): Promise<ClaimedRun | null> {
+    const i = this.queue.findIndex(
+      (r) => r.kind === kind && (assessmentId == null || r.assessmentId === assessmentId),
+    );
     if (i === -1) return null;
     const [run] = this.queue.splice(i, 1);
     this.claimed.push(run);
@@ -397,6 +399,8 @@ export type ResearchCollectResult = {
 export async function runResearchCollect(opts: {
   kinds?: string[];
   max?: number;
+  /** Giới hạn claim trong 1 hồ sơ (nút "Chạy ngay" trên UI); bỏ qua = vét toàn cục. */
+  assessmentId?: string | null;
   /** tiêm port cho test (mặc định tự dựng theo env) */
   port?: ResearchWorkerPort;
   /** tiêm run giả cho chế độ demo không DB */
@@ -441,6 +445,7 @@ export async function runResearchCollect(opts: {
     max: opts.max ?? 20,
     log,
     llm: llmContext.provider,
+    assessmentId: opts.assessmentId ?? null,
   });
 
   return {
