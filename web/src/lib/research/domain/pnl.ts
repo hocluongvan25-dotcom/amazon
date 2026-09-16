@@ -17,7 +17,10 @@ import {
   FEE_TABLE_VERSION,
 } from "./size-tier.ts";
 import type {
+  AdFeasibility,
   AssessmentAssumptions,
+  CpcCrGrid,
+  CpcCrGridCell,
   FeeSource,
   FinancialResult,
   MonthlySimulation,
@@ -113,6 +116,109 @@ export function computeScenarioPnl(
     netMarginPct,
     breakEvenAcosPct,
   };
+}
+
+/* ============================================================================
+ * NGƯỠNG CHỊU ĐỰNG ADS — bài toán ngược cho ẩn số KHÔNG THỂ biết ở G1
+ * ==========================================================================*/
+
+/**
+ * CR benchmark khi user KHÔNG nhập tỉ lệ chuyển đổi: ~10% là mức thường dẫn
+ * cho Amazon US. Chỉ dùng để QUY ĐỔI ngưỡng PPC→CPC và luôn gắn cờ `assumed`
+ * trong kết quả — KHÔNG bao giờ âm thầm dùng như số liệu của user.
+ */
+export const DEFAULT_CONVERSION_ASSUMPTION = 0.1;
+
+/** Lưới khảo sát mặc định: CPC × CR — phủ dải thực tế của đa số ngách US. */
+export const CPC_GRID_DEFAULT = [0.5, 0.75, 1.0, 1.25, 1.5];
+export const CR_PCT_GRID_DEFAULT = [6, 8, 10, 12, 15];
+
+/** Lời TRƯỚC quảng cáo/đơn — đảo ngược từ ScenarioPnl (không tính lại phí). */
+export function preAdProfitOf(s: ScenarioPnl): number {
+  return R2(s.netProfit + (s.ppcPerOrder ?? 0));
+}
+
+/**
+ * PPC/đơn tối đa còn chịu được trước khi biên tụt xuống `targetMarginPct`.
+ * Trả null khi riêng chi phí KHÔNG-ads đã vượt giá (biên trước ads ≤ target) —
+ * lúc đó dù CPC = 0 ngách cũng không đạt mục tiêu.
+ */
+export function maxAffordablePpcPerOrder(
+  s: ScenarioPnl,
+  targetMarginPct: number,
+): number | null {
+  const allowed = preAdProfitOf(s) - (targetMarginPct / 100) * s.price;
+  return allowed > 0 ? R2(allowed) : null;
+}
+
+/**
+ * Ngưỡng chịu đựng quảng cáo cho 1 kịch bản (chuẩn: kịch bản BI QUAN — dùng
+ * quyết định GO/NO-GO). Cho biết: PPC/đơn tối đa, CPC tối đa (theo CR của
+ * user hoặc benchmark 10% gắn cờ assumed), CR tối thiểu (chỉ khi user có nhập
+ * CPC). KHÔNG bịa CPC khi thiếu — để null và UI nói rõ.
+ */
+export function adFeasibility(
+  a: AssessmentAssumptions,
+  s: ScenarioPnl,
+): AdFeasibility {
+  const cr =
+    typeof a.conversionRate === "number" && a.conversionRate > 0
+      ? { value: a.conversionRate, assumed: false }
+      : { value: DEFAULT_CONVERSION_ASSUMPTION, assumed: true };
+
+  const maxPpcBE = maxAffordablePpcPerOrder(s, 0);
+  const maxPpcRF = maxAffordablePpcPerOrder(s, MARGIN_RED_FLAG * 100);
+
+  const cpcUsed = typeof a.cpc === "number" && a.cpc > 0 ? a.cpc : null;
+  const minCrBE =
+    cpcUsed !== null && maxPpcBE !== null ? R1((cpcUsed / maxPpcBE) * 100) : null;
+  const minCrRF =
+    cpcUsed !== null && maxPpcRF !== null ? R1((cpcUsed / maxPpcRF) * 100) : null;
+
+  return {
+    scenario: s.scenario,
+    price: s.price,
+    preAdProfitPerUnit: preAdProfitOf(s),
+    maxPpcPerOrderBreakEven: maxPpcBE,
+    maxPpcPerOrderRedFlag: maxPpcRF,
+    crUsed: cr,
+    maxCpcBreakEven: maxPpcBE === null ? null : R2(maxPpcBE * cr.value),
+    maxCpcRedFlag: maxPpcRF === null ? null : R2(maxPpcRF * cr.value),
+    cpcUsed,
+    // CR > 100% là bất thi — trả null để UI khỏi hiện con số vô nghĩa
+    minCrBreakEvenPct: minCrBE !== null && minCrBE <= 100 ? minCrBE : null,
+    minCrRedFlagPct: minCrRF !== null && minCrRF <= 100 ? minCrRF : null,
+  };
+}
+
+/**
+ * Lưới độ nhạy CPC × CR trên 1 kịch bản: mỗi ô là biên lợi nhuận khi thay
+ * PPC/đơn = cpc ÷ cr, giữ NGUYÊN mọi chi phí khác của ScenarioPnl gốc. Dùng
+ * khi user không biết CPC/CR thật: nhìn cả dải thay vì đoán một điểm.
+ */
+export function cpcCrSensitivityGrid(
+  s: ScenarioPnl,
+  cpcValues: readonly number[] = CPC_GRID_DEFAULT,
+  crPctValues: readonly number[] = CR_PCT_GRID_DEFAULT,
+): CpcCrGrid {
+  // Chi phí KHÔNG gồm PPC của scenario gốc (ppcPerOrder null ⇒ coi như 0).
+  const baseCostsExclPpc = R2(s.totalCosts - (s.ppcPerOrder ?? 0));
+  const cells: CpcCrGridCell[][] = cpcValues.map((cpc) =>
+    crPctValues.map((crPct) => {
+      const ppc = R2(cpc / (crPct / 100));
+      const netProfit = R2(s.price - baseCostsExclPpc - ppc);
+      const netMarginPct = s.price > 0 ? R1((netProfit / s.price) * 100) : 0;
+      return {
+        cpc,
+        crPct,
+        ppcPerOrder: ppc,
+        netProfit,
+        netMarginPct,
+        passRedFlag: netMarginPct >= MARGIN_RED_FLAG * 100,
+      };
+    }),
+  );
+  return { scenario: s.scenario, cpcValues: [...cpcValues], crPctValues: [...crPctValues], cells };
 }
 
 /**

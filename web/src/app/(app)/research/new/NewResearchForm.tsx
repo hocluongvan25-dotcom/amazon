@@ -117,11 +117,12 @@ export function NewResearchForm() {
 
               <FieldGroup title="Quảng cáo & chuyển đổi">
                 <div className="grid grid-cols-2 gap-2.5">
-                  <NumField label="CPC giả định" value={form.cpc ?? ""} onChange={(v) => set({ cpc: v })} suffix="$/click" />
-                  <NumField label="Tỉ lệ chuyển đổi" value={form.conversionRatePct ?? ""} onChange={(v) => set({ conversionRatePct: v })} suffix="%" hint="vd: 10" />
+                  <NumField label="CPC giả định" value={form.cpc ?? ""} onChange={(v) => set({ cpc: v })} suffix="$/click" hint="chưa biết thì để trống" />
+                  <NumField label="Tỉ lệ chuyển đổi" value={form.conversionRatePct ?? ""} onChange={(v) => set({ conversionRatePct: v })} suffix="%" hint="vd: 10 — trống = chuẩn 10%" />
                 </div>
                 <p className="mt-2 text-[11px] leading-snug text-muted">
-                  ACOS hòa vốn và PPC/đơn được engine tự suy từ CPC ÷ tỉ lệ chuyển đổi.
+                  Chưa biết CPC/CR thật? Để trống — bước 2 sẽ tính <b>CPC tối đa chịu được</b> và
+                  lưới độ nhạy CPC × CR thay vì bắt đoán.
                 </p>
               </FieldGroup>
             </div>
@@ -155,7 +156,7 @@ export function NewResearchForm() {
           <Panel title="4. Velocity & lô test" hint="kịch bản BI QUAN quyết định GO/NO-GO">
             <FieldGroup title="Đơn lượng & số ngày phủ">
               <div className="grid grid-cols-2 gap-2.5">
-                <NumField label="Đơn/ngày BI QUAN" value={form.pessimisticUnitsPerDay ?? ""} onChange={(v) => set({ pessimisticUnitsPerDay: v })} suffix="đơn/ngày" hint="G2–G3 hiệu chỉnh bằng sales estimation thật." />
+                <NumField label="Đơn/ngày BI QUAN" value={form.pessimisticUnitsPerDay ?? ""} onChange={(v) => set({ pessimisticUnitsPerDay: v })} suffix="đơn/ngày" hint="chưa biết thì để trống — bước 2 có bảng chọn theo vốn; G2 điền số thật." />
                 <NumField label="Số ngày phủ lô test" value={form.testCoverDays ?? ""} onChange={(v) => set({ testCoverDays: v })} suffix="ngày" hint="30–45, mặc định 45" />
               </div>
             </FieldGroup>

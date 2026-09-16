@@ -13,6 +13,7 @@ import type {
   AssessmentAssumptions,
   FinancialResult,
   RoadmapResult,
+  VelocityLadderRow,
 } from "./types.ts";
 
 export const DEFAULT_COVER_DAYS = 45;
@@ -113,4 +114,48 @@ export function computeRoadmap(
     killCriteria: defaultKillCriteria(),
     notes,
   };
+}
+
+/* ============================================================================
+ * BẢNG VELOCITY → VỐN LÔ TEST (ẩn số velocity xử lý bằng "chọn mức chấp nhận")
+ * ==========================================================================*/
+
+/** Các mốc velocity bày ra để user CHỌN (đơn/ngày) — velocity thật có ở G2. */
+export const VELOCITY_LADDER_DEFAULT = [1, 2, 3, 5, 8, 10];
+
+/**
+ * Velocity bi quan là ẩn số user KHÔNG thể biết ở G1 (phải G2 mới có sales
+ * estimation Rainforest). Thay vì bắt đoán, bày ra bảng: với mỗi mức velocity
+ * giả định thì vốn lô test, ngân sách ads đề xuất và MỨC LỖ TỐI ĐA là bao
+ * nhiêu — user chọn mức rủi ro chấp nhận được. Công thức KHỚP computeRoadmap
+ * (coverDays, ads đề xuất = velocity × PPC/đơn kịch bản cơ sở, lỗ tối đa =
+ * lỗ/đơn bi quan × số lượng + tổng ads test).
+ */
+export function velocityLadder(
+  a: AssessmentAssumptions,
+  f: FinancialResult,
+  velocities: readonly number[] = VELOCITY_LADDER_DEFAULT,
+): VelocityLadderRow[] {
+  const coverDays = a.testCoverDays ?? DEFAULT_COVER_DAYS;
+  const adsTestDays = a.adsTestDays ?? DEFAULT_ADS_TEST_DAYS;
+  const unitLanded = landedCost(a);
+  const basePpc = f.scenarios.base.ppcPerOrder;
+  const pess = f.scenarios.pessimistic;
+  const perUnitLoss = pess.netProfit < 0 ? Math.abs(pess.netProfit) : 0;
+
+  return velocities
+    .filter((v) => Number.isFinite(v) && v > 0)
+    .map((v) => {
+      const testOrderQty = CEIL(v * coverDays);
+      const lotCapital = R2(testOrderQty * unitLanded);
+      const adsBudgetPerDay =
+        typeof a.adsBudgetPerDay === "number" && Number.isFinite(a.adsBudgetPerDay)
+          ? a.adsBudgetPerDay
+          : basePpc === null
+            ? null
+            : R2(v * basePpc);
+      const adsTestSpend = adsBudgetPerDay === null ? null : R2(adsBudgetPerDay * adsTestDays);
+      const maxLoss = R2(perUnitLoss * testOrderQty + (adsTestSpend ?? 0));
+      return { unitsPerDay: v, testOrderQty, lotCapital, adsBudgetPerDay, adsTestSpend, maxLoss };
+    });
 }

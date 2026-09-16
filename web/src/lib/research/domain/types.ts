@@ -183,6 +183,52 @@ export type FinancialResult = {
   warnings: string[];
 };
 
+/* ================ NGƯỠNG CHỊU ĐỰNG ADS & ĐỘ NHẠY CPC×CR ================ */
+
+/**
+ * Bài toán ngược cho các ẩn số KHÔNG THỂ biết trước ở G1 (CPC, CR, velocity):
+ * thay vì bắt nhập một con số để đoán, engine tính NGƯỠNG mà ẩn số phải đạt
+ * để kịch bản (mặc định BI QUAN) còn sống — từ những gì ĐÃ biết (giá, COGS,
+ * cước, kích thước). Mọi giá trị "cần giả định" đều ghi rõ `assumed`.
+ */
+export type AdFeasibility = {
+  scenario: ScenarioKey;
+  price: number;
+  /** Lời TRƯỚC quảng cáo/đơn = giá − mọi chi phí trừ PPC */
+  preAdProfitPerUnit: number;
+  /** PPC/đơn tối đa trước khi biên tụt xuống 0% (không phụ thuộc CPC/CR) */
+  maxPpcPerOrderBreakEven: number | null;
+  /** PPC/đơn tối đa trước khi biên tụt dưới ngưỡng cờ đỏ 20% */
+  maxPpcPerOrderRedFlag: number | null;
+  /** CR dùng để quy đổi PPC→CPC: của user nhập, hoặc benchmark 10% (assumed) */
+  crUsed: { value: number; assumed: boolean };
+  maxCpcBreakEven: number | null;
+  maxCpcRedFlag: number | null;
+  /** CPC dùng để quy đổi PPC→CR — chỉ có khi user nhập CPC (KHÔNG bịa) */
+  cpcUsed: number | null;
+  /** CR tối thiểu (%) để hoà vốn / để giữ biên ≥20% — null nếu >100% (bất thi) */
+  minCrBreakEvenPct: number | null;
+  minCrRedFlagPct: number | null;
+};
+
+export type CpcCrGridCell = {
+  cpc: number;
+  crPct: number;
+  ppcPerOrder: number;
+  netProfit: number;
+  netMarginPct: number;
+  /** biên ≥ ngưỡng cờ đỏ 20% */
+  passRedFlag: boolean;
+};
+
+export type CpcCrGrid = {
+  scenario: ScenarioKey;
+  cpcValues: number[];
+  crPctValues: number[];
+  /** cells[i][j] theo cpcValues[i] × crPctValues[j] */
+  cells: CpcCrGridCell[][];
+};
+
 /* ============================ SCORECARD ============================ */
 
 export type PillarKey =
@@ -247,6 +293,21 @@ export type RoadmapResult = {
   gates: { week: number; metrics: string[] }[];
   killCriteria: string[];
   notes: string[];
+};
+
+/**
+ * Bảng "chọn velocity theo vốn" — velocity thật chỉ có ở G2 (Rainforest sales
+ * estimation), nên G1 không bắt đoán: bày ra vốn lô test + mức lỗ tối đa tương
+ * ứng từng mức velocity để user CHỌN mức chấp nhận được. Cùng công thức với
+ * `computeRoadmap` (coverDays, ads đề xuất = velocity × PPC/đơn kịch bản cơ sở).
+ */
+export type VelocityLadderRow = {
+  unitsPerDay: number;
+  testOrderQty: number;
+  lotCapital: number;
+  adsBudgetPerDay: number | null;
+  adsTestSpend: number | null;
+  maxLoss: number | null;
 };
 
 /* ============================ HỒ SƠ THẨM ĐỊNH (OUTPUT G1) ============================ */

@@ -9,6 +9,9 @@ import { Chip, KpiCard, KpiGrid, Panel, tableCls } from "@/components/ui";
 import {
   SCENARIO_LABEL,
   SCENARIO_ORDER,
+  adFeasibility,
+  cpcCrSensitivityGrid,
+  velocityLadder,
   type AssessmentResult,
   type ScenarioKey,
 } from "@/lib/research/domain";
@@ -77,6 +80,10 @@ export function ResearchResultView({ result }: { result: AssessmentResult }) {
   const { financial: fin, scorecard, roadmap: rm } = result;
   const s = fin.scenarios;
   const base = s.base;
+  // Bài toán ngược cho ẩn số CPC/CR/velocity: tính NGƯỠNG từ dữ liệu đã biết.
+  const feas = adFeasibility(result.assumptions, s.pessimistic);
+  const grid = cpcCrSensitivityGrid(s.pessimistic);
+  const ladder = velocityLadder(result.assumptions, fin);
   const monthly500 = fin.monthly.find((m) => m.unitsPerMonth === 500);
   const redVetoes = scorecard.vetoes.filter((v) => v.severity === "red");
   const warnVetoes = scorecard.vetoes.filter((v) => v.severity === "warning");
@@ -204,6 +211,140 @@ export function ResearchResultView({ result }: { result: AssessmentResult }) {
             ))}
           </ul>
         )}
+      </Panel>
+
+      {/* Ngưỡng chịu đựng ads + lưới CPC×CR — bài toán ngược cho ẩn số CPC/CR */}
+      <Panel
+        title="Ngưỡng chịu đựng quảng cáo — kịch bản BI QUAN"
+        hint="Không cần biết CPC/CR thật: engine tính điều kiện ngách phải đạt từ giá + chi phí đã biết"
+      >
+        {feas.maxPpcPerOrderRedFlag === null ? (
+          <p className="mb-3 rounded-[10px] bg-red-soft px-3 py-2 text-[12.5px] font-bold text-[#a01717]">
+            Biên TRƯỚC quảng cáo của kịch bản bi quan đã dưới 20% — dù CPC = 0đ ngách này cũng
+            không đạt ngưỡng an toàn. Vấn đề nằm ở giá/vốn/đóng gói, KHÔNG phải ở ads.
+          </p>
+        ) : null}
+        <KpiGrid>
+          <KpiCard label="Lời TRƯỚC quảng cáo/đơn" value={usd(feas.preAdProfitPerUnit)} sub="giá − mọi chi phí trừ PPC" />
+          <KpiCard
+            label="PPC/đơn tối đa (hòa vốn)"
+            value={feas.maxPpcPerOrderBreakEven === null ? "≤ 0" : usd(feas.maxPpcPerOrderBreakEven)}
+            sub="không phụ thuộc CPC/CR"
+          />
+          <KpiCard
+            label="PPC/đơn tối đa (giữ biên ≥20%)"
+            value={feas.maxPpcPerOrderRedFlag === null ? "≤ 0" : usd(feas.maxPpcPerOrderRedFlag)}
+            sub="ngưỡng cờ đỏ 20%"
+          />
+          <KpiCard
+            label="CPC tối đa chịu được"
+            value={feas.maxCpcRedFlag === null ? "≤ 0" : usd(feas.maxCpcRedFlag)}
+            sub={
+              feas.crUsed.assumed
+                ? `giả định CR chuẩn ${Math.round(feas.crUsed.value * 100)}% (bạn chưa nhập)`
+                : `theo CR bạn nhập ${Math.round(feas.crUsed.value * 100)}%`
+            }
+          />
+        </KpiGrid>
+        {feas.cpcUsed !== null ? (
+          <p className="mb-3 text-[12px] text-soft">
+            Với CPC bạn giả định <b>{usd(feas.cpcUsed)}</b>/click: tỉ lệ chuyển đổi tối thiểu để hòa vốn là{" "}
+            <b>{feas.minCrBreakEvenPct === null ? ">100% (bất thi)" : pct(feas.minCrBreakEvenPct)}</b>, và để giữ biên ≥20% là{" "}
+            <b>{feas.minCrRedFlagPct === null ? ">100% (bất thi)" : pct(feas.minCrRedFlagPct)}</b>.
+          </p>
+        ) : (
+          <p className="mb-3 text-[12px] text-muted">
+            Chưa nhập CPC giả định — nếu có, engine sẽ tính thêm tỉ lệ chuyển đổi tối thiểu cần đạt.
+          </p>
+        )}
+
+        <p className="mb-1.5 text-[12.5px] font-bold">
+          Lưới độ nhạy CPC × CR — biên lợi nhuận kịch bản bi quan (%)
+        </p>
+        <div className="overflow-x-auto">
+          <table className={tableCls.table}>
+            <thead>
+              <tr>
+                <th className={tableCls.th}>CPC ↓ \ CR →</th>
+                {grid.crPctValues.map((cr) => (
+                  <th key={cr} className={`${tableCls.th} text-right`}>
+                    {cr}%
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {grid.cpcValues.map((cpc, i) => (
+                <tr key={cpc}>
+                  <td className={`${tableCls.td} font-bold tabular-nums`}>{usd(cpc)}</td>
+                  {grid.cells[i].map((cell) => {
+                    const tone = marginTone(cell.netMarginPct);
+                    const cls =
+                      tone === "up"
+                        ? "bg-green/10 text-green"
+                        : tone === "warn"
+                          ? "bg-amber/10 text-[#8a5602]"
+                          : "bg-red-soft text-[#a01717]";
+                    return (
+                      <td key={cell.crPct} className={`${tableCls.tdNum} tabular-nums ${cls} font-bold`}>
+                        {cell.netMarginPct.toFixed(1)}%
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-2 text-[11.5px] leading-snug text-muted">
+          Ô <span className="font-bold text-green">xanh</span> = tổ hợp CPC/CR mà biên bi quan vẫn ≥20%. Không cần đoán đúng
+          CPC/CR — chỉ cần tin rằng thị trường ngách này rơi vào vùng xanh (CPC thực đo được ở G4 khi chạy ads test).
+        </p>
+      </Panel>
+
+      {/* Bảng velocity → vốn lô test: velocity thật có ở G2, G1 chọn mức rủi ro */}
+      <Panel
+        title="Quy mô lô test theo velocity — chọn mức chấp nhận được"
+        hint="velocity thật sẽ có ở G2 (Rainforest sales estimation); bảng này cho thấy vốn & mức lỗ tối đa từng mức"
+      >
+        <div className="overflow-x-auto">
+          <table className={tableCls.table}>
+            <thead>
+              <tr>
+                <th className={tableCls.th}>Đơn/ngày (bi quan)</th>
+                <th className={`${tableCls.th} text-right`}>Lô test ({rm.coverDays} ngày)</th>
+                <th className={`${tableCls.th} text-right`}>Vốn hàng</th>
+                <th className={`${tableCls.th} text-right`}>Ads đề xuất/ngày</th>
+                <th className={`${tableCls.th} text-right`}>Tổng ads test ({rm.adsTestDays} ngày)</th>
+                <th className={`${tableCls.th} text-right`}>Lỗ tối đa nếu fail</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ladder.map((row) => {
+                const chosen =
+                  typeof result.assumptions.pessimisticUnitsPerDay === "number" &&
+                  row.unitsPerDay === result.assumptions.pessimisticUnitsPerDay;
+                return (
+                  <tr key={row.unitsPerDay} className={chosen ? "bg-[#eef4ff]" : undefined}>
+                    <td className={`${tableCls.td} font-bold tabular-nums`}>
+                      {row.unitsPerDay}
+                      {chosen ? " ← bạn nhập" : ""}
+                    </td>
+                    <td className={`${tableCls.tdNum} tabular-nums`}>{row.testOrderQty} đơn</td>
+                    <td className={`${tableCls.tdNum} tabular-nums`}>{usd(row.lotCapital, 0)}</td>
+                    <td className={`${tableCls.tdNum} tabular-nums`}>{row.adsBudgetPerDay === null ? "thiếu CPC/CR" : usd(row.adsBudgetPerDay)}</td>
+                    <td className={`${tableCls.tdNum} tabular-nums`}>{row.adsTestSpend === null ? "—" : usd(row.adsTestSpend, 0)}</td>
+                    <td className={`${tableCls.tdNum} tabular-nums font-bold`}>{row.maxLoss === null ? "—" : usd(row.maxLoss, 0)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-2 text-[11.5px] leading-snug text-muted">
+          Chưa biết velocity thì ĐỪNG đoán: chọn mức vốn/lỗ tối đa bạn chấp nhận mất cho lô test, engine sẽ dùng mức đó.
+          Số đo thật sẽ được hiệu chỉnh ở G2–G3 bằng sales estimation của Rainforest.
+        </p>
       </Panel>
 
       {/* Đóng gói/tối ưu FBA */}
