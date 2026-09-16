@@ -7,6 +7,7 @@
  */
 
 import React, { useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   REQUIRED_SECTIONS,
@@ -241,7 +242,23 @@ export function ReportWorkspace(props: ReportWorkspaceProps) {
               <span className="text-xs text-slate-500">
                 LLM: {report.llm.configured ? report.llm.model : `${report.llm.model} (mock — chưa cấu hình key)`}
               </span>
-              <div className="ml-auto flex flex-wrap gap-2">
+              <div className="ml-auto flex flex-wrap items-center gap-2">
+                <Link
+                  href={`/research/${assessmentId}/report?kind=exec`}
+                  target="_blank"
+                  className="rounded border border-slate-300 px-3 py-1.5 text-[13px] text-slate-700 hover:bg-slate-50"
+                  title="Bản tóm tắt điều hành — In ra PDF khổ A4"
+                >
+                  🖨️ Bản in (exec)
+                </Link>
+                <Link
+                  href={`/research/${assessmentId}/report?kind=full`}
+                  target="_blank"
+                  className="rounded border border-slate-300 px-3 py-1.5 text-[13px] text-slate-700 hover:bg-slate-50"
+                  title="Bản đầy đủ — In ra PDF khổ A4"
+                >
+                  🖨️ Bản in (full)
+                </Link>
                 {draftStatus === "draft" && (
                   <>
                     <button

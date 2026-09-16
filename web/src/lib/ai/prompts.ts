@@ -172,7 +172,7 @@ export function buildSectionMessages(input: SectionNarrativeInput): {
     .slice(0, 12)
     .map(
       (q, i) =>
-        `  - {{quote:${q.reviewId}} = ${q.asin} ${q.stars ?? "?"}★ ngày ${q.reviewDate ?? "?"}: “${q.quote}”${i >= 8 ? " (còn nhiều, chỉ chọn câu điển hình nhất)" : ""}`,
+        `  - {{quote:${q.reviewId}}} = ${q.asin} ${q.stars ?? "?"}★ ngày ${q.reviewDate ?? "?"}: “${q.quote}”${i >= 8 ? " (còn nhiều, chỉ chọn câu điển hình nhất)" : ""}`,
     )
     .join("\n");
 

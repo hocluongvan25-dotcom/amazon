@@ -237,6 +237,91 @@ async function buildDemoReport(assessmentId: string, llm: ReportData["llm"]): Pr
   };
 }
 
+/**
+ * Dữ liệu cho route IN: chọn version ưu tiên published → approved →
+ * in_review → draft (bản nháp in kèm nhãn DRAFT). Section lấy theo ĐÚNG
+ * version đó (bản đã duyệt là bất biến).
+ */
+export type PrintReportData = {
+  mode: "demo" | "supabase";
+  version: ReportVersionRow;
+  sections: Partial<Record<string, ReportSectionRow>>;
+  acks: VetoAckRow[];
+  requiredKeys: string[];
+  llm: ReportData["llm"];
+  isDraft: boolean;
+};
+
+function pickPrintVersion(versions: ReportVersionRow[]): ReportVersionRow | null {
+  const rank: Record<string, number> = {
+    published: 5,
+    approved: 4,
+    in_review: 3,
+    changes_requested: 2,
+    draft: 1,
+    stale: 0,
+  };
+  return [...versions].sort((a, b) => (rank[b.status] ?? 0) - (rank[a.status] ?? 0))[0] ?? null;
+}
+
+export async function readPrintData(assessmentId: string): Promise<PrintReportData | null> {
+  const full = await readReportData(assessmentId);
+  if (!full) return null;
+
+  if (full.mode === "demo") {
+    const v = full.versions[0];
+    return {
+      mode: "demo",
+      version: v,
+      sections: full.sections,
+      acks: full.acks,
+      requiredKeys: full.requiredKeys,
+      llm: full.llm,
+      isDraft: true,
+    };
+  }
+
+  const db = await createClient();
+  if (!db) return null;
+  const [versionsRes, sectionsRes, acksRes] = await Promise.all([
+    db
+      .from("vexim_research_report_versions")
+      .select("*")
+      .eq("assessment_id", assessmentId)
+      .order("version_no", { ascending: true }),
+    db.from("vexim_research_report_sections").select("*").eq("assessment_id", assessmentId),
+    db.from("vexim_research_veto_acks").select("*").eq("assessment_id", assessmentId),
+  ]);
+  if (versionsRes.error || sectionsRes.error) return null;
+  const versions = ((versionsRes.data ?? []) as Record<string, unknown>[]).map(mapVersion);
+  const version = pickPrintVersion(versions);
+  if (!version) return null;
+  const sections: PrintReportData["sections"] = {};
+  for (const r of (sectionsRes.data ?? []) as Record<string, unknown>[]) {
+    if (Number(r.report_version) !== version.versionNo) continue;
+    const mapped = mapSection(r);
+    sections[mapped.sectionKey] = mapped;
+  }
+  const acks: VetoAckRow[] = ((acksRes.data ?? []) as Record<string, unknown>[])
+    .filter((r) => Number(r.version_no) === version.versionNo)
+    .map((r) => ({
+      versionNo: Number(r.version_no),
+      ruleCode: String(r.rule_code),
+      acknowledgedName: str(r.acknowledged_name),
+      note: str(r.note),
+      createdAt: String(r.created_at),
+    }));
+  return {
+    mode: "supabase",
+    version,
+    sections,
+    acks,
+    requiredKeys: full.requiredKeys,
+    llm: full.llm,
+    isDraft: version.status === "draft" || version.status === "changes_requested",
+  };
+}
+
 let demoReportCache: Promise<ReportData> | null = null;
 
 export async function readReportData(assessmentId: string): Promise<ReportData | null> {

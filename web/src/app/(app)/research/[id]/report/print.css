@@ -1,0 +1,268 @@
+/* ============================================================================
+ * Module 8 G6 — CSS IN A4 cho /research/[id]/report
+ * Nguyên tắc: PDF khớp 100% màn hình; không dependency nặng; trình duyệt
+ * xuất PDF bằng hộp thoại In (chrome → Save as PDF).
+ * ========================================================================== */
+
+:root {
+  --pr-ink: #142033;
+  --pr-muted: #5b6b7f;
+  --pr-line: #c9d3e0;
+  --pr-blue: #1d4ed8;
+  --pr-red: #b91c1c;
+  --pr-amber: #92400e;
+}
+
+/* ------------------------------ MÀN HÌNH -------------------------------- */
+.pr-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: #0f172a;
+  color: #fff;
+  font-size: 13px;
+}
+.pr-toolbar a,
+.pr-toolbar button {
+  border-radius: 6px;
+  border: 1px solid #475569;
+  background: #1e293b;
+  color: #fff;
+  padding: 6px 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.pr-toolbar button.pr-primary {
+  background: #2563eb;
+  border-color: #2563eb;
+}
+.pr-toolbar .pr-tb-active {
+  background: #334155;
+  border-color: #94a3b8;
+}
+.pr-toolbar .pr-tb-note {
+  color: #cbd5e1;
+}
+
+.pr-backdrop {
+  background: #64748b33;
+  padding: 16px 0 40px;
+}
+
+.pr-page {
+  box-sizing: border-box;
+  width: 210mm;
+  min-height: 297mm;
+  margin: 0 auto 12mm;
+  padding: 16mm 15mm 18mm;
+  background: #fff;
+  color: var(--pr-ink);
+  font-size: 10.5pt;
+  line-height: 1.5;
+  box-shadow: 0 4px 18px rgba(15, 23, 42, 0.25);
+  position: relative;
+  overflow: hidden;
+}
+
+/* --------------------------- NỘI DUNG TÀI LIỆU -------------------------- */
+.pr-doc p { margin: 0 0 7pt; }
+.pr-doc h3 {
+  font-size: 12pt;
+  margin: 12pt 0 5pt;
+  color: #0f2b5b;
+  border-bottom: 1px solid var(--pr-line);
+  padding-bottom: 2pt;
+}
+.pr-doc ul, .pr-doc ol { margin: 4pt 0 7pt; padding-left: 18pt; }
+.pr-doc li { margin: 2pt 0; }
+.pr-empty { height: 0.6em; }
+.pr-missing { color: var(--pr-muted); font-style: italic; }
+.pr-link { color: var(--pr-blue); text-decoration: underline; word-break: break-all; }
+
+.pr-chip {
+  display: inline;
+  border-radius: 4px;
+  padding: 0 4px;
+  font-size: 9.5pt;
+  font-weight: 600;
+  white-space: normal;
+  line-height: 1.7;
+}
+.pr-chip-metric {
+  background: #dbeafe;
+  border: 1px solid #93c5fd;
+  color: #1e3a8a;
+}
+.pr-chip-quote {
+  display: inline-block;
+  margin: 2pt 0;
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  color: #78350f;
+  text-decoration: none;
+}
+.pr-chip-badge {
+  background: #f59e0b;
+  color: #451a03;
+  border-radius: 3px;
+  padding: 0 3px;
+  font-size: 8.5pt;
+}
+
+.pr-h2 {
+  font-size: 14pt;
+  color: #0f2b5b;
+  margin: 14pt 0 7pt;
+  border-bottom: 2px solid #0f2b5b;
+  padding-bottom: 3pt;
+  break-after: avoid;
+}
+.pr-part {
+  font-size: 13pt;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #fff;
+  background: #0f2b5b;
+  padding: 5pt 9pt;
+  margin: 0 0 10pt;
+  break-after: avoid;
+}
+.pr-section { break-inside: auto; }
+.pr-new-page { break-before: page; }
+
+/* khối dữ liệu */
+.pr-block { margin: 8pt 0 12pt; break-inside: avoid-page; }
+.pr-block-title {
+  font-size: 10.5pt;
+  margin: 10pt 0 4pt;
+  color: #0f2b5b;
+}
+.pr-block-title-note { font-weight: 400; font-size: 8.5pt; color: var(--pr-muted); }
+.pr-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 4pt 0 8pt;
+  font-size: 9.5pt;
+}
+.pr-table th, .pr-table td {
+  border: 1px solid var(--pr-line);
+  padding: 3pt 5pt;
+  vertical-align: top;
+  text-align: left;
+}
+.pr-table thead th { background: #eef2f7; }
+.pr-table .pr-num { text-align: right; white-space: nowrap; }
+.pr-kv th { width: 46%; background: #f8fafc; }
+.pr-compact { font-size: 9pt; }
+.pr-total td, .pr-total th { background: #e0ecff; }
+.pr-muted { color: var(--pr-muted); font-weight: 400; }
+.pr-good { color: #166534; }
+.pr-bad { color: var(--pr-red); font-weight: 700; }
+.pr-note { font-size: 9pt; color: var(--pr-muted); font-style: italic; }
+.pr-plain { margin: 0; padding-left: 14pt; }
+.pr-kill { margin: 6pt 0 2pt; color: var(--pr-red); }
+.pr-kill-list li { color: var(--pr-red); margin: 2pt 0; }
+
+.pr-veto-list { margin-top: 6pt; }
+.pr-veto { border: 1px solid; border-radius: 4px; padding: 5pt 7pt; margin: 4pt 0; font-size: 9.5pt; }
+.pr-veto-red { border-color: #fca5a5; background: #fef2f2; color: #7f1d1d; }
+.pr-veto-warning { border-color: #fcd34d; background: #fffbeb; color: var(--pr-amber); }
+
+/* bìa */
+.pr-cover { display: flex; flex-direction: column; }
+.pr-cover-brand {
+  text-align: center; font-size: 10pt; letter-spacing: 0.18em; color: var(--pr-muted);
+  border-bottom: 3px double #0f2b5b; padding-bottom: 8pt;
+}
+.pr-cover-kind { text-align: center; margin-top: 26mm; font-size: 13pt; letter-spacing: 0.1em; color: #0f2b5b; font-weight: 700; }
+.pr-cover-title { text-align: center; font-size: 23pt; margin: 8mm 0 14mm; line-height: 1.25; }
+.pr-cover-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 0; font-size: 11pt; }
+.pr-cover-meta > div { display: flex; justify-content: space-between; border-bottom: 1px dotted var(--pr-line); padding: 5pt 4pt; }
+.pr-cover-meta dt { color: var(--pr-muted); }
+.pr-cover-meta dd { margin: 0; font-weight: 600; text-align: right; }
+.pr-cover-verdict {
+  margin-top: 16mm; border: 2px solid #0f2b5b; border-radius: 8px; padding: 6mm; text-align: center;
+}
+.pr-cover-verdict-label { font-size: 10pt; color: var(--pr-muted); text-transform: uppercase; letter-spacing: 0.1em; }
+.pr-cover-verdict-value { font-size: 17pt; font-weight: 800; color: #0f2b5b; margin-top: 4pt; }
+.pr-cover-foot { margin-top: auto; padding-top: 10mm; font-size: 8.5pt; color: var(--pr-muted); text-align: center; }
+
+/* ký tên */
+.pr-signoff-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14mm 10mm; margin: 12mm 0; }
+.pr-signoff-line { border-bottom: 1px solid #334155; height: 16mm; }
+.pr-signoff-role { font-weight: 700; font-size: 10pt; margin-top: 3pt; }
+.pr-signoff-date { color: var(--pr-muted); font-size: 9pt; }
+
+/* watermark + header/footer chạy mọi trang (chỉ hiện khi in) */
+.pr-watermark { display: none; }
+.pr-running-head, .pr-running-foot { display: none; }
+
+/* ------------------------------- IN ------------------------------------ */
+@media print {
+  @page { size: A4; margin: 16mm 13mm 16mm; }
+
+  /* ẩn TOÀN BỘ shell app, chỉ giữ vùng báo cáo */
+  body * { visibility: hidden !important; }
+  #print-root, #print-root * { visibility: visible; }
+  #print-root { position: absolute; inset: 0; }
+  .pr-toolbar { display: none !important; }
+  .pr-backdrop { background: #fff; padding: 0; }
+
+  .pr-page {
+    width: auto;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    box-shadow: none;
+    page-break-after: always;
+    break-after: page;
+  }
+  .pr-page:last-child { page-break-after: auto; break-after: auto; }
+  .pr-new-page { page-break-before: always; break-before: page; }
+  h2, h3, h4, .pr-part, .pr-block-title { page-break-after: avoid; break-after: avoid; }
+  tr, .pr-block, .pr-chip-quote { page-break-inside: avoid; break-inside: avoid; }
+
+  .pr-watermark {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='360' height='360'><text x='30' y='190' transform='rotate(-26 180 180)' fill='%23b91c1c' fill-opacity='0.075' font-size='21' font-family='Arial' font-weight='bold'>T%C3%80I LI%E1%BB%86U B%E1%BA%A2O M%E1%BA%ACT %E2%80%94 VEXIM</text></svg>");
+    background-repeat: repeat;
+  }
+  .pr-running-head {
+    display: block;
+    position: fixed;
+    top: -10mm;
+    left: 0;
+    right: 0;
+    font-size: 8pt;
+    color: #64748b;
+    border-bottom: 0.5pt solid #cbd5e1;
+    padding-bottom: 2pt;
+    display: flex;
+    justify-content: space-between;
+  }
+  .pr-running-foot {
+    display: block;
+    position: fixed;
+    bottom: -10mm;
+    left: 0;
+    right: 0;
+    font-size: 8pt;
+    color: #64748b;
+    border-top: 0.5pt solid #cbd5e1;
+    padding-top: 2pt;
+    display: flex;
+    justify-content: space-between;
+  }
+  .pr-page > * { position: relative; z-index: 1; }
+
+  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+}

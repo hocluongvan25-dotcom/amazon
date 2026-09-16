@@ -330,7 +330,7 @@ export class MockLlmProvider implements LlmProvider {
     }
     if (q.length && (input.sectionKey.startsWith("rd_") || input.sectionKey === "exec_verdict")) {
       lines.push("Bằng chứng khách hàng tiêu biểu:");
-      for (const quote of q) lines.push(`- {{quote:${quote.reviewId}}`);
+      for (const quote of q) lines.push(`- {{quote:${quote.reviewId}}}`);
     }
     lines.push(
       "*(Nội dung MOCK nháp để chạy quy trình; khi có LLM_API_KEY, phần này do gpt-4.1-mini soạn và vẫn phải hiệu đính trước khi ký.)*",
