@@ -101,7 +101,10 @@ export class OpenAiLlmProvider implements LlmProvider {
           temperature: 0.2,
           response_format: { type: "json_object" },
           max_completion_tokens: this.maxOutputTokens,
-          metadata: { section },
+          // KHÔNG gửi 'metadata': OpenAI (từ ~2025) chỉ chấp nhận khi kèm
+          // store=true — mà store=true lưu prompt 30 ngày bên họ. Section đã
+          // được ghi trong llm_runs.sectionKey, không cần metadata phía OpenAI.
+          // Sự cố 17/09/2026: HTTP 400 "metadata only allowed when store enabled".
         }),
       });
 

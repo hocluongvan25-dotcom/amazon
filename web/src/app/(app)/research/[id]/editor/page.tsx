@@ -13,6 +13,11 @@ import { readReportData, loadNarrativeContext } from "@/lib/data/research-report
 import { ReportCanvas } from "@/components/research/report-canvas";
 import { STATUS_LABEL, shortDate } from "@/lib/data/research-model";
 
+// Các server action canvas gọi LLM thật: "✨ AI soát nháp các khối trống" nháp
+// ~25 khối narrative (3 khối song song/đợt) — cần trần 60s như trang chi tiết,
+// mặc định Vercel 10s sẽ cắt giữa chừng.
+export const maxDuration = 60;
+
 const ALLOWED: PersonaKey[] = ["ceo"];
 
 export default async function ReportEditorPage({
