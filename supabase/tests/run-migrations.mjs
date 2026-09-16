@@ -5390,7 +5390,326 @@ await ex("reset role; rollback;");
 await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
 
 // ============================================================================
-console.log("\n=== BƯỚC 31: repair/recreate_research_public_views.sql (19 view gồm G4+G5+G7) ===");
+console.log("\n=== BƯỚC 31: 0031 — TÊN SHOP AMAZON (storeName) cho màn Kết nối shop ===");
+// ============================================================================
+// Bối cảnh sự cố 16/09/2026: "kết nối được shop nhưng KHÔNG hiển thị tên shop
+// Amazon đã kéo về". API không lỗi — getMarketplaceParticipations có trả
+// `storeName` ("the name of the seller's store as displayed in the marketplace",
+// Sellers API v1), nhưng client bỏ qua field đó và DB cũng chưa có cột nào chứa
+// tên shop. Bước này kiểm chứng phần DB của bản sửa.
+//
+// Trạng thái trước 0031: harness KHÔNG chạy 0023/0024 nên view đang ở shape 0016.
+// Dựng lại view theo shape 0024 (đúng như production đang có) để kiểm chứng
+// ĐƯỜNG THẬT trên Supabase: "create or replace view + thêm 2 cột ở CUỐI".
+await ex("drop view if exists public.vexim_shops");
+await ex(`create view public.vexim_shops with (security_invoker = true) as
+  select sa.id as seller_account_id, sa.seller_id as seller_id, sa.display_name as shop,
+         sa.display_name as display_name, sa.marketplace as marketplace,
+         sa.marketplace as marketplace_id, sa.status, sa.data_source, sa.health_status,
+         sa.last_sync_at
+    from connections.seller_accounts sa`);
+ok(
+  (await colsOf("vexim_shops")) ===
+    "seller_account_id,seller_id,shop,display_name,marketplace,marketplace_id,status," +
+      "data_source,health_status,last_sync_at",
+  "0031 (chuẩn bị): vexim_shops ở shape 0024 giống production",
+);
+
+await ex(rd("migrations/0031_shop_store_name.sql"), "0031 lần 1");
+ok(true, "0031 chạy sạch (cột store_name · view · 2 RPC service_role)");
+ok(
+  (await colsOf("vexim_shops")) ===
+    "seller_account_id,seller_id,shop,display_name,marketplace,marketplace_id,status," +
+      "data_source,health_status,last_sync_at,store_name,store_name_synced_at",
+  `0031: view thêm store_name + store_name_synced_at Ở CUỐI, khớp SHOP_SELECT_V3 của oauth.ts — nhận: ${await colsOf("vexim_shops")}`,
+);
+await ex(rd("migrations/0031_shop_store_name.sql"), "0031 lần 2");
+ok(
+  (await colsOf("vexim_shops")) ===
+    "seller_account_id,seller_id,shop,display_name,marketplace,marketplace_id,status," +
+      "data_source,health_status,last_sync_at,store_name,store_name_synced_at",
+  "0031 idempotent (chạy lại không nhân đôi cột, không lỗi)",
+);
+
+const s31 = (
+  await one(
+    "select id from connections.seller_accounts where seller_id='AQMVYI4HJTI4C' and marketplace='ATVPDKIKX0DER'",
+  )
+).id;
+ok(!!s31, "0031: shop production US của 0009 vẫn nguyên vẹn để test");
+
+await ex("begin");
+// 1. Người dùng web KHÔNG gọi được 2 RPC này (chỉ service_role)
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',true);`);
+ok(
+  await mustBlock(`select * from public.vexim_worker_set_shop_store_name('${s31}', 'Tên giả')`),
+  "0031 CHẶN: người dùng web không ghi được tên shop",
+);
+ok(
+  await mustBlock("select * from public.vexim_worker_list_shop_credentials()"),
+  "0031 CHẶN: người dùng web KHÔNG đọc được refresh token của shop",
+);
+
+// 2. service_role (worker/callback) ghi tên shop
+await ex("reset role; set local role service_role; select set_config('request.jwt.claim.sub','',true);");
+const saved31 = await one(
+  `select * from public.vexim_worker_set_shop_store_name('${s31}', 'VEXIM Store US') limit 1`,
+);
+ok(
+  saved31?.store_name === "VEXIM Store US" && saved31?.changed === true,
+  `0031: service_role lưu được tên shop (nhận ${JSON.stringify(saved31)})`,
+);
+await cmp(
+  "0031: tên shop nằm đúng dòng seller_accounts + có mốc đồng bộ",
+  `select count(*) n from connections.seller_accounts
+    where id='${s31}' and store_name='VEXIM Store US'
+      and store_name_source='spapi' and store_name_synced_at is not null`,
+  1,
+);
+
+// 3. Tên RỖNG không được ghi đè (Amazon trả thiếu storeName ⇒ giữ tên cũ)
+const blank31 = await one(
+  `select * from public.vexim_worker_set_shop_store_name('${s31}', '   ') limit 1`,
+);
+ok(blank31?.changed === false, "0031: tên rỗng KHÔNG ghi đè tên đang có");
+await cmp(
+  "0031: tên cũ vẫn nguyên sau khi gọi với tên rỗng",
+  `select count(*) n from connections.seller_accounts where id='${s31}' and store_name='VEXIM Store US'`,
+  1,
+);
+const creds31 = await one("select count(*)::int n from public.vexim_worker_list_shop_credentials()");
+ok(creds31?.n >= 2, `0031: list_shop_credentials đọc được shop + token (nhận ${creds31?.n})`);
+
+// 4. Web (authenticated, có RLS) ĐỌC được tên shop qua view
+await ex("reset role; set local role authenticated; select set_config('request.jwt.claim.sub','" + adminId + "',true);");
+await cmp(
+  "0031: web đọc được store_name qua view (RLS seller_accounts vẫn áp)",
+  `select count(*) n from public.vexim_shops
+    where seller_account_id='${s31}' and store_name='VEXIM Store US'`,
+  1,
+);
+await ex("reset role; rollback;");
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+
+// 5. Deployment NHẢY CÓC (chưa từng chạy 0024): view còn shape 0016 ⇒ 0031 phải
+//    dựng lại được thay vì lỗi "cannot change name of view column".
+await ex("begin");
+await ex("drop view if exists public.vexim_shops");
+await ex(`create view public.vexim_shops with (security_invoker = true) as
+  select sa.id as seller_account_id, sa.display_name as shop, sa.marketplace,
+         sa.status, sa.data_source, sa.health_status, sa.last_sync_at
+    from connections.seller_accounts sa`);
+await ex(rd("migrations/0031_shop_store_name.sql"), "0031 trên shape 0016");
+ok(
+  (await colsOf("vexim_shops")) ===
+    "seller_account_id,seller_id,shop,display_name,marketplace,marketplace_id,status," +
+      "data_source,health_status,last_sync_at,store_name,store_name_synced_at",
+  "0031: shape 0016 (nhảy cóc 0024) vẫn dựng lại được view 12 cột",
+);
+await ex("rollback");
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+
+// ============================================================================
+console.log("\n=== BƯỚC 32: 0032 — QUẢN LÝ SHOP (thêm/xoá shop · ẩn shop demo) ===");
+// ============================================================================
+// Yêu cầu 16/09/2026: (a) xoá/ẩn shop demo cho gọn, (b) nút [+ Thêm shop mới],
+// (c) nút [Xoá] có cổng an toàn. Bước này kiểm chứng phần DB (migration 0032).
+await ex(rd("migrations/0032_shop_admin.sql"), "0032 lần 1");
+ok(true, "0032 chạy sạch (seller_id nullable · 3 RPC · ẩn shop demo)");
+await ex(rd("migrations/0032_shop_admin.sql"), "0032 lần 2");
+ok(true, "0032 idempotent");
+
+await cmp(
+  "0032: 6 shop demo (0007/seed_demo) đã ẩn — không còn shop mock nào hiện trên UI",
+  "select count(*) n from connections.seller_accounts where data_source='mock' and status <> 'revoked'",
+  0,
+);
+await cmp(
+  "0032: KHÔNG xoá dữ liệu demo (vẫn còn 6 dòng mock nếu cần đối chiếu)",
+  "select count(*) n from connections.seller_accounts where data_source='mock'",
+  6,
+);
+await cmp(
+  "0032: seller_id cho phép NULL (tạo shop trước khi authorize)",
+  `select count(*) n from information_schema.columns
+    where table_schema='connections' and table_name='seller_accounts'
+      and column_name='seller_id' and is_nullable='YES'`,
+  1,
+);
+await cmp(
+  "0032: 2 shop production vẫn nguyên vẹn (không bị ảnh hưởng bởi việc ẩn demo)",
+  "select count(*) n from connections.seller_accounts where data_source='production' and status='active'",
+  2,
+);
+
+await ex("begin");
+const org32 = (await one("select id from iam.organizations where slug='vexim'")).id;
+const admin32 = (await one(
+  "select user_id from iam.role_assignments where role='super_admin' limit 1",
+)).user_id;
+
+// --- 1. Người dùng thường KHÔNG thêm/xoá được shop ---------------------------
+const op32 = "ffff0000-0000-4000-8000-000000000052";
+await ex(`select set_config('request.jwt.claim.sub','${op32}',true);`);
+ok(
+  await mustBlock(`select * from public.vexim_admin_create_shop('Shop lậu', 'ATVPDKIKX0DER')`),
+  "0032 CHẶN: người không phải admin không thêm được shop",
+);
+ok(
+  await mustBlock(`select * from public.vexim_admin_delete_shop('${wShop}', true)`),
+  "0032 CHẶN: người không phải admin không xoá được shop",
+);
+
+// --- 2. Admin thêm shop -------------------------------------------------------
+await ex(`select set_config('request.jwt.claim.sub','${admin32}',true);`);
+const created32 = await one(
+  `select * from public.vexim_admin_create_shop('Shop khách test - US', 'ATVPDKIKX0DER', null) limit 1`,
+);
+ok(
+  created32?.created === true && created32?.status === "paused" && created32?.seller_id === null,
+  `0032: admin thêm shop (paused, chưa có seller id) — nhận ${JSON.stringify(created32)}`,
+);
+await cmp(
+  "0032: shop mới KHÔNG được worker đồng bộ (active_production_shops bỏ qua shop paused)",
+  `select count(*) n from public.active_production_shops() where id='${created32?.seller_account_id}'`,
+  0,
+);
+const dup32 = await one(
+  `select * from public.vexim_admin_create_shop('Shop khách test - US (lần 2)', 'ATVPDKIKX0DER', null) limit 1`,
+);
+ok(
+  dup32?.created === true && dup32?.seller_account_id !== created32?.seller_account_id,
+  "0032: seller_id NULL ⇒ KHÔNG chặn tạo trùng theo (seller_id, marketplace) — đúng thiết kế",
+);
+const beforeName32 = (await one(
+  "select display_name from connections.seller_accounts where seller_id='AQMVYI4HJTI4C' and marketplace='ATVPDKIKX0DER'",
+)).display_name;
+const dupSeller32 = await one(
+  `select * from public.vexim_admin_create_shop('Tên khác hoàn toàn', 'ATVPDKIKX0DER', 'AQMVYI4HJTI4C') limit 1`,
+);
+ok(
+  dupSeller32?.created === false && dupSeller32?.display_name === beforeName32,
+  `0032: khai lại shop đã có (seller_id + marketplace) ⇒ created=false, GIỮ tên cũ "${beforeName32}" (nhận ${JSON.stringify(dupSeller32)})`,
+);
+
+// --- 3. Kiểm tra dữ liệu đầu vào ---------------------------------------------
+ok(
+  await mustBlock(`select * from public.vexim_admin_create_shop('   ', 'ATVPDKIKX0DER')`),
+  "0032 CHẶN: thiếu tên gọi nội bộ",
+);
+ok(
+  await mustBlock(`select * from public.vexim_admin_create_shop('Shop X', '')`),
+  "0032 CHẶN: thiếu marketplace",
+);
+ok(
+  await mustBlock(`select * from public.vexim_admin_create_shop('Shop X', 'ATVPDKIKX0DER', 'ABC-12')`),
+  "0032 CHẶN: seller id sai định dạng (không phải chữ/số)",
+);
+ok(
+  await mustBlock(`select * from public.vexim_admin_create_shop('Shop X', 'ATVPDKIKX0DER', null, null, 'khong-co')`),
+  "0032 CHẶN: data_source ngoài enum",
+);
+
+// --- 4. Xoá shop: cổng an toàn 2 bước ---------------------------------------
+const ask32 = await one(`select * from public.vexim_admin_delete_shop('${created32?.seller_account_id}', false) limit 1`);
+ok(
+  ask32?.deleted === false && ask32?.requires_force === true,
+  `0032: xoá bước 1 CHỈ đếm (không xoá) — nhận ${JSON.stringify(ask32)}`,
+);
+await cmp(
+  "0032: shop vẫn còn sau bước 1",
+  `select count(*) n from connections.seller_accounts where id='${created32?.seller_account_id}'`,
+  1,
+);
+const del32 = await one(`select * from public.vexim_admin_delete_shop('${created32?.seller_account_id}', true) limit 1`);
+ok(del32?.deleted === true, `0032: xoá thật khi force=true — nhận ${JSON.stringify(del32)}`);
+await cmp(
+  "0032: shop đã bị xoá khỏi DB",
+  `select count(*) n from connections.seller_accounts where id='${created32?.seller_account_id}'`,
+  0,
+);
+await cmp(
+  "0032: nhật ký xoá shop được giữ lại (audit không bị xoá theo shop)",
+  `select count(*) n from iam.audit_logs where action='shop.delete' and entity like '%Shop khách test - US%'`,
+  1,
+);
+// Lưu ý: nhật ký THÊM shop gắn seller_account_id nên bị xoá theo khi shop bị xoá
+// (khoá ngoại ON DELETE CASCADE). Nhật ký XOÁ shop thì giữ vĩnh viễn (ghi ở trên)
+// — đó là chủ ý: sau khi xoá vẫn còn dấu vết ai xoá shop nào, kèm toàn bộ thông tin.
+
+// --- 5. Shop có token: xoá phải xác nhận, và nêu rõ sẽ mất gì ----------------
+// Tự tạo token cho shop vừa thêm (bằng service_role) để kiểm chứng cổng xác nhận:
+// shop ĐÃ kết nối thì KHÔNG được xoá chỉ bằng một cú bấm.
+await ex("reset role; set local role service_role; select set_config('request.jwt.claim.sub','',true);");
+await one(
+  `select * from public.vexim_worker_set_oauth_token('${dup32?.seller_account_id}',
+     '{"refreshToken":"Atzr|test32","noticeDays":30}'::jsonb) limit 1`,
+);
+await ex("reset role; set local role authenticated; select set_config('request.jwt.claim.sub','" + admin32 + "',true);");
+const askTok = await one(`select * from public.vexim_admin_delete_shop('${dup32?.seller_account_id}', false) limit 1`);
+ok(
+  askTok?.deleted === false && askTok?.requires_force === true,
+  `0032: shop ĐÃ có token ⇒ bước 1 chỉ đếm, bắt buộc xác nhận (nhận ${JSON.stringify(askTok?.message)})`,
+);
+ok(
+  askTok?.summary?.["connections.oauth_tokens"] >= 1,
+  `0032: bản đếm có nêu oauth_tokens (nhận ${JSON.stringify(askTok?.summary)})`,
+);
+await ex("reset role; set local role service_role; select set_config('request.jwt.claim.sub','',true);");
+await cmp(
+  "0032: token vẫn còn sau bước đếm (chưa xoá gì)",
+  `select count(*) n from connections.oauth_tokens where seller_account_id='${dup32?.seller_account_id}'`,
+  1,
+);
+await ex("reset role; set local role authenticated; select set_config('request.jwt.claim.sub','" + admin32 + "',true);");
+await cmp(
+  "0032 RLS: người dùng web KHÔNG đọc được bảng token (kể cả admin — token chỉ service_role)",
+  `select count(*) n from connections.oauth_tokens`,
+  0,
+);
+
+// Audit: nhật ký thêm shop CÓ ghi (shop này chưa bị xoá)
+await cmp(
+  "0032: nhật ký thêm shop được ghi (shop.create)",
+  `select count(*) n from iam.audit_logs
+    where action='shop.create' and entity = 'Shop khách test - US (lần 2)'`,
+  1,
+);
+
+// --- 6. Callback: tự nhận seller id cho shop tạo trước khi authorize ---------
+await ex("reset role; set local role service_role; select set_config('request.jwt.claim.sub','',true);");
+const claim32 = await one(
+  `select * from public.vexim_worker_claim_shop_seller_id('${dup32?.seller_account_id}', 'A2CUSTOMER01') limit 1`,
+);
+ok(
+  claim32?.adopted === true && claim32?.matches === true && claim32?.seller_id === "A2CUSTOMER01",
+  `0032: callback điền seller id thật cho shop mới (nhận ${JSON.stringify(claim32)})`,
+);
+const claimAgain32 = await one(
+  `select * from public.vexim_worker_claim_shop_seller_id('${dup32?.seller_account_id}', 'A2CUSTOMER01') limit 1`,
+);
+ok(
+  claimAgain32?.matches === true && claimAgain32?.adopted === false,
+  "0032: gọi lại cùng seller id ⇒ khớp, không ghi lại",
+);
+const claimWrong32 = await one(
+  `select * from public.vexim_worker_claim_shop_seller_id('${dup32?.seller_account_id}', 'A2NEGUOI') limit 1`,
+);
+ok(
+  claimWrong32?.matches === false,
+  "0032: authorize LỆCH shop ⇒ matches=false (callback phải từ chối lưu token)",
+);
+await ex("reset role; set local role authenticated; select set_config('request.jwt.claim.sub','" + admin32 + "',true);");
+ok(
+  await mustBlock(`select * from public.vexim_worker_claim_shop_seller_id('${dup32?.seller_account_id}', 'A2XYZ')`),
+  "0032 CHẶN: RPC của callback không cho người dùng web gọi",
+);
+
+await ex("reset role; rollback;");
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+
+// ============================================================================
+console.log("\n=== BƯỚC 33: repair/recreate_research_public_views.sql (19 view gồm G4+G5+G7) ===");
 await ex(rd("repair/recreate_research_public_views.sql"), "repair views G7");
 await cmp("repair: đủ 19 view public.vexim_research_*",
   `select count(*) n from information_schema.views

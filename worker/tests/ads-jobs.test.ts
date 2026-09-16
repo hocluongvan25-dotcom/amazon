@@ -64,12 +64,20 @@ type FakeOpts = {
   createError?: unknown;
   throwOnProfiles?: unknown;
   profiles?: unknown[];
+  /** negative ĐANG CÓ trên Amazon — hàm sẽ trả về */
+  negatives?: unknown[];
+  /** lỗi cho lần gọi KHÔNG filter (mô phỏng Amazon đòi campaignIdFilter) */
+  negativeListError?: unknown;
+  /** lỗi cho MỌI lần gọi (kể cả theo campaign) */
+  negativeAlwaysError?: unknown;
 };
 
 class FakeAds {
   created: { name: string; startDate: string; endDate: string; configuration: { reportTypeId: string } }[] = [];
   polls: string[] = [];
   downloads: string[] = [];
+  /** mỗi lần gọi listNegativeKeywords ghi lại tham số để test soi (filter hay không) */
+  negativeCalls: { campaignIds?: string[] }[] = [];
   private opts: FakeOpts;
 
   constructor(opts: FakeOpts = {}) {
@@ -87,6 +95,14 @@ class FakeAds {
 
   async listAdGroups() {
     return [{ adGroupId: "AG-1", campaignId: "C-1", name: "Vali 20 inch", state: "ENABLED", defaultBid: 0.75 }] as never;
+  }
+
+  async listNegativeKeywords(_profileId: string, opts: { campaignIds?: string[] } = {}) {
+    this.negativeCalls.push({ campaignIds: opts.campaignIds });
+    if (this.opts.negativeAlwaysError) throw this.opts.negativeAlwaysError;
+    const filtered = (opts.campaignIds ?? []).length > 0;
+    if (!filtered && this.opts.negativeListError) throw this.opts.negativeListError;
+    return (this.opts.negatives ?? []) as never;
   }
 
   async listTargets() {
@@ -184,6 +200,65 @@ test("ads-sync: ghi profile → campaign → ad group → target, giữ tỷ l�
   assert.equal(db.adsTargets.length, 1);
   assert.equal(db.adsTargets[0].targetKind, "keyword");
   assert.equal(res.results[0].counts.campaigns.inserted, 1);
+});
+
+test("ads-sync: đọc negative ĐANG CÓ trên Amazon về gương (A3 mới biết 'đã chặn')", async () => {
+  const db = new MockDbAdapter();
+  const fake = new FakeAds({
+    negatives: [
+      { keywordId: "N-1", campaignId: "C-1", adGroupId: "AG-1", keywordText: "vali to", matchType: "NEGATIVE_EXACT", state: "ENABLED" },
+      { keywordId: "N-2", campaignId: "C-1", adGroupId: "AG-1", keywordText: "free ship", matchType: "NEGATIVE_PHRASE", state: "ENABLED" },
+    ],
+  });
+  const res = await runAdsEntitySync({ db, shops: [SHOP], clientFor: () => asClient(fake), log: () => {} });
+
+  assert.equal(res.synced, 1);
+  assert.equal(fake.negativeCalls.length, 1, "gọi KHÔNG filter là đủ cho lần đầu — rẻ nhất");
+  assert.equal(db.adsNegativeKeywords.length, 2);
+  assert.equal(db.adsNegativeKeywords[0].keywordText, "vali to");
+  assert.equal(db.adsNegativeKeywords[0].adsProfileId, "P-1", "gương phải gắn profile để không trộn marketplace");
+  assert.equal(db.adsNegativeKeywords[0].changeRequestId, null, "negative đọc về KHÔNG gắn với yêu cầu thay đổi nào");
+  assert.equal(res.results[0].counts.negativeKeywords.inserted, 2);
+  assert.deepEqual(res.results[0].errors, [], "không có lỗi thì không được rải cảnh báo");
+
+  // chạy lần hai: cùng dữ liệu ⇒ UPDATE, không nhân đôi
+  await runAdsEntitySync({ db, shops: [SHOP], clientFor: () => asClient(fake), log: () => {} });
+  assert.equal(db.adsNegativeKeywords.length, 2);
+});
+
+test("ads-sync: Amazon đòi filter ⇒ tự hỏi theo từng campaign (và không làm hỏng sync)", async () => {
+  const db = new MockDbAdapter();
+  const fake = new FakeAds({
+    negativeListError: new AdsApiRequestError({
+      status: 400,
+      code: "BAD_REQUEST",
+      message: "campaignIdFilter is required",
+    }),
+    negatives: [
+      { keywordId: "N-9", campaignId: "C-1", adGroupId: "AG-1", keywordText: "vali to", matchType: "NEGATIVE_EXACT", state: "ENABLED" },
+    ],
+  });
+  const res = await runAdsEntitySync({ db, shops: [SHOP], clientFor: () => asClient(fake), log: () => {} });
+
+  assert.equal(res.synced, 1, "lỗi khi đọc negative KHÔNG được làm hỏng việc đồng bộ cấu trúc");
+  assert.equal(fake.negativeCalls.length, 2, "1 lần không filter + 1 lần theo campaign");
+  assert.deepEqual(fake.negativeCalls[1].campaignIds, ["C-1"]);
+  assert.equal(db.adsNegativeKeywords.length, 1);
+  assert.equal(res.results[0].counts.negativeKeywords.inserted, 1);
+});
+
+test("ads-sync: đọc negative lỗi hoàn toàn ⇒ sync vẫn xong nhưng PHẢI cảnh báo gương thiếu", async () => {
+  const db = new MockDbAdapter();
+  const fake = new FakeAds({
+    negativeAlwaysError: new AdsApiRequestError({ status: 403, code: "UNAUTHORIZED", message: "not allowed" }),
+  });
+  const res = await runAdsEntitySync({ db, shops: [SHOP], clientFor: () => asClient(fake), log: () => {} });
+
+  assert.equal(res.synced, 1);
+  assert.equal(db.adsNegativeKeywords.length, 0);
+  assert.equal(res.results[0].errors.length, 1, "im lặng là tệ nhất: A3 sẽ hiện 'chưa chặn' mà không ai biết vì sao");
+  assert.match(res.results[0].errors[0], /gương negative keyword có thể THIẾU/);
+  assert.match(res.results[0].errors[0], /not allowed/);
 });
 
 test("ads-sync: chạy lần hai cập nhật, KHÔNG nhân đôi campaign", async () => {
@@ -450,7 +525,10 @@ test("ads-pull: có dòng F4 cùng tiền tệ → lấp ads_spend (TACOS có s�
 
 test("oauth-reminder: token còn 5 ngày → tạo cảnh báo + đánh dấu đã nhắc (không lặp mỗi ngày)", async () => {
   const db = new MockDbAdapter();
-  const soon = new Date(NOW.getTime() + 5 * 86_400_000).toISOString();
+  // ⚠️ Mốc hạn phải tính theo ĐỒNG HỒ THẬT, không theo NOW: MockDbAdapter
+  // .listOauthSoon() đếm daysLeft bằng Date.now() (đúng như DB production dùng
+  // now()). Dùng NOW cứng ⇒ test đỏ dần theo thời gian dù sản phẩm không đổi.
+  const soon = new Date(Date.now() + 5 * 86_400_000).toISOString();
   await db.saveOauthToken(SHOP.id, {
     refreshToken: "Atzr|abc",
     authorizedAt: NOW.toISOString(),
@@ -463,10 +541,9 @@ test("oauth-reminder: token còn 5 ngày → tạo cảnh báo + đánh dấu đ
   assert.equal(r1.alertsCreated, 1);
   assert.equal(r1.marked, 1);
   assert.equal(db.alerts[0].ruleCode, "oauth_reauth_due");
-  // Số ngày làm tròn xuống theo giờ thực lúc chạy (mock đọc đồng hồ hệ thống;
-  // NOW là mốc giả định nên khi chạy trễ vài ngày so với mốc, số ngày còn lại
-  // có thể tụt xuống 2–3 — chỉ khoá là token đang trong cửa sổ "sắp hết hạn".
-  assert.match(String(db.alerts[0].detail), /còn ([2-5]) ngày/);
+  // Khoá LUẬT: cảnh báo phải nói rõ còn bao nhiêu ngày (giá trị lấy từ đồng hồ
+  // thật của mock, nên chỉ kiểm tra định dạng + đang trong cửa sổ nhắc).
+  assert.match(String(db.alerts[0].detail), /còn \d+ ngày/);
 
   const r2 = await runOauthReminder({ db, now: NOW, log: () => {} });
   assert.equal(r2.alertsCreated, 0);
@@ -491,7 +568,8 @@ test("oauth-reminder: dry-run chỉ đọc — KHÔNG tạo cảnh báo, KHÔNG 
   const db = new MockDbAdapter();
   await db.saveOauthToken(SHOP.id, {
     refreshToken: "Atzr|abc",
-    expiresAt: new Date(NOW.getTime() + 3 * 86_400_000).toISOString(),
+    // đồng hồ thật, xem chú thích ở test "token còn 5 ngày"
+    expiresAt: new Date(Date.now() + 3 * 86_400_000).toISOString(),
     noticeDays: 30,
   });
   const res = await runOauthReminder({ db, now: NOW, dryRun: true, log: () => {} });

@@ -23,6 +23,27 @@
  * TRẦN TỐC ĐỘ: Reporting v3 thoáng hơn SP-API nhưng KHÔNG phải vô hạn. Job dùng
  * `cooldownHours` để quyết định xin report mới hay poll cái đang chờ — và nhờ
  * `connections.report_requests` (0019) mà cron chạy lại KHÔNG xin trùng.
+ *
+ * GROUPBY LẤY TỪ TÀI LIỆU CHÍNH THỨC (đối chiếu 16/09/2026, Amazon Ads Reporting
+ * v3 — advertising.amazon.com/API/docs/en-us/guides/reporting/v3/report-types/*,
+ * kèm Postman collection chính thức amzn/ads-advanced-tools-docs):
+ *
+ *   reportTypeId          groupBy (chỉ những giá trị này)   ghi chú
+ *   ────────────────────  ─────────────────────────────────  ──────────────────
+ *   spCampaigns           campaign | adGroup | campaignPlacement
+ *   spTargeting           targeting
+ *   spSearchTerm          searchTerm
+ *   spAdvertisedProduct   advertiser
+ *   spPurchasedProduct    asin                             ⚠ KHÔNG phải
+ *                                                          "purchasedAsin" —
+ *                                                          giá trị đó là của
+ *                                                          sbPurchasedProduct
+ *                                                          (SPONSORED_BRANDS)
+ *
+ * Cột cũng phải nằm trong danh sách của đúng report type: SP targeting dùng cột
+ * `targeting` cho biểu thức nhắm mục tiêu (KHÔNG có `targetingExpression` — tên
+ * đó thuộc report của Sponsored Display). Sai một giá trị ⇒ Amazon trả 400 và
+ * report đó KHÔNG BAO GIỜ có dữ liệu, im lặng (test worker khoá bảng này lại).
  */
 import type {
   AdsAdGroupRowInput,
@@ -110,7 +131,11 @@ export const ADS_REPORT_SPECS: Record<AdsReportKind, AdsReportSpec> = {
       "keywordId",
       "keyword",
       "matchType",
-      "targetingExpression",
+      // Cột CHÍNH THỨC cho biểu thức nhắm mục tiêu của báo cáo SP targeting là
+      // `targeting`. `targetingExpression` KHÔNG tồn tại ở report này (nó thuộc
+      // report Sponsored Display) — dùng sai tên ⇒ Amazon 400 và A2 trắng mãi.
+      "targeting",
+      "keywordType",
       ...METRIC_COLUMNS_CORE,
     ],
     label: "Hiệu quả theo từ khoá/nhóm sản phẩm (spTargeting)",
@@ -160,7 +185,10 @@ export const ADS_REPORT_SPECS: Record<AdsReportKind, AdsReportSpec> = {
     kind: "purchased-products",
     reportTypeId: "spPurchasedProduct",
     adProduct: "SPONSORED_PRODUCTS",
-    groupBy: ["purchasedAsin"],
+    // groupBy CHÍNH THỨC của spPurchasedProduct là "asin" (KHÔNG phải
+    // "purchasedAsin" — giá trị đó dành cho sbPurchasedProduct của Sponsored
+    // Brands). Sai ⇒ 400 "Invalid groupBy" và report không bao giờ về.
+    groupBy: ["asin"],
     columns: [
       "date",
       "campaignId",

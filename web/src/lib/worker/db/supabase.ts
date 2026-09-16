@@ -65,6 +65,7 @@ import type {
   AdsCampaignRowInput,
   AdsEntityCounts,
   AdsMetricCounts,
+  AdsNegativeKeywordRowInput,
   AdsProductMetricRowInput,
   AdsProfileRow,
   AdsProfileRowInput,
@@ -145,6 +146,7 @@ const RPC_PATHS = {
   upsertAdsCampaigns: "/rest/v1/rpc/vexim_worker_upsert_ads_campaigns",
   upsertAdsAdGroups: "/rest/v1/rpc/vexim_worker_upsert_ads_ad_groups",
   upsertAdsTargets: "/rest/v1/rpc/vexim_worker_upsert_ads_targets",
+  upsertAdsNegativeKeywords: "/rest/v1/rpc/vexim_worker_upsert_ads_negative_keywords",
   upsertAdsCampaignMetrics: "/rest/v1/rpc/vexim_worker_upsert_ads_campaign_metrics",
   upsertAdsTargetMetrics: "/rest/v1/rpc/vexim_worker_upsert_ads_target_metrics",
   upsertAdsSearchTerms: "/rest/v1/rpc/vexim_worker_upsert_ads_search_terms",
@@ -1165,6 +1167,16 @@ export class SupabaseDbAdapter implements DbAdapter {
     rows: AdsTargetRowInput[],
   ): Promise<AdsEntityCounts> {
     const result = await this.request<unknown[]>("POST", RPC_PATHS.upsertAdsTargets, {
+      body: { p_seller: sellerAccountId, p_rows: rows },
+    });
+    return this.adsCounts(result);
+  }
+
+  async upsertAdsNegativeKeywords(
+    sellerAccountId: string,
+    rows: AdsNegativeKeywordRowInput[],
+  ): Promise<AdsEntityCounts> {
+    const result = await this.request<unknown[]>("POST", RPC_PATHS.upsertAdsNegativeKeywords, {
       body: { p_seller: sellerAccountId, p_rows: rows },
     });
     return this.adsCounts(result);

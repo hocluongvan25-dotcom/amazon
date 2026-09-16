@@ -22,6 +22,7 @@
 import type {
   AdsAdGroupRowInput,
   AdsCampaignRowInput,
+  AdsNegativeKeywordRowInput,
   AdsProfileRowInput,
   AdsTargetRowInput,
   AdsEntityCounts,
@@ -41,6 +42,8 @@ export type AdsSyncCounts = {
   campaigns: AdsEntityCounts;
   adGroups: AdsEntityCounts;
   targets: AdsEntityCounts;
+  /** Gương negative keyword đọc từ Amazon (`/sp/negativeKeywords/list`) */
+  negativeKeywords: AdsEntityCounts;
 };
 
 export type AdsSyncShopResult = {
@@ -83,7 +86,76 @@ const emptyCounts = (): AdsSyncCounts => ({
   campaigns: { ...ZERO },
   adGroups: { ...ZERO },
   targets: { ...ZERO },
+  negativeKeywords: { ...ZERO },
 });
+
+/**
+ * Trần số campaign hỏi negative khi Amazon BẮT BUỘC phải có filter. Không đặt trần
+ * thì shop vài trăm campaign sẽ ngốn hết trần 60s của cron (mỗi campaign 1 request)
+ * — thà đối chiếu một phần rồi NÓI RA còn hơn treo job.
+ */
+const NEGATIVE_KEYWORD_FALLBACK_CAMPAIGNS = 25;
+
+/**
+ * Đọc negative keyword ĐANG CÓ trên Amazon về để làm gương.
+ *
+ * Hai nhịp: (1) gọi KHÔNG filter — rẻ nhất, 1 request; (2) nếu Amazon từ chối
+ * (400/415 — bộ Postman chính thức luôn gửi `campaignIdFilter`) thì hỏi lần lượt
+ * theo từng campaign, tối đa NEGATIVE_KEYWORD_FALLBACK_CAMPAIGNS.
+ *
+ * Lỗi ở đây KHÔNG được làm hỏng việc đồng bộ cấu trúc — nhưng cũng KHÔNG được im
+ * lặng: trả `error` để job ghi vào `out.errors` và người vận hành biết gương đang
+ * thiếu (A3 chỉ hiện "đã chặn" cho những gì có trong gương).
+ */
+async function pullNegativeKeywords(
+  client: AdsClient,
+  profileId: string,
+  campaignIds: string[],
+): Promise<{ rows: AdsNegativeKeywordRowInput[]; mode: string; error: string | null }> {
+  const toRow = (k: Awaited<ReturnType<AdsClient["listNegativeKeywords"]>>[number]): AdsNegativeKeywordRowInput => ({
+    keywordId: k.keywordId,
+    campaignId: k.campaignId,
+    adGroupId: k.adGroupId,
+    keywordText: k.keywordText,
+    matchType: k.matchType,
+    state: k.state,
+    adsProfileId: profileId,
+  });
+
+  try {
+    const all = await client.listNegativeKeywords(profileId, {});
+    return { rows: all.map(toRow), mode: "không filter", error: null };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message.split("\n")[0] : String(e);
+    const retryable = e instanceof AdsApiRequestError && e.status >= 400 && e.status < 500;
+    if (!retryable) return { rows: [], mode: "", error: msg };
+    if (campaignIds.length === 0) return { rows: [], mode: "", error: msg };
+
+    const subset = campaignIds.slice(0, NEGATIVE_KEYWORD_FALLBACK_CAMPAIGNS);
+    const rows: AdsNegativeKeywordRowInput[] = [];
+    const failures: string[] = [];
+    for (const campaignId of subset) {
+      try {
+        const part = await client.listNegativeKeywords(profileId, { campaignIds: [campaignId] });
+        rows.push(...part.map(toRow));
+      } catch (inner) {
+        failures.push(`campaign ${campaignId}: ${inner instanceof Error ? inner.message.split("\n")[0] : String(inner)}`);
+      }
+    }
+    if (failures.length > 0 && rows.length === 0) {
+      return { rows: [], mode: "", error: `${msg} · hỏi theo campaign cũng lỗi: ${failures[0]}` };
+    }
+    const capped =
+      campaignIds.length > subset.length
+        ? ` — CHỈ hỏi ${subset.length}/${campaignIds.length} campaign (trần tốc độ), lần sau hỏi tiếp`
+        : "";
+    return {
+      rows,
+      mode: `theo từng campaign${capped}`,
+      error: failures.length > 0 ? `${failures.length} campaign lỗi khi hỏi negative: ${failures[0]}` : null,
+    };
+  }
+}
 
 export async function runAdsEntitySync(opts: AdsSyncOptions): Promise<AdsSyncResult> {
   const log = opts.log ?? (() => {});
@@ -221,9 +293,29 @@ export async function runAdsEntitySync(opts: AdsSyncOptions): Promise<AdsSyncRes
           await opts.db.upsertAdsTargets(shop.id, targetRows),
         );
 
+        // Negative keyword ĐANG CÓ trên Amazon → gương DB. Thiếu bước này thì A3
+        // hiện "chưa chặn" cho từ khoá đã bị chặn từ trước (do người dùng đặt tay
+        // trong Ads console) và người vận hành sẽ đòi chặn lại ⇒ Amazon trả lỗi trùng.
+        const negatives = await pullNegativeKeywords(
+          client,
+          profileId,
+          campaigns.map((c) => c.campaignId),
+        );
+        if (negatives.error) {
+          out.errors.push(`gương negative keyword có thể THIẾU: ${negatives.error}`);
+        }
+        if (negatives.rows.length > 0) {
+          out.counts.negativeKeywords = addCounts(
+            out.counts.negativeKeywords,
+            await opts.db.upsertAdsNegativeKeywords(shop.id, negatives.rows),
+          );
+        }
+
         out.message =
           `profile ${profileId}: campaign ${fmt(out.counts.campaigns)} · ` +
-          `ad group ${fmt(out.counts.adGroups)} · target ${fmt(out.counts.targets)}`;
+          `ad group ${fmt(out.counts.adGroups)} · target ${fmt(out.counts.targets)} · ` +
+          `negative đã có trên Amazon ${fmt(out.counts.negativeKeywords)}` +
+          `${negatives.mode ? ` (${negatives.mode})` : ""}`;
         log(`[ads-sync] OK  ${shop.displayName} · ${out.message}\n`);
       }
 

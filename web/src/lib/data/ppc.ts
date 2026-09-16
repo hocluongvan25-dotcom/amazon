@@ -10,7 +10,8 @@
  * Cả 5 view đều `security_invoker` ⇒ RLS bảng gốc vẫn áp (user chỉ thấy shop được
  * gán qua `iam.can_read_seller_account`).
  *
- * Dữ liệu chỉ có sau khi worker chạy:
+ * Dữ liệu chỉ có sau khi worker chạy (các script nằm trong gói `worker/`, KHÔNG phải
+ * `web/` — đứng ở thư mục gốc repo thì `cd worker` trước):
  *   npm run worker:ads-sync    (profile → campaign → ad group → target)
  *   npm run worker:ads-pull    (5 report metrics qua Reporting API v3)
  * hoặc Vercel Cron /api/cron/report-pull (02:00 inventory · 03:00 reports + ads).

@@ -20,6 +20,7 @@ import { gzipSync } from "node:zlib";
 
 import { MockDbAdapter } from "../../web/src/lib/worker/db/adapter.ts";
 import {
+  ADS_SP_MEDIA_TYPE,
   AdsApiRequestError,
   AdsClient,
   AdsLwaTokenManager,
@@ -431,4 +432,278 @@ test("ads: bảng đăng ký khớp reportTypeId ↔ kind (khoá để cron khô
   assert.equal(isAdsReportKind("search-terms"), true);
   assert.equal(isAdsReportKind("spSearchTerm"), false, "isAdsReportKind nhận KIND nội bộ, không phải reportTypeId");
   assert.equal(Object.keys(ADS_REPORT_SPECS).length, 5);
+});
+
+
+// ============================================================================
+// 6. HỢP ĐỒNG VỚI TÀI LIỆU AMAZON (chống 400 im lặng)
+// ============================================================================
+// Vì sao có mục này: một report sai `groupBy` hoặc sai tên cột thì Amazon trả
+// 400 ngay lúc tạo report — job chỉ ghi `failed`, màn A1/A2/A3 trắng và KHÔNG ai
+// biết vì sao. Ngày 16/09/2026 đã dính ĐÚNG 2 lỗi như vậy:
+//   • spTargeting xin cột `targetingExpression` (tên đó thuộc report Sponsored
+//     Display) → phải là `targeting`
+//   • spPurchasedProduct dùng groupBy `purchasedAsin` (giá trị của
+//     sbPurchasedProduct) → phải là `asin`
+//
+// Nguồn đối chiếu (16/09/2026):
+//   • Reporting v3 report types — advertising.amazon.com/API/docs/en-us/guides/
+//     reporting/v3/report-types/{campaign,targeting,search-term,
+//     advertised-product,purchased-product}
+//   • Postman collection chính thức: github.com/amzn/ads-advanced-tools-docs
+//     (postman/Amazon_Ads_API.postman_collection.json — mẫu spCampaigns:
+//     groupBy ["campaign","adGroup"], columns [impressions, clicks, cost…])
+//   • Đối chiếu chéo với connector đang chạy thật (airbyte source-amazon-ads).
+
+/** groupBy hợp lệ của từng report type — CHỈ những giá trị này. */
+const DOC_GROUP_BY: Record<string, string[]> = {
+  spCampaigns: ["campaign", "adGroup", "campaignPlacement"],
+  spTargeting: ["targeting"],
+  spSearchTerm: ["searchTerm"],
+  spAdvertisedProduct: ["advertiser"],
+  spPurchasedProduct: ["asin"],
+};
+
+/**
+ * Cột hợp lệ theo tài liệu (base metrics + additional metrics của đúng report
+ * type). Muốn thêm cột mới ⇒ thêm vào đây TRƯỚC, kèm link tài liệu trong PR.
+ */
+const DOC_COLUMNS: Record<string, string[]> = {
+  spCampaigns: [
+  "adGroupId", "adGroupName", "adStatus", "addToList", "attributedSalesSameSku14d",
+  "attributedSalesSameSku1d", "attributedSalesSameSku30d", "attributedSalesSameSku7d",
+  "campaignApplicableBudgetRuleId", "campaignApplicableBudgetRuleName",
+  "campaignBiddingStrategy", "campaignBudgetAmount", "campaignBudgetCurrencyCode",
+  "campaignBudgetType", "campaignId", "campaignName", "campaignRuleBasedBudgetAmount",
+  "campaignStatus", "clickThroughRate", "clicks", "cost", "costPerClick", "date",
+  "impressions", "kindleEditionNormalizedPagesRead14d",
+  "kindleEditionNormalizedPagesRoyalties14d", "placementClassification", "purchases14d",
+  "purchases1d", "purchases30d", "purchases7d", "purchasesSameSku14d", "purchasesSameSku1d",
+  "purchasesSameSku30d", "purchasesSameSku7d", "qualifiedBorrows", "royaltyQualifiedBorrows",
+  "sales14d", "sales1d", "sales30d", "sales7d", "spend", "startDate",
+  "topOfSearchImpressionShare", "unitsSoldClicks14d", "unitsSoldClicks1d",
+  "unitsSoldClicks30d", "unitsSoldClicks7d", "unitsSoldSameSku14d", "unitsSoldSameSku1d",
+  "unitsSoldSameSku30d", "unitsSoldSameSku7d",
+  ],
+  spTargeting: [
+  "acosClicks14d", "acosClicks7d", "adGroupId", "adGroupName", "adKeywordStatus", "addToList",
+  "attributedSalesSameSku14d", "attributedSalesSameSku1d", "attributedSalesSameSku30d",
+  "attributedSalesSameSku7d", "campaignBudgetAmount", "campaignBudgetCurrencyCode",
+  "campaignBudgetType", "campaignId", "campaignName", "campaignStatus", "clickThroughRate",
+  "clicks", "cost", "costPerClick", "date", "impressions", "keyword", "keywordBid",
+  "keywordId", "keywordType", "kindleEditionNormalizedPagesRead14d",
+  "kindleEditionNormalizedPagesRoyalties14d", "matchType", "portfolioId", "purchases14d",
+  "purchases1d", "purchases30d", "purchases7d", "purchasesSameSku14d", "purchasesSameSku1d",
+  "purchasesSameSku30d", "purchasesSameSku7d", "qualifiedBorrows", "roasClicks14d",
+  "roasClicks7d", "royaltyQualifiedBorrows", "sales14d", "sales1d", "sales30d", "sales7d",
+  "salesOtherSku7d", "startDate", "targeting", "topOfSearchImpressionShare",
+  "unitsSoldClicks14d", "unitsSoldClicks1d", "unitsSoldClicks30d", "unitsSoldClicks7d",
+  "unitsSoldOtherSku7d", "unitsSoldSameSku14d", "unitsSoldSameSku1d", "unitsSoldSameSku30d",
+  "unitsSoldSameSku7d",
+  ],
+  spSearchTerm: [
+  "acosClicks14d", "acosClicks7d", "adGroupId", "adGroupName", "adKeywordStatus", "addToList",
+  "attributedSalesSameSku14d", "attributedSalesSameSku1d", "attributedSalesSameSku30d",
+  "attributedSalesSameSku7d", "campaignBudgetAmount", "campaignBudgetCurrencyCode",
+  "campaignBudgetType", "campaignId", "campaignName", "campaignStatus", "clickThroughRate",
+  "clicks", "cost", "costPerClick", "date", "impressions", "keyword", "keywordBid",
+  "keywordId", "keywordType", "kindleEditionNormalizedPagesRead14d",
+  "kindleEditionNormalizedPagesRoyalties14d", "matchType", "portfolioId", "purchases14d",
+  "purchases1d", "purchases30d", "purchases7d", "purchasesSameSku14d", "purchasesSameSku1d",
+  "purchasesSameSku30d", "purchasesSameSku7d", "qualifiedBorrows", "roasClicks14d",
+  "roasClicks7d", "royaltyQualifiedBorrows", "sales14d", "sales1d", "sales30d", "sales7d",
+  "salesOtherSku7d", "searchTerm", "startDate", "targeting", "unitsSoldClicks14d",
+  "unitsSoldClicks1d", "unitsSoldClicks30d", "unitsSoldClicks7d", "unitsSoldOtherSku7d",
+  "unitsSoldSameSku14d", "unitsSoldSameSku1d", "unitsSoldSameSku30d", "unitsSoldSameSku7d",
+  ],
+  spAdvertisedProduct: [
+  "acosClicks14d", "acosClicks7d", "adGroupId", "adGroupName", "adId", "addToList",
+  "advertisedAsin", "advertisedSku", "attributedSalesSameSku14d", "attributedSalesSameSku1d",
+  "attributedSalesSameSku30d", "attributedSalesSameSku7d", "campaignBudgetAmount",
+  "campaignBudgetCurrencyCode", "campaignBudgetType", "campaignId", "campaignName",
+  "campaignStatus", "clickThroughRate", "clicks", "cost", "costPerClick", "date",
+  "impressions", "kindleEditionNormalizedPagesRead14d",
+  "kindleEditionNormalizedPagesRoyalties14d", "portfolioId", "purchases14d", "purchases1d",
+  "purchases30d", "purchases7d", "purchasesSameSku14d", "purchasesSameSku1d",
+  "purchasesSameSku30d", "purchasesSameSku7d", "qualifiedBorrows", "roasClicks14d",
+  "roasClicks7d", "royaltyQualifiedBorrows", "sales14d", "sales1d", "sales30d", "sales7d",
+  "salesOtherSku7d", "spend", "startDate", "unitsSoldClicks14d", "unitsSoldClicks1d",
+  "unitsSoldClicks30d", "unitsSoldClicks7d", "unitsSoldOtherSku7d", "unitsSoldSameSku14d",
+  "unitsSoldSameSku1d", "unitsSoldSameSku30d", "unitsSoldSameSku7d",
+  ],
+  spPurchasedProduct: [
+  "adGroupId", "adGroupName", "addToList", "addToListFromClicks", "advertisedAsin",
+  "advertisedSku", "campaignBudgetCurrencyCode", "campaignId", "campaignName", "date",
+  "keyword", "keywordId", "keywordType", "kindleEditionNormalizedPagesRead14d",
+  "kindleEditionNormalizedPagesRoyalties14d", "matchType", "portfolioId", "purchasedAsin",
+  "purchases14d", "purchases1d", "purchases30d", "purchases7d", "purchasesOtherSku14d",
+  "purchasesOtherSku1d", "purchasesOtherSku30d", "purchasesOtherSku7d", "qualifiedBorrows",
+  "qualifiedBorrowsFromClicks", "royaltyQualifiedBorrows", "royaltyQualifiedBorrowsFromClicks",
+  "sales14d", "sales1d", "sales30d", "sales7d", "salesOtherSku14d", "salesOtherSku1d",
+  "salesOtherSku30d", "salesOtherSku7d", "startDate", "unitsSoldClicks14d",
+  "unitsSoldClicks1d", "unitsSoldClicks30d", "unitsSoldClicks7d", "unitsSoldOtherSku14d",
+  "unitsSoldOtherSku1d", "unitsSoldOtherSku30d", "unitsSoldOtherSku7d",
+  ],
+};
+
+test("ads: groupBy của từng report type khớp tài liệu Amazon (spPurchasedProduct = asin)", () => {
+  for (const kind of ADS_ALL_KINDS) {
+    const spec = adsSpecOf(kind);
+    const allowed = DOC_GROUP_BY[spec.reportTypeId];
+    assert.ok(allowed, `thiếu bảng groupBy cho ${spec.reportTypeId}`);
+    for (const g of spec.groupBy) {
+      assert.ok(
+        allowed.includes(g),
+        `${spec.reportTypeId}: groupBy "${g}" không có trong tài liệu (hợp lệ: ${allowed.join(", ")})`,
+      );
+    }
+    assert.ok(spec.groupBy.length > 0, `${spec.reportTypeId}: phải có groupBy`);
+  }
+  // Khoá riêng ca đã từng sai để không ai "sửa lại" thành giá trị cũ
+  assert.deepEqual(adsSpecOf("purchased-products").groupBy, ["asin"]);
+  assert.ok(
+    !adsSpecOf("targeting").columns.includes("targetingExpression"),
+    "spTargeting KHÔNG có cột targetingExpression — cột đúng là \"targeting\"",
+  );
+  assert.ok(adsSpecOf("targeting").columns.includes("targeting"));
+});
+
+test("ads: mọi cột của mọi report đều nằm trong danh sách tài liệu (không xin cột lạ)", () => {
+  for (const kind of ADS_ALL_KINDS) {
+    const spec = adsSpecOf(kind);
+    const allowed = DOC_COLUMNS[spec.reportTypeId];
+    assert.ok(allowed, `thiếu bảng cột cho ${spec.reportTypeId}`);
+    for (const col of spec.columns) {
+      assert.ok(
+        allowed.includes(col),
+        `${spec.reportTypeId}: cột "${col}" không có trong tài liệu Amazon → sẽ 400`,
+      );
+    }
+  }
+});
+
+/* ==========================================================================
+ * 7. MEDIA TYPE của Campaign Management v3 (hợp đồng header)
+ * --------------------------------------------------------------------------
+ * Bộ Postman chính thức (amzn/ads-advanced-tools-docs) đặt CẢ `Accept` lẫn
+ * `Content-Type` = media type phiên bản của TÀI NGUYÊN cho mọi endpoint `/sp/*`.
+ * Gửi `application/json` trần thì Amazon trả 415/400 — lỗi cấu hình header, không
+ * phải lỗi người dùng sửa được, và chỉ lộ ra khi đã bật credential thật.
+ * Test này gọi THẬT từng method với fetch giả và soi header đã gửi.
+ * ========================================================================== */
+
+/** Bảng đối chiếu: method của client → (endpoint, media type Postman chính thức). */
+const DOC_MEDIA_TYPE: { call: string; path: string; media: string }[] = [
+  { call: "listCampaigns", path: "/sp/campaigns/list", media: "application/vnd.spCampaign.v3+json" },
+  { call: "listAdGroups", path: "/sp/adGroups/list", media: "application/vnd.spAdGroup.v3+json" },
+  { call: "listTargets(keywords)", path: "/sp/keywords/list", media: "application/vnd.spKeyword.v3+json" },
+  { call: "listTargets(targets)", path: "/sp/targets/list", media: "application/vnd.spTargetingClause.v3+json" },
+  { call: "updateCampaigns", path: "/sp/campaigns", media: "application/vnd.spCampaign.v3+json" },
+  { call: "updateKeywords", path: "/sp/keywords", media: "application/vnd.spKeyword.v3+json" },
+  { call: "createNegativeKeywords", path: "/sp/negativeKeywords", media: "application/vnd.spNegativeKeyword.v3+json" },
+  { call: "listNegativeKeywords", path: "/sp/negativeKeywords/list", media: "application/vnd.spNegativeKeyword.v3+json" },
+];
+
+test("ads: hằng media type khớp ĐÚNG loại tài nguyên của Postman chính thức", () => {
+  assert.deepEqual(ADS_SP_MEDIA_TYPE, {
+    campaigns: "application/vnd.spCampaign.v3+json",
+    adGroups: "application/vnd.spAdGroup.v3+json",
+    keywords: "application/vnd.spKeyword.v3+json",
+    targets: "application/vnd.spTargetingClause.v3+json",
+    negativeKeywords: "application/vnd.spNegativeKeyword.v3+json",
+  });
+  // Bảng đối chiếu ở test dưới chỉ được dùng những media type có trong hằng số này.
+  const allowed = new Set<string>(Object.values(ADS_SP_MEDIA_TYPE));
+  for (const row of DOC_MEDIA_TYPE) {
+    assert.ok(allowed.has(row.media), `${row.call}: media type ${row.media} không có trong ADS_SP_MEDIA_TYPE`);
+  }
+});
+
+test("ads: mọi lời gọi /sp/* gửi Accept + Content-Type đúng media type tài nguyên", async () => {
+  const { fetchFn, calls } = makeFetch({
+    "auth/o2/token": () => ({ json: { access_token: "t", expires_in: 3600 } }),
+    "/sp/campaigns/list": () => ({ json: { campaigns: [{ campaignId: "C1" }] } }),
+    "/sp/adGroups/list": () => ({ json: { adGroups: [{ adGroupId: "AG1", campaignId: "C1" }] } }),
+    "/sp/keywords/list": () => ({ json: { keywords: [{ keywordId: "K1", adGroupId: "AG1" }] } }),
+    "/sp/targets/list": () => ({ json: { targetingClauses: [{ targetId: "T1", adGroupId: "AG1" }] } }),
+    "/sp/campaigns": () => ({ json: { campaigns: [{ campaignId: "C1", code: "SUCCESS" }] } }),
+    "/sp/keywords": () => ({ json: { keywords: [{ keywordId: "K1", code: "SUCCESS" }] } }),
+    "/sp/negativeKeywords/list": () => ({
+      json: { negativeKeywords: [{ keywordId: "N1", campaignId: "C1", adGroupId: "AG1", keywordText: "fake", matchType: "NEGATIVE_EXACT", state: "ENABLED" }] },
+    }),
+    "/sp/negativeKeywords": () => ({ json: { negativeKeywords: [{ keywordId: "N2", code: "SUCCESS" }] } }),
+  });
+  const ads = client(fetchFn);
+
+  await ads.listCampaigns("P1");
+  await ads.listAdGroups("P1");
+  await ads.listTargets("P1");
+  await ads.updateCampaigns("P1", [{ campaignId: "C1", budget: 20 }]);
+  await ads.updateKeywords("P1", [{ keywordId: "K1", bid: 0.9 }]);
+  await ads.createNegativeKeywords("P1", [{ campaignId: "C1", adGroupId: "AG1", keywordText: "fake", matchType: "NEGATIVE_EXACT" }]);
+  await ads.listNegativeKeywords("P1", { campaignIds: ["C1"] });
+
+  for (const row of DOC_MEDIA_TYPE) {
+    const hit = calls.find((c) => c.url.endsWith(row.path) || c.url.includes(row.path));
+    assert.ok(hit, `${row.call}: chưa gọi ${row.path}`);
+    assert.equal(hit.headers["content-type"], row.media, `${row.path}: Content-Type phải là ${row.media}`);
+    assert.equal(hit.headers["accept"], row.media, `${row.path}: Accept phải là ${row.media}`);
+    // Header bắt buộc khác không được rơi rụng trong lúc thêm media type.
+    assert.equal(hit.headers["amazon-advertising-api-clientid"], "amzn1.application-oa2-client.ads");
+    assert.equal(hit.headers["amazon-advertising-api-scope"], "P1");
+  }
+
+  // `/sp/campaigns` (PUT) phải KHÔNG bị lẫn với `/sp/campaigns/list` (POST).
+  const put = calls.find((c) => c.method === "PUT" && c.url.includes("/sp/campaigns"));
+  assert.ok(put);
+  assert.equal(put.headers["content-type"], "application/vnd.spCampaign.v3+json");
+});
+
+test("ads: body cần filter cho /sp/negativeKeywords/list (theo Postman) — hỏi theo từng campaign", async () => {
+  const { fetchFn, calls } = makeFetch({
+    "auth/o2/token": () => ({ json: { access_token: "t", expires_in: 3600 } }),
+    "/sp/negativeKeywords/list": () => ({ json: { negativeKeywords: [] } }),
+  });
+  const ads = client(fetchFn);
+  await ads.listNegativeKeywords("P1", { campaignIds: ["C-1", "C-2", ""] });
+
+  const listCalls = calls.filter((c) => c.url.includes("/sp/negativeKeywords/list"));
+  assert.equal(listCalls.length, 2, "1 lời gọi cho MỖI campaign có thật; chuỗi rỗng bị bỏ");
+  assert.deepEqual(listCalls[0].body, {
+    maxResults: 100,
+    includeExtendedDataFields: true,
+    campaignIdFilter: { include: ["C-1"] },
+  });
+  assert.deepEqual(listCalls[1].body, {
+    maxResults: 100,
+    includeExtendedDataFields: true,
+    campaignIdFilter: { include: ["C-2"] },
+  });
+});
+
+test("ads: negative list khử trùng theo keywordId và bỏ dòng thiếu khoá (không bịa)", async () => {
+  const { fetchFn } = makeFetch({
+    "auth/o2/token": () => ({ json: { access_token: "t", expires_in: 3600 } }),
+    "/sp/negativeKeywords/list": () => ({
+      json: {
+        negativeKeywords: [
+          { keywordId: "N1", campaignId: "C1", adGroupId: "AG1", keywordText: "fake", matchType: "negative_exact", state: "enabled" },
+          { keywordId: "N1", campaignId: "C1", adGroupId: "AG1", keywordText: "fake", matchType: "NEGATIVE_EXACT", state: "ENABLED" },
+          { keywordId: "", campaignId: "C1", keywordText: "thiếu id" },
+          { keywordId: "N2", campaignId: "C1", adGroupId: "AG1", keywordText: "" },
+        ],
+      },
+    }),
+  });
+  const ads = client(fetchFn);
+  const rows = await ads.listNegativeKeywords("P1", { campaignIds: ["C1"] });
+  assert.equal(rows.length, 1, "trùng keywordId + dòng thiếu id/thiếu chữ đều bị bỏ");
+  assert.deepEqual(rows[0], {
+    keywordId: "N1",
+    campaignId: "C1",
+    adGroupId: "AG1",
+    keywordText: "fake",
+    matchType: "NEGATIVE_EXACT",
+    state: "ENABLED",
+  });
 });

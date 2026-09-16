@@ -32,6 +32,17 @@ export type MarketplaceInfo = {
   currencyCode: string;
   domainName: string;
   isSuspended: boolean;
+  /**
+   * TÊN SHOP của seller TRÊN marketplace này — `storeName` của
+   * MarketplaceParticipation (Sellers API v1), theo mô hình chính thức:
+   *   "storeName": "The name of the seller's store as displayed in the marketplace"
+   *   (bắt buộc có trong response từ changelog SP-API 18/12/2024)
+   *
+   * ⚠️ KHÁC `name` — `name` là tên SÀN ("Amazon.com"), `storeName` mới là tên
+   * gian hàng của mình. Đây chính là field trước đây bị bỏ qua khiến "kéo shop về
+   * mà không hiển thị được tên shop Amazon".
+   */
+  storeName: string | null;
 };
 
 export type WhoamiStep<T = unknown> = {
@@ -83,6 +94,15 @@ export type WhoamiResult = {
   region: string;
   marketplaces: MarketplaceInfo[];
   marketplace: MarketplaceInfo | null;
+  /** Tên shop Amazon (storeName) của marketplace đã chốt — null nếu Amazon không trả */
+  storeName: string | null;
+  /** Tên shop theo TỪNG marketplace (US/CA có thể khác nhau) */
+  storeNames: {
+    marketplaceId: string;
+    countryCode: string;
+    storeName: string | null;
+    isSuspended: boolean;
+  }[];
   inventory: InventoryWhoami | null;
   sellerId: string | null;
   /** ASIN đã dùng cho feesEstimate (inventory hoặc fallback) */
@@ -117,6 +137,17 @@ function httpError(status: number, raw: string): string {
   return `HTTP ${status}: ${clip(raw) || "(empty)"}`;
 }
 
+/**
+ * Chuẩn hoá tên shop: bỏ khoảng trắng thừa, chuỗi rỗng ⇒ null.
+ * Amazon có thể trả `storeName` thiếu (app/token rất cũ) — khi đó null, KHÔNG
+ * được bịa ra tên từ marketplace.name (sẽ ghi "Amazon.com" thành tên shop).
+ */
+export function normalizeStoreName(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const s = raw.replace(/\s+/g, " ").trim();
+  return s.length > 0 ? s : null;
+}
+
 export function parseMarketplaces(data: unknown): MarketplaceInfo[] {
   const payload = unwrapPayload(data);
   const list = Array.isArray(payload)
@@ -136,6 +167,13 @@ export function parseMarketplaces(data: unknown): MarketplaceInfo[] {
     const hasSuspended = part?.hasSuspendedListings;
     const isSuspended =
       hasSuspended === true || isParticipating === false;
+    // storeName nằm ở cấp MarketplaceParticipation (cạnh `marketplace`). Vài
+    // payload sandbox/proxy bọc trong `participation`/`marketplace` → đọc thêm
+    // để không mất tên shop, nhưng vẫn xếp đúng thứ tự ưu tiên theo spec.
+    const storeName =
+      normalizeStoreName(row.storeName) ??
+      normalizeStoreName(part?.storeName) ??
+      normalizeStoreName(mp.storeName);
     out.push({
       id,
       name: typeof mp.name === "string" ? mp.name : id,
@@ -148,9 +186,38 @@ export function parseMarketplaces(data: unknown): MarketplaceInfo[] {
             : "",
       domainName: typeof mp.domainName === "string" ? mp.domainName : "",
       isSuspended,
+      storeName,
     });
   }
   return out;
+}
+
+/**
+ * Tên shop Amazon của một marketplace cụ thể trong danh sách participations.
+ *
+ * Vì sao cần hàm riêng: `storeName` là thuộc tính THEO TỪNG MARKETPLACE — shop
+ * VEXIM bán US + CA có thể đặt tên khác nhau ("VEXIM US" / "VEXIM CA"). Ghi tên
+ * của US cho dòng CA là sai dữ liệu, nên luôn tra theo đúng marketplace id.
+ */
+export function storeNameForMarketplace(
+  list: MarketplaceInfo[],
+  marketplaceId: string,
+): string | null {
+  const id = (marketplaceId ?? "").trim();
+  if (!id) return null;
+  return list.find((m) => m.id === id)?.storeName ?? null;
+}
+
+/** Bảng tên shop theo marketplace — dùng cho UI/diag/log. */
+export function storeNameTable(
+  list: MarketplaceInfo[],
+): { marketplaceId: string; countryCode: string; storeName: string | null; isSuspended: boolean }[] {
+  return list.map((m) => ({
+    marketplaceId: m.id,
+    countryCode: m.countryCode,
+    storeName: m.storeName,
+    isSuspended: m.isSuspended,
+  }));
 }
 
 /**
@@ -226,7 +293,15 @@ function skipped<T>(reason: string): WhoamiStep<T> {
  * Sinh SQL khai shop production — một dòng cho MỖI marketplace đang hoạt động
  * (shop VEXIM bán cả US + CA, thiếu một bên là mất nửa dữ liệu đồng bộ).
  * Idempotent nhờ unique (seller_id, marketplace) + on conflict.
+ *
+ * Kèm luôn `store_name` (tên shop Amazon) khi API trả về — để khai shop xong là
+ * UI hiển thị được tên shop, không phải chờ đồng bộ lại.
  */
+function sqlLiteral(v: string | null): string {
+  if (v === null) return "null";
+  return `'${v.replace(/'/g, "''")}'`;
+}
+
 function sqlHintFor(
   sellerId: string | null,
   marketplaces: MarketplaceInfo[],
@@ -234,24 +309,36 @@ function sqlHintFor(
   if (!sellerId) return null;
   const active = marketplaces.filter((m) => !m.isSuspended);
   if (active.length === 0) return null;
+  const anyStoreName = active.some((m) => m.storeName !== null);
 
   const rows = active
     .map((m, i) => {
       const label = `P${i + 1} · ${m.countryCode || m.id}`;
-      return (
+      const cols =
         `  ((select id from iam.organizations where slug = 'vexim'), ` +
-        `'${sellerId}', '${m.id}', '${label}', 'active', 'production')`
-      );
+        `'${sellerId}', '${m.id}', '${label}', 'active', 'production'` +
+        (anyStoreName ? `, ${sqlLiteral(m.storeName)}` : "") +
+        `)`;
+      return cols;
     })
     .join(",\n");
+
+  const cols = anyStoreName
+    ? `(org_id, seller_id, marketplace, display_name, status, data_source, store_name)`
+    : `(org_id, seller_id, marketplace, display_name, status, data_source)`;
+
+  const conflictUpdate = anyStoreName
+    ? `  set status = 'active', data_source = 'production',\n` +
+      `      store_name = coalesce(excluded.store_name, seller_accounts.store_name);`
+    : `  set status = 'active', data_source = 'production';`;
 
   return (
     `-- Khai shop production vào connections.seller_accounts (idempotent):\n` +
     `insert into connections.seller_accounts\n` +
-    `  (org_id, seller_id, marketplace, display_name, status, data_source)\n` +
+    `  ${cols}\n` +
     `values\n${rows}\n` +
     `on conflict (seller_id, marketplace) do update\n` +
-    `  set status = 'active', data_source = 'production';\n` +
+    `${conflictUpdate}\n` +
     `-- (hoặc chỉ cần chạy migration supabase/migrations/0009_seed_production_shops.sql)`
   );
 }
@@ -432,12 +519,15 @@ export async function discoverSellerIdentity(opts: {
 
   const sellerId = steps.feesEstimate.data?.sellerId ?? null;
   const ok = Boolean(sellerId && marketplace);
+  const storeName = marketplace?.storeName ?? null;
 
   return {
     ok,
     region,
     marketplaces,
     marketplace,
+    storeName,
+    storeNames: storeNameTable(marketplaces),
     inventory,
     sellerId,
     asin,

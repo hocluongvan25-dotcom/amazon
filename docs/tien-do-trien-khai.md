@@ -1,6 +1,6 @@
 # TIẾN ĐỘ TRIỂN KHAI — VEXIM OPS
 
-> Cập nhật: 15/09/2026 (G1+G2 Module 8) · Thứ tự build đã chốt: **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** (21 màn Đợt 1)
+> Cập nhật: 16/09/2026 (Module 5 PPC/Ads: rà soát API + sửa media type v3 + nối gương negative keyword + rà trang A3 Search term · quản lý shop Module 0 · tên shop Amazon) · G1+G2 Module 8 · Thứ tự build đã chốt: **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** (21 màn Đợt 1)
 
 ## Cập nhật 15/09 — MODULE 8 GIAI ĐOẠN 3: tập trung thị trường CR3/CR5/HHI, Amazon 1P, velocity (migration 0027)
 
@@ -1245,3 +1245,234 @@ Code chỉ đọc **5 tên** này (`grep -rn "process.env" web/src`):
 9 biến còn lại trên Vercel (`POSTGRES_*`, `SUPABASE_PUBLISHABLE_KEY`,
 `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`, `SUPABASE_ANON_KEY`,
 `SUPABASE_URL`, `SUPABASE_JWT_SECRET`) **code không đọc** — không gây hại, có thể để nguyên.
+
+---
+
+## 16/09/2026 — Sự cố "kết nối shop rồi mà không thấy tên shop Amazon" (đã xử lý)
+
+**Triệu chứng (chủ dự án báo):** shop kết nối thành công, token lưu bình thường, nhưng không thấy **tên shop Amazon** ở đâu cả — màn Kết nối shop chỉ hiện nhãn vận hành "VEXIM US - Chính".
+
+**Kết luận điều tra: KHÔNG lỗi API.** Theo mô hình chính thức (`amzn/selling-partner-api-models`, `models/sellers-api-model/sellers.json`), `GET /sellers/v1/marketplaceParticipations` trả `storeName` = *"the name of the seller's store as displayed in the marketplace"* (field **bắt buộc**, có từ changelog SP-API **18/12/2024**). Lỗi ở phía mình, 3 chỗ:
+1. `parseMarketplaces()` (web/src/lib/spapi/whoami.ts) chỉ lấy `marketplace.name` (= "Amazon.com", tên **sàn**) và **bỏ qua `storeName`**;
+2. DB `connections.seller_accounts` **không có cột** nào chứa tên shop (`display_name` là nhãn vận hành VEXIM tự đặt);
+3. UI chỉ hiển thị `display_name`.
+
+**Đã sửa:**
+- Đọc `storeName` (giữ theo **từng marketplace**: US ≠ CA) — `whoami.ts`, `/api/amazon/whoami` trả thêm `storeName` + `storeNames[]`, `sqlHint` khai shop kèm `store_name`.
+- Migration **`0031_shop_store_name.sql`**: 3 cột `store_name`/`store_name_source`/`store_name_synced_at`; view `vexim_shops` phơi thêm 2 cột ở cuối; RPC `vexim_worker_set_shop_store_name` + `vexim_worker_list_shop_credentials` (**chỉ service_role**, web vẫn không ghi thẳng được — chốt bằng self-check + test).
+- Module mới `web/src/lib/spapi/shop-name.ts` + `web/src/lib/data/shop-names.ts`: lấy tên bằng **đúng refresh token của shop đó** (token env chỉ dùng khi `seller_id` trùng, mặc định `AQMVYI4HJTI4C`); tên rỗng **không** ghi đè.
+- **Ngay sau khi authorize** (callback OAuth) tự lấy tên shop; màn Kết nối shop có nút **[⤓ Đồng bộ tên shop Amazon]** + hiện "🏪 Tên trên Amazon" từng shop; mọi lỗi (invalid_grant / 403 / 401 / 429 / thiếu storeName / chưa chạy 0031) được dịch thành câu tiếng Việt có việc-cần-làm.
+- `worker/src/amazon/sellers.ts` hết stub — thành client Sellers API thật.
+- 2 test Module 0 cũ (`worker/tests/ads-jobs.test.ts`, phần `oauth-reminder`) dùng mốc thời gian cứng nên **đỏ dần theo lịch** — đã chuyển sang tính theo `Date.now()`.
+
+**Kiểm chứng:** `worker npm test` **481/481 PASS** (thêm 24 test mới: shop-name 9 · shop-name-sync 12 · whoami +3) · `supabase npm test` **TẤT CẢ PASS** (BƯỚC 31 mới kiểm chứng 0031 trên Postgres 18: idempotent, hợp đồng 12 cột view, chặn web, tên rỗng không ghi đè, nhánh nhảy cóc 0024) · `web tsc --noEmit` sạch · `web npm test` 357/357 · `next build` OK.
+
+**VEXIM cần làm:** chạy migration `0031` (SQL Editor) → Redeploy web → mở Module 0 → Kết nối shop → bấm **[⤓ Đồng bộ tên shop Amazon]**.
+Chi tiết đầy đủ + checklist API + SQL kiểm tra: **`docs/bao-cao-loi-ten-shop-amazon.md`**.
+
+---
+
+## 16/09/2026 — Quản lý shop: thêm shop mới · xoá shop cũ · dọn giao diện Module 0 (đã xử lý)
+
+**Yêu cầu (chủ dự án):** (1) 6 shop demo phải biến mất khỏi màn Kết nối shop, (2) thêm nút **[+ Thêm shop mới]** để sau này kết nối cho dễ, (3) giao diện gọn hơn, (4) xoá 3 khối chữ thừa (checklist MD1000/MD9100 · panel "Đề xuất đổi tên thân thiện (thay A1/B1/P1)" kèm SQL · panel "Fix MD9100 — This app can't connect right now").
+
+**Migration `0032_shop_admin.sql`** (idempotent, tự soát ở DO-block cuối):
+1. `connections.seller_accounts.seller_id` **bỏ NOT NULL** — cho phép tạo shop *trước* khi authorize (chưa biết selling partner id).
+2. `vexim_admin_create_shop(p_display_name, p_marketplace, p_seller_id)` — chỉ admin; tên bắt buộc ≤ 120 ký tự, marketplace phải thuộc danh sách thật, seller id rỗng ⇒ NULL / có thì chuẩn hoá HOA và khớp `^[A-Z0-9]{6,32}$`; shop mới **`status='paused'` + `data_source='production'`** (worker chỉ đồng bộ shop `active` ⇒ chưa cắm nhầm vào cron production); trùng `(seller_id, marketplace)` ⇒ trả `created=false` và **giữ nguyên tên cũ**, không nhân bản; ghi audit `shop.create`.
+3. `vexim_admin_delete_shop(p_id, p_force)` — **2 bước an toàn**: `p_force=false` *chỉ đếm* (số bản ghi ở mọi bảng có cột `seller_account_id`, dò động qua `pg_attribute`, kèm cả `iam.audit_logs` và `connections.oauth_tokens`) rồi trả `requires_force=true` + câu giải thích; chỉ `p_force=true` mới xoá thật (51 khoá ngoại `ON DELETE CASCADE`). Audit `shop.delete` ghi **TRƯỚC** khi xoá với `seller_account_id = null` nên **không bị xoá theo shop** — sau khi xoá vẫn còn dấu vết ai xoá shop nào.
+4. `vexim_worker_claim_shop_seller_id(...)` — **chỉ `service_role`** (callback OAuth gọi): shop chưa có seller id ⇒ nhận `selling_partner_id` thật từ Amazon (`adopted=true`); shop đã có ⇒ chỉ so khớp (`matches`), **lệch shop thì callback từ chối lưu token**; đụng `unique_violation` ⇒ trả về shop sẵn có, không tạo bản sao.
+5. **Ẩn 6 shop mock**: `status='revoked'` (giữ nguyên dòng + dữ liệu, chỉ biến khỏi danh sách vận hành) — không xoá dữ liệu demo.
+6. `revoke`/`grant` + self-check: RPC admin chỉ `authenticated` gọi được và bên trong chặn bằng `is_user_admin()`, RPC worker chỉ `service_role`, không policy ghi nào bị hở.
+
+**Web (Vercel Root Directory = `web`):**
+- `web/src/lib/data/admin-rpc.ts` (mới) — gom `adminRpc()` + `supabaseAdminConfig()` + `isMissingRpcError()` dùng chung cho mọi RPC admin; chỉ gọi `/rest/v1/rpc/<fn>` và dịch lỗi PostgREST `{message,hint,details}` sang tiếng Việt.
+- `web/src/lib/data/shop-admin-model.ts` (mới, thuần — dùng chung client & server) + `shop-admin.ts` (mới, server-only): `createShop`, `deleteShop` (2 bước), `claimShopSellerId`, `describeDependents`; lỗi thiếu RPC chỉ đúng file `0032`.
+- `web/src/app/(app)/module0/connect/actions.ts` (mới, `"use server"`): 3 server action, mỗi action qua `guardAdmin()` (có session + `mode === "supabase"` + persona `ceo`).
+- `ShopConnectTable.tsx` viết lại: toolbar **[+ Thêm shop mới]** / **[⤓ Đồng bộ tên shop Amazon]**, mỗi dòng có nút **[Xoá]** mở modal 2 bước (hỏi → liệt kê dữ liệu phụ thuộc → xác nhận), modal thêm shop (tên · marketplace · seller id tuỳ chọn) và modal kết nối.
+- `/api/oauth/amazon/callback` gọi `claimShopSellerId` thay cho PATCH REST cũ (đã bỏ — sai cú pháp PostgREST `schema.table`); shop lệch ⇒ **không lưu token**, báo lỗi tiếng Việt.
+- `page.tsx` bỏ hẳn 3 khối chữ thừa theo yêu cầu (checklist MD1000/MD9100, panel đổi tên thân thiện + SQL, panel Fix MD9100), đổi tên khối "Điều kiện kết nối (biến môi trường)", bỏ jargon MD ở header.
+
+**Kiểm chứng:** `supabase npm test` **TẤT CẢ PASS** (thêm **BƯỚC 32** ~30 assert trên Postgres 18: 0032 chạy sạch + chạy lại vẫn sạch, 6 mock đã revoked mà 2 shop production vẫn active, `seller_id` cho NULL, chặn non-admin, thêm shop ⇒ `paused` và `active_production_shops()` bỏ qua, trùng seller id giữ tên cũ, chặn tên/marketplace/seller id/data_source sai, xoá bước 1 chỉ đếm rồi xoá thật khi `force=true`, audit xoá sống sót, shop có token ⇒ bắt buộc xác nhận + bản đếm nêu `oauth_tokens`, claim seller id đủ 3 nhánh, web **không đọc được** bảng token) · `web tsc --noEmit` sạch · `web npm test` **368/368** (11 test mới `tests/shop-admin.test.ts`) · `next build` OK · `worker npm test` **481/481**.
+
+**VEXIM cần làm:** chạy `0032_shop_admin.sql` trong SQL Editor **SAU `0031`** → Redeploy web → mở **Module 0 → Kết nối shop**: 6 shop demo biến mất, bấm **[+ Thêm shop mới]** để tạo shop rồi mới authorize (callback tự điền seller id thật), shop cũ không dùng nữa thì bấm **[Xoá]** và xác nhận bước 2. **Không cần** tự chạy SQL `update` tay nữa.
+
+---
+
+## 16/09/2026 (lần 2) — Module 1: "không thấy shop nào" + "nhấn vào không nhập được liệu" (đã sửa — KHÔNG cần migration mới)
+
+**Triệu chứng (chủ dự án báo trên preview):** mở `/listing/editor` (và trang danh sách listing) **không thấy shop nào** dù shop đã kết nối; nhấn vào form thì **không nhập được liệu**.
+
+**Nguyên nhân 1 — bộ chọn shop đọc SAI NGUỒN.** `readShopOptions()` (`web/src/lib/listing/editor.ts`) lấy danh sách shop từ **`vexim_listings`**, tức chỉ thấy shop **đã đồng bộ listing**. Shop vừa kết nối chưa có SKU nào ⇒ bộ chọn rỗng, kèm câu thông báo sai hướng *"Chưa có shop nào trong dữ liệu đồng bộ — chạy đồng bộ listing trước khi soạn"*.
+**Sửa:** đọc từ view **`vexim_shops`** (RLS lọc sẵn — cùng nguồn với màn Kết nối shop và màn giá vốn), lùi cột an toàn khi deployment chưa chạy 0024/0031 (V3 `store_name` → V2 `display_name` → V1), ẩn shop `revoked` (shop demo/đã gỡ), **giữ shop `paused`** (shop vừa tạo bằng [+ Thêm shop mới] vẫn chọn được để soạn bản nháp đầu tiên).
+
+**Nguyên nhân 2 — quyền ghi ở UI THIẾU NHÁNH super_admin.** `readEditorActor()` chỉ coi `iam.assignments.can_write = true` là có quyền ghi. Shop kết nối **sau** migration 0007 không có dòng assignment nào (0007 chỉ gán cho các shop tồn tại lúc đó, còn `vexim_admin_set_user_access` **bỏ qua super_admin** vì "super_admin không cần gán shop") ⇒ super_admin mở form thấy **mọi ô bị khoá, nút Lưu mờ** — đúng hiện tượng "không cho nhập liệu" — dù DB (`iam.can_write_seller_account`) vẫn cho ghi.
+**Sửa:** `resolveEditorAccess()` mirror **đúng** luật DB (tài khoản bị khoá ⇒ mất quyền thật; `super_admin` ⇒ ghi được mọi shop; còn lại cần `iam.assignments.can_write` trên đúng shop đó) + **banner nói rõ lý do** và cách cấp quyền (Module 0 → Người dùng → Quyền → chọn Dept Lead/Operator + tick shop) thay vì chỉ có tooltip trên nút bị mờ.
+
+**Kèm theo (cùng gốc "tưởng mất shop"):**
+- Trang `/listing`, `/listing/list`, `/listing/queue`: khi chưa có dòng nào trong `vexim_listings`, hiện khung **"Chưa có listing nào để hiển thị"** kèm **danh sách shop ĐÃ KẾT NỐI** (đọc từ `vexim_shops`) + việc cần làm (`listings:sync` / chờ cron) — thay cho câu "Không có SKU nào khớp bộ lọc." gây hiểu sai là mất shop.
+- Bộ chọn shop hiện nhãn vận hành kèm tên Amazon khi đã có: `VEXIM US - Chính · 🏪 Vexim Global`.
+- Lỗi đọc danh sách shop **không còn làm trắng** cả trang danh sách bản nháp (trước đây `Promise.all` ⇒ một lỗi là sập trang).
+
+**Kiểm chứng:** `web npm test` **379/379** (11 test mới `tests/listing-editor-access.test.ts`) · `web tsc --noEmit` sạch · `next build` OK · `supabase npm test` **TẤT CẢ PASS** (không đổi DB) · `worker npm test` **481/481**.
+
+**VEXIM cần làm:** chỉ cần **Redeploy web** (không có migration mới). Nếu vẫn không thấy shop: kiểm tra tài khoản đăng nhập có vai trò `super_admin` chưa — tài khoản không phải super_admin mà không được gán shop sẽ chỉ thấy shop trong tổ chức của mình (RLS `iam.can_read_seller_account`), và form sẽ hiện banner nói rõ.
+
+---
+
+## 16/09/2026 (lần 4) — Module 5 (Quảng cáo/PPC): rà soát Amazon Ads API, sửa 2 lỗi hợp đồng, màn hình tự chẩn đoán vì sao trống
+
+**Yêu cầu (chủ dự án):** "Quảng cáo (PPC) — Chưa có dữ liệu Amazon Ads. Team tiếp tục đọc tài liệu API của Ads Amazon và repo chính thức (https://github.com/amzn/ads-advanced-tools-docs) để phân tích xem module này đã kết nối, hoạt động đúng chưa?"
+
+**Kết luận rà soát:** tầng HTTP `web/src/lib/worker/amazon/ads.ts` **khớp Postman chính thức** (token
+`api.amazon.com/auth/o2/token`, 3 header `Bearer` + `Amazon-Advertising-API-ClientId` +
+`Amazon-Advertising-API-Scope`, `/sp/*/list`, `/reporting/reports` v3 bất đồng bộ + tải file GZIP,
+host theo vùng NA/EU/FE, phân loại 401/429) — **không sửa**. Màn trống là vì **thiếu credential Ads
+trên Vercel** (`AMAZON_ADS_CLIENT_ID/_SECRET/_REFRESH_TOKEN`) ⇒ `cfg.ads = null` ⇒ mọi job Ads trả
+`skipped` (đúng thiết kế, không phải lỗi) và **chưa từng** có lần chạy nào.
+
+**2 lỗi thật đã sửa** trong `web/src/lib/worker/ads/registry.ts` (sai hợp đồng API ⇒ sẽ ăn 400 khi bật credential):
+- `spPurchasedProduct`: `groupBy ["purchasedAsin"]` → **`["asin"]`** (`purchasedAsin` là của Sponsored Brands; issue #324 + manifest Airbyte dùng `asin`).
+- `spTargeting`: cột `"targetingExpression"` → **`"targeting"`** và thêm `"keywordType"` (SP không có `targetingExpression`). Bảng groupBy chuẩn đã ghi ngay trong doc block của file kèm nguồn.
+
+**Chống tái phát:** mục 6 mới trong `worker/tests/ads-engine.test.ts` — "HỢP ĐỒNG VỚI TÀI LIỆU AMAZON"
+(`DOC_GROUP_BY` cho 5 `reportTypeId`, `DOC_COLUMNS` danh sách cột hợp lệ sinh từ tài liệu). Bằng chứng
+test có giá trị: bình thường **19/19 pass**; khi **tiêm lại 2 lỗi cũ** → **17 pass / 2 fail** đúng 2 test
+mới, sau đó khôi phục bản gốc (grep lại `groupBy: ["asin"]`).
+
+**Màn `/ppc` tự chẩn đoán 5 cổng** (`web/src/lib/data/ads-health.ts` + `ads-health-model.ts` thuần,
+`web/src/components/ppc/AdsDiagnostics.tsx`): credential → profile Ads → cấu trúc campaign → metrics →
+lần xin report gần nhất. Cổng trước chưa mở thì cổng sau ở trạng thái "chờ" (không dọa bằng lỗi dây
+chuyền); lỗi Amazon hiện **nguyên văn** từ `vexim_report_requests.last_error` (đây chính là chỗ phơi ra
+lỗi 400 groupBy/cột trước đây bị chôn trong log cron). Credential chỉ đọc **có/không**, không bao giờ
+trả giá trị token. Thêm nút **"▶ Chạy đồng bộ Amazon Ads ngay"** (`web/src/app/(app)/ppc/actions.ts`,
+chỉ `ceo`/`op_ppc`, chế độ Supabase — chạy sync→pull ngay, in nhật ký) và `maxDuration = 60`.
+
+**Bật dữ liệu thật (3 bước):** (1) thêm 3 biến `AMAZON_ADS_*` (+`AMAZON_ADS_REGION`) cho Production +
+Preview trên Vercel rồi **Redeploy** — Ads là app đăng ký **riêng**, không dùng chung app SP-API;
+(2) bấm nút chạy ngay trên `/ppc`, hoặc `npm run worker:ads-sync` / `worker:ads-pull` trong `web/`,
+hoặc chờ cron `/api/cron/report-pull`; (3) report v3 **bất đồng bộ** — lần đầu có thể `PENDING`, bấm lại
+sau 1–2 phút (job có resume + cooldown 4 h nên không xin trùng).
+
+**Kiểm chứng:** `web npm test` **390/390** (+9 test `web/tests/ads-health.test.ts`) · `tsc` sạch ·
+`next build` OK (`/ppc` 1.07 kB) · `worker` **483/483** · `supabase` TẤT CẢ PASS · test tiêm lỗi đã chạy.
+**Báo cáo đầy đủ:** `docs/bao-cao-module-ppc-ads.md` (đối chiếu từng hạng mục với Postman, chuỗi nhân
+quả màn trống, 5 cổng, 3 bước bật thật, giới hạn "chưa chứng minh bằng call API thật vì chưa có credential").
+
+## 16/09/2026 (lần 3) — Trình soạn listing: ảnh xem trước ngay cạnh ô nhập link ảnh
+
+**Yêu cầu (chủ dự án):** ở khối Hình ảnh (Ảnh chính * + Ảnh 1..8), khi dán link vào ô thì **ảnh nhỏ hiện ngay bên phải ô nhập đó** để biết đã dán đúng ảnh chưa.
+
+**Đã làm (thuần giao diện, không cần migration):**
+- Mỗi ô link ảnh giờ có thumbnail **48×48** ở bên phải: dán link `https://…` là ảnh hiện ngay; bấm vào ảnh mở ảnh gốc ở tab mới (kèm tooltip URL đầy đủ).
+- Chống nháy khi đang gõ: chờ 0,5 giây sau khi ngừng gõ/paste mới thử tải — gõ nửa link không hiện chip lỗi.
+- Link sai định dạng → chip đỏ **URL?**; link https nhưng tải lỗi (404 / chặn hotlink / không phải file ảnh) → chip vàng **lỗi** kèm tooltip, **không** hiện icon ảnh vỡ của trình duyệt. Ô trống thì không hiện gì (giữ form gọn).
+- Luật URL dùng CHUNG một chỗ: `isHttpsImageUrl()` trong `editor-model.ts` — cổng validation gửi Amazon và ảnh xem trước không thể lệch nhau.
+
+**Kiểm chứng:** `web npm test` **381/381** (thêm 2 test: luật URL https + lưu/xoá link theo từng ô) · `tsc` sạch · `next build` OK · `supabase npm test` TẤT CẢ PASS · `worker` 481/481. Preview demo (port 3000) đã dựng sẵn để thử: bản nháp demo có sẵn 1 link ở “Ảnh chính” nên thumbnail hiện ngay khi mở trang.
+
+## 16/09/2026 (lần 5) — Module 5: rà trang "A3 — Search term & Negative keyword" (`/ppc/search-terms`)
+
+**Yêu cầu (chủ dự án):** gửi link `…/ppc/search-terms` + *"Vậy còn trang này, xem có bị thiếu hay sai gì không?"*
+
+**Cách rà:** đọc luồng dữ liệu của trang từ đầu tới cuối (`page.tsx` → `SearchTermsBoard.tsx` →
+`ppc-model.ts` → view `vexim_ads_search_terms` ở migration 0020 §19.4 / 0021 §8.5 → RPC
+`vexim_worker_record_ads_change`), đối chiếu lại với 2 collection Postman chính thức trong
+`amzn/ads-advanced-tools-docs` và manifest connector Airbyte đã chạy thật. (Link Vercel của dự án có
+**Deployment Protection** nên không mở trực tiếp được — rà bằng bản build trong repo.)
+
+**Phát hiện & sửa — tầng gọi Amazon (2 lỗi thật, đây là phần quan trọng):**
+
+1. **Thiếu media type v3 ở MỌI lời gọi `/sp/*`** (đã sửa). Amazon Ads API v3 không dùng
+   `application/json`: mỗi tài nguyên một media type riêng, gửi ở cả `Accept` lẫn `Content-Type`
+   (`application/vnd.spCampaign.v3+json`, `spAdGroup.v3`, `spKeyword.v3`, `spTargetingClause.v3`,
+   `spNegativeKeyword.v3`; riêng `/sp/campaigns/budget/usage` chỉ Accept `…spcampaignbudgetusage.v1+json`).
+   Thêm hằng `ADS_SP_MEDIA_TYPE` + `spOpts()` và truyền vào **7 call site**. ⇒ **Đính chính báo cáo (lần 4):**
+   câu "tầng HTTP khớp Postman, không sửa gì" đúng phần đường dẫn/body/auth nhưng **sai ở media type**.
+2. **Gương negative keyword chưa được nối vào job sync** (đã nối). `vexim_worker_record_ads_change` có ghi
+   gương khi change là `add_negative_*`, nhưng `ads-sync` **chưa bao giờ kéo ngược** danh sách negative của
+   Amazon về ⇒ negative đã chặn thật vẫn hiện như "chưa chặn" ⇒ dễ chặn lần hai. Thêm `pullNegativeKeywords()`:
+   hỏi gộp theo profile, nếu Amazon trả 400/415 thì hỏi **từng campaign** (trần 25/N, **ghi rõ trong message**),
+   lỗi luôn vào `out.errors` với tiền tố "gương negative keyword có thể THIẾU", bộ đếm mới `negativeKeywords`.
+
+**Phát hiện & sửa — tầng giao diện / ngữ cảnh vận hành (6 chỗ thiếu + 1 chỗ chống thao tác trùng):**
+
+- Bảng rỗng ⇒ hiện **panel chẩn đoán 5 cổng** + nút *"▶ Chạy đồng bộ Amazon Ads ngay"* (trước chỉ có câu
+  "Chưa có dữ liệu Amazon Ads", không nói tắc ở đâu).
+- **Băng cảnh báo dữ liệu CŨ** khi ngày mới nhất > 2 ngày (`A3_STALE_DAYS`) — trước đây dữ liệu tuần trước vẫn
+  hiện y như mới.
+- Panel **"Nạp dữ liệu search term bằng cách nào"** (4 cách), có ghi rõ **`cd worker`**.
+- **Nhãn tên shop** trên từng dòng khi tài khoản thấy > 1 shop.
+- Cảnh báo khi bảng bị **cắt ở trần 3.000 dòng** (`ROW_LIMIT` + prop `truncated`).
+- Cảnh báo **"chặn oan"**: `sales_14d > 0` mà `purchases_7d = 0`.
+- **Chống chặn trùng (mới):** duyệt gợi ý xong thì `pending_suggestion_id` biến mất, nhưng gương negative chỉ có
+  sau khi worker ghi **thành công** ⇒ khoảng giữa đó người vận hành rất dễ bấm "Chặn" lần nữa và ăn lỗi trùng của
+  Amazon. Cột *Thao tác* giờ khoá theo yêu cầu đang bay: hiện **chip trạng thái** + câu *"Đã có yêu cầu chặn cho
+  term này — KHÔNG tạo thêm để Amazon không báo trùng."*; nếu lần ghi trước **LỖI** thì hiện **nguyên văn lỗi**
+  + nút *"Thử chặn lại (Exact)"*. Nếu **không đọc được** hàng đợi thì bảng **không bị trắng**: hiện băng đỏ nói rõ lớp
+  chống trùng đang tắt, phải tải lại + xem A4 trước khi bấm chặn. Con số *"N dòng đáng xem chưa ai làm gì"* ở tiêu đề cũng
+  trừ dòng đã có yêu cầu đang bay (`a3ReadyToBlock(rows, filter, inFlight)`). **DEMO MODE có đủ 6 trạng thái hiện sẵn**
+  (chờ duyệt · đã chặn · cảnh báo chặn oan · đã duyệt chờ ghi · lần ghi trước LỖI + nút thử lại · form chặn tay).
+  Luật thuần ở `ppc-model.ts`: `a3ChangeKey` · `a3InFlightMap` ·
+  `isOpenChangeStatus` · `a3HasOpenChange` · `a3FailedChange`; trang đọc `readAdsChanges` với
+  `statuses: ["pending_approval","approved","applying","failed"]` (phải có `failed` vì `is_open` chỉ tính 3
+  trạng thái đang bay ⇒ ca "đã lỗi, cần thử lại" sẽ bị ẩn mất).
+
+**Soát lại toàn bộ cột/`groupBy` 5 report — 5/5 HỢP LỆ** (đối chiếu từng tên cột): `spCampaigns` [campaign] 18/49 ·
+`spTargeting` [targeting] 20/60 · `spSearchTerm` [searchTerm] 19/60 · `spAdvertisedProduct` [advertiser] 17/56 ·
+`spPurchasedProduct` [asin] 21/48. Ghi chú: report `spAdvertisedProduct` cần **Advertiser/Marketplace ID** đúng —
+`PENDING` mãi thì **kiểm profile ID trước**, đừng đổi `groupBy` (issues #324/#338 chính thức).
+
+**Sau khi giao, chủ dự án báo hai màn `/ppc` và `/ppc/search-terms` "giống hệt nhau"** — đúng, vì khi chưa có dữ liệu
+cả hai đổ cùng một panel chẩn đoán 5 cổng. Đã tách: A1 giữ vai "nhà của chẩn đoán" (đủ 5 cổng + trạng thái report +
+nút chạy ngay), A3 chỉ nói **tắc ở cổng nào** + **vì sao riêng màn search term trống** (5 ca, kể cả ca "đã có keyword
+nhưng report `spSearchTerm` còn PENDING") + 4 cách nạp dữ liệu; hai màn có dòng điều hướng chéo. Helper thuần mới:
+`stuckGate()` · `a3EmptyReason()` trong `ads-health-model.ts`.
+
+**Kiểm chứng:** `web npm test` **405/405** (`ppc-model` 23 → **30**, `ads-health` 9 → **11**) · `tsc` sạch · `next build` OK
+(`/ppc/search-terms` 5.02 kB) · `worker npm test` **490/490** (`ads-engine` 23/23 có mục 7 media type + negative,
+`ads-jobs` 22/22) · `supabase npm test` TẤT CẢ PASS · chạy bản build mới: `/ppc/search-terms` **HTTP 200**,
+hiện *"dữ liệu tới 2026-09-15 · cách đây 1 ngày"*.
+
+**VEXIM cần làm:** không có migration mới (dùng lại RPC `vexim_worker_upsert_ads_negative_keywords` đã có ở 0021).
+Chỉ cần **Redeploy web** để lấy bản sửa media type + gương negative; sau đó chạy đồng bộ một lần
+(trên `/ppc` bấm nút, hoặc `cd worker && npm run worker:ads-sync` rồi `npm run worker:ads-pull`).
+Báo cáo đầy đủ: `docs/bao-cao-module-ppc-ads.md` mục 8.
+
+## 16/09/2026 (lần 6) — Module 4 (Đơn hàng): bộ chọn shop thật + nối đúng Orders API v0 (`/orders`)
+
+**Câu hỏi:** kiểm tra trang `/orders` · kết nối API đã chuẩn chưa · vì sao không chọn được shop đã kéo về (hay là mặc định?).
+
+**Trả lời gọn:** chưa chuẩn — **không phải sai tham số mà là THIẾU tầng gọi**: repo chưa từng gọi `GET /orders/v0/orders`
+(chỉ có tài liệu mô tả trong `jobs/orders-sync.job.ts`, còn `getOrders` chỉ nằm trong comment); và bộ chọn shop trên
+Topbar là **control giả** (một `<option>{persona.shop}</option>`, không `onChange`, không đọc DB) nên *không phải mặc định* —
+nó chưa bao giờ nối vào đâu. Đã sửa cả hai.
+
+**Đã làm (không cần migration mới):**
+
+- **Bộ chọn phạm vi shop dùng chung**: `shop-scope-model.ts` (thuần, có test) + `shop-scope.ts` (server: đọc `vexim_shops`
+  lùi cột V3→V2, RLS lọc sẵn) + `ShopScopeSelect.tsx` (select THẬT, ghi cookie `shop_scope`, `router.refresh()`); nối
+  `(app)/layout.tsx` → `AppShell` → `Topbar`. Luật: `?shop=` thắng cookie, id lạ/đã thu hồi ⇒ bỏ qua, không chọn gì = tất cả.
+  Select **tổ chức** (cũng là control tĩnh) đổi thành chữ.
+- **Lọc theo shop ở tầng DB**: `readOperations(screen, filter?, shopId?)` thêm `eq("seller_account_id", …)` ⇒ mọi màn
+  đơn hàng/tài chính đọc đúng shop đang chọn; tiêu đề ghi rõ `phạm vi: shop X | tất cả shop (N)`.
+- **Nối Orders API v0 (tầng delta)**: `domain/orders-api.ts` (thuần) · `amazon/orders.ts` (`OrdersClient` + `TokenBucket`
+  theo trần Amazon) · `run-orders-sync.ts` (mỗi shop → getOrders → getOrderItems → `upsertOrders`/`order_daily`/alert FBM)
+  · cron `/api/cron/orders-sync` + gộp vào `report-pull` (cờ `?orders=0`, không thêm cron thứ tư) · nút **“▶ Đồng bộ đơn
+  hàng ngay”** trên 3 màn đơn hàng · CLI `cd worker && npm run worker:orders-sync -- --days=7` (kèm `--report=` cho tầng report).
+- **Chuyển code thật vào `web/`** cho 4 file orders (domain · 2 parser · job) theo đúng quy ước repo (Vercel Root Directory =
+  `web`); `worker/src/**` còn **shim** re-export ⇒ `worker npm test` 490/490 vẫn xanh.
+- **Giữ bất biến không PII**: 3 endpoint `/address`, `/buyerInfo`, `/orderItems/buyerInfo` bị **chặn ở tầng request**;
+  hệ quả `ship_state`/`ship_country` để trống ở đường API (chỉ tầng report mới có) — ghi rõ trong code + báo cáo.
+- **Trần 60s của Vercel**: `getOrderItems` 0.5 rps ⇒ runner dùng **ngân sách thời gian** `maxItemMs` (cron 8s · nút 15s),
+  **đơn mới nhất trước**, đơn chưa kịp lấy item vẫn ghi và **báo rõ số bị hoãn** (`deferred`).
+- **Panel rỗng có hướng dẫn**: khi 0 dòng, màn đơn hàng nói rõ cách nạp dữ liệu (cron/nút/CLI/credential/shop production).
+
+**Kiểm chứng:** `web npm test` **431/431** (+6 `shop-scope`, +20 `orders-api`) · `tsc` sạch · `next build` OK
+(`/api/cron/orders-sync` có trong bảng route) · `worker npm test` **490/490** · SSR `/orders`, `/orders/fbm`,
+`/orders/returns` **HTTP 200** với select phạm vi shop (DEMO: disabled + nói rõ lý do).
+
+**VEXIM cần làm:** thêm `AMAZON_LWA_*` + `SUPABASE_SERVICE_ROLE_KEY` (nếu chưa), **Redeploy**, shop phải
+`active` + `data_source='production'`, rồi bấm “Đồng bộ đơn hàng ngay” (hoặc chờ cron 03:00 UTC). **Chưa làm:**
+tầng notification `ORDER_CHANGE` (cần SQS) và ReportKind cho 2 loại report đơn hàng trong registry web.
+
+Báo cáo đầy đủ: `docs/bao-cao-don-hang-orders.md`.

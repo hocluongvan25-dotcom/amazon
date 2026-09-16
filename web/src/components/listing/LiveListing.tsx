@@ -3,6 +3,8 @@
  */
 import { Chip, KpiCard, KpiGrid, NoAccess, PageHeader, Panel, tableCls } from "@/components/ui";
 import { readListings, readListingQueue } from "@/lib/data/listing";
+import { shopOptionLabel } from "@/lib/listing/editor-access.ts";
+import { readShopOptions } from "@/lib/listing/editor";
 import {
   computeListingKpis,
   formatPrice,
@@ -53,6 +55,49 @@ function isNotSellable(r: ListingListRow): boolean {
     r.status === "STRANDED" ||
     r.status === "SUPPRESSED" ||
     r.status === "UNKNOWN"
+  );
+}
+
+/**
+ * Khung "chưa có listing nào đồng bộ" — dùng chung cho /listing, /listing/list.
+ *
+ * Vì sao cần: shop ĐÃ KẾT NỐI (có dòng trong `vexim_shops`) vẫn có thể chưa có
+ * SKU nào trong `vexim_listings` (chưa chạy listings:sync). Màn hình cũ chỉ hiện
+ * "Không có SKU nào khớp bộ lọc." khiến tưởng mất shop; ở đây nói thẳng: shop còn
+ * nguyên, chỉ thiếu bước đồng bộ — kèm tên shop để đối chiếu ngay.
+ */
+async function NoListingsYetPanel() {
+  let shops: Awaited<ReturnType<typeof readShopOptions>> = [];
+  try {
+    shops = await readShopOptions();
+  } catch {
+    shops = [];
+  }
+
+  return (
+    <Panel
+      title="Chưa có listing nào để hiển thị"
+      hint={shops.length ? `${shops.length} shop đã kết nối` : "chưa có shop nào"}
+    >
+      {shops.length > 0 ? (
+        <>
+          <p className="text-[13px] text-muted">
+            <b>Shop đã kết nối:</b> {shops.map((s) => shopOptionLabel(s)).join(" · ")}
+          </p>
+          <p className="mt-1.5 text-[13px] text-muted">
+            Danh sách shop đọc từ <code>vexim_shops</code> (shop đã kết nối luôn hiện ở đây), nhưng chưa có dòng
+            nào trong <code>vexim_listings</code> — tức <b>chưa đồng bộ listing</b>, không phải mất shop. Chạy đồng
+            bộ của worker (<code>listings:sync</code>) hoặc chờ cron; xong thì SKU hiện ở đây và bộ lọc “Shop …”
+            cũng có dữ liệu.
+          </p>
+        </>
+      ) : (
+        <p className="text-[13px] text-muted">
+          Chưa có shop nào bạn có quyền xem. Vào <b>Module 0 → Kết nối shop</b>, bấm <b>+ Thêm shop mới</b> rồi
+          authorize với Amazon.
+        </p>
+      )}
+    </Panel>
   );
 }
 
@@ -108,6 +153,7 @@ export async function LiveListingOverview() {
         </Panel>
       ) : (
         <>
+          {allRows.length === 0 ? <NoListingsYetPanel /> : null}
           <KpiGrid>
             {kpis.map((k) => (
               <KpiCard key={k.label} {...k} />
@@ -311,6 +357,7 @@ export async function LiveListingList({
         </Panel>
       ) : (
         <>
+          {allRows.length === 0 ? <NoListingsYetPanel /> : null}
           <Panel title={`${rows.length} SKU`} hint="issues đếm từ JSONB">
             <table className={tableCls.table}>
               <thead>
@@ -413,7 +460,9 @@ export async function LiveListingList({
                 {rows.length === 0 ? (
                   <tr>
                     <td colSpan={10} className={`${tableCls.td} text-center text-soft`}>
-                      Không có SKU nào khớp bộ lọc.
+                      {allRows.length === 0
+                        ? "Chưa có listing nào trong dữ liệu đã đồng bộ — xem khung ngay trên."
+                        : "Không có SKU nào khớp bộ lọc."}
                     </td>
                   </tr>
                 ) : null}
@@ -608,6 +657,7 @@ export async function LiveListingDetail({ sku }: { sku: string }) {
             </table>
           )}
         </Panel>
+        <NoListingsYetPanel />
         <Panel title="Phạm vi bản đọc" hint="0016 đã ghi: issues, product type, tồn, stranded, enforcement">
           <ul className="list-disc space-y-1.5 pl-5 text-[13px] text-muted">
             <li>
@@ -707,7 +757,11 @@ export async function LiveListingQueue() {
           </div>
           <Panel title="Queue xử lý" hint="ưu tiên cao trước · trong cùng mức xếp theo tiền đang mất">
             {queueItems.length === 0 ? (
-              <p className="text-[13px] text-muted">Không có listing nào có vấn đề trong DB.</p>
+              <p className="text-[13px] text-muted">
+                Không có SKU nào cần xử lý trong dữ liệu đã đồng bộ. Nếu vừa kết nối shop mà bảng
+                còn trắng, xem khung “Chưa có listing nào để hiển thị” bên dưới — shop vẫn còn,
+                chỉ thiếu bước đồng bộ listing.
+              </p>
             ) : (
               <table className={tableCls.table}>
                 <thead>

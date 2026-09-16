@@ -1,5 +1,6 @@
 import { PageHeader, Panel } from "@/components/ui";
 import { readOperations } from "@/lib/data/operations";
+import { resolveShopScope } from "@/lib/data/shop-scope";
 import {
   breakdownRows,
   deadline,
@@ -11,6 +12,7 @@ import {
   type Screen,
 } from "@/lib/data/operations-model";
 import { DataTable } from "./DataTable";
+import { OrdersSyncNowButton } from "./OrdersSyncNowButton";
 
 export async function LiveOperations({
   screen,
@@ -27,11 +29,16 @@ export async function LiveOperations({
   let failed = false;
   const now = Date.now();
   const invalidId = detail && !validId(id);
+  // PHẠM VI SHOP do bộ chọn trên Topbar (cookie `shop_scope`, URL `?shop=` nếu có).
+  // Trước 16/09 màn này KHÔNG lọc theo shop nào cả nên không có cách nào xem riêng
+  // một shop dù bộ chọn có tồn tại.
+  const scope = await resolveShopScope();
   if (!invalidId) {
     try {
       rows = await readOperations(
         screen,
         detail ? { column: "id", value: id! } : undefined,
+        scope.shopId,
       );
       if (detail && rows.length) {
         childRows = await readOperations(
@@ -70,6 +77,10 @@ export async function LiveOperations({
     }
   }
   const spec = screens[screen];
+  /** Dòng mô tả phạm vi — số liệu trên bảng phải luôn đọc được là của shop nào. */
+  const scopeLabel = scope.shop
+    ? `shop ${scope.shop.name}`
+    : `tất cả shop (${scope.shops.length})`;
   const nav = finance
     ? [
         ["/finance/settlements", "Kỳ settlement"],
@@ -84,7 +95,7 @@ export async function LiveOperations({
     <>
       <PageHeader
         title={`${spec.title}${detail ? " · Chi tiết" : ""}`}
-        sub="SUPABASE · theo phạm vi RLS của người đăng nhập"
+        sub={`SUPABASE · phạm vi: ${scopeLabel} · trong RLS của người đăng nhập`}
         desc={`Chỉ đọc · tải lúc ${new Date(now).toISOString()} · dữ liệu DB có thể chưa được đồng bộ Amazon mới nhất. Không hiển thị PII người mua.`}
       />
       <nav className="mb-4 flex gap-4 text-sm text-accent-ink">
@@ -95,6 +106,7 @@ export async function LiveOperations({
         ))}
         <a href="">Tải lại dữ liệu</a>
       </nav>
+      {!finance && !detail ? <OrdersSyncNowButton /> : null}
       {failed ? (
         <Panel title="Không tải được dữ liệu">
           <p role="alert">
@@ -102,6 +114,35 @@ export async function LiveOperations({
             RLS và phiên đăng nhập rồi tải lại. Không thay thế bằng dữ liệu
             demo.
           </p>
+        </Panel>
+      ) : !detail && rows.length === 0 ? (
+        <Panel
+          title={`Chưa có dòng nào cho ${scopeLabel}`}
+          hint="bảng rỗng KHÔNG có nghĩa là không có đơn trên Amazon"
+        >
+          <ul className="flex list-disc flex-col gap-1 pl-5 text-[13px] text-soft">
+            <li>
+              Dữ liệu đơn hàng chỉ có sau khi job đồng bộ chạy: bấm nút{" "}
+              <b>“▶ Đồng bộ đơn hàng ngay”</b> ở trên, hoặc chờ cron <code>report-pull</code> 03:00 UTC
+              (bước đơn hàng nằm cuối — thêm <code>?orders=0</code> để tắt), hoặc gọi thẳng{" "}
+              <code>/api/cron/orders-sync</code> với header <code>Authorization: Bearer &lt;CRON_SECRET&gt;</code>{" "}
+              (nhận <code>?days=</code>, <code>?shop=</code>, <code>?dryRun=1</code>).
+            </li>
+            <li>
+              Chạy trên máy/VPS: <code>cd worker && npm run worker:orders-sync -- --days=7</code>
+              {" "}(backfill 30 ngày thì <code>--days=30</code>; đối soát bằng report thì{" "}
+              <code>--report=&lt;file&gt;</code>).
+            </li>
+            <li>
+              Kiểm tra credential SP-API (<code>AMAZON_LWA_CLIENT_ID</code> / <code>_SECRET</code> /{" "}
+              <code>_REFRESH_TOKEN</code>) và trạng thái shop ở{" "}
+              <a className="font-bold underline" href="/module0/connect">Module 0 · Kết nối shop</a>.
+            </li>
+            <li>
+              Nếu đang chọn một shop mà shop đó chưa bao giờ đồng bộ: đổi phạm vi shop ở thanh trên cùng
+              sang shop khác hoặc “Tất cả shop”.
+            </li>
+          </ul>
         </Panel>
       ) : invalidId || (detail && !rows.length) ? (
         <Panel title="Không tìm thấy">

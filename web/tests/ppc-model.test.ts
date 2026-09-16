@@ -24,7 +24,15 @@ import {
   ADS_NEGATIVE_KEYWORD_SELECT,
   ADS_SEARCH_TERM_SELECT,
   ADS_TARGET_SELECT,
+  a3BlockRisk,
+  a3ChangeKey,
   a3Evidence,
+  a3FailedChange,
+  a3HasOpenChange,
+  a3InFlightMap,
+  a3Freshness,
+  a3LatestDay,
+  A3_STALE_DAYS,
   auditActionLabel,
   changeActionLabel,
   changePct,
@@ -475,4 +483,186 @@ test("Hợp đồng cột 0021: chuỗi select khớp view (harness BƯỚC 22 s
   // A3: thiếu `pending_suggestion_id` là không duyệt được gợi ý nào.
   assert.ok(ADS_SEARCH_TERM_SELECT.includes("pending_suggestion_id"));
   assert.ok(ADS_SEARCH_TERM_SELECT.includes("negative_keyword_id"));
+});
+
+/* ==========================================================================
+ * A3 (16/09/2026): "số này là số của NGÀY NÀO?" + chống chặn oan
+ * --------------------------------------------------------------------------
+ * Cột `*_7d` của view tính theo NGÀY DỮ LIỆU CUỐI, không phải hôm nay. Cron ngừng
+ * chạy thì màn vẫn hiện "chi 7 ngày" của ba tuần trước mà không nói gì ⇒ người
+ * vận hành tưởng số mới rồi đi chặn từ khoá. 2 hàm dưới đây là chốt chặn đó.
+ * ========================================================================== */
+
+test("A3: ngày dữ liệu mới nhất lấy MAX last_day, bỏ dòng rỗng", () => {
+  assert.equal(a3LatestDay([]), null);
+  assert.equal(a3LatestDay([term({ last_day: null }), term({ last_day: "2026-09-10" })]), "2026-09-10");
+  assert.equal(
+    a3LatestDay([term({ last_day: "2026-09-10" }), term({ last_day: "2026-09-14" }), term({ last_day: null })]),
+    "2026-09-14",
+  );
+});
+
+test("A3: dữ liệu hôm qua / hôm nay KHÔNG báo cũ (report ngày trễ T-1 là bình thường)", () => {
+  const today = new Date("2026-09-16T05:00:00Z");
+  const f = a3Freshness([term({ last_day: "2026-09-15" })], today);
+  assert.equal(f.day, "2026-09-15");
+  assert.equal(f.ageDays, 1);
+  assert.equal(f.stale, false);
+  assert.match(f.label, /cách đây 1 ngày/);
+  assert.ok(!/CŨ/.test(f.label));
+
+  const sameDay = a3Freshness([term({ last_day: "2026-09-16" })], today);
+  assert.equal(sameDay.ageDays, 0);
+  assert.equal(sameDay.stale, false);
+  assert.match(sameDay.label, /hôm nay/);
+});
+
+test("A3: dữ liệu đứng quá ngưỡng ⇒ cảnh báo CŨ kèm số ngày", () => {
+  const today = new Date("2026-09-16T05:00:00Z");
+  const f = a3Freshness([term({ last_day: "2026-09-01" })], today);
+  assert.equal(f.stale, true);
+  assert.equal(f.ageDays, 15);
+  assert.match(f.label, /2026-09-01/);
+  assert.match(f.label, /CŨ/);
+  // Ngưỡng là hằng số công khai — đổi ngưỡng thì phải đổi cả luật này.
+  assert.equal(A3_STALE_DAYS, 2);
+  assert.equal(a3Freshness([term({ last_day: "2026-09-14" })], today).stale, false, "đúng 2 ngày vẫn coi là bình thường");
+  assert.equal(a3Freshness([term({ last_day: "2026-09-13" })], today).stale, true, "quá 2 ngày là cũ");
+});
+
+test("A3: chưa có dòng nào ⇒ không dọa 'cũ' (chỉ nói chưa có ngày)", () => {
+  const f = a3Freshness([], new Date("2026-09-16T05:00:00Z"));
+  assert.equal(f.day, null);
+  assert.equal(f.stale, false);
+  assert.equal(f.ageDays, null);
+  assert.match(f.label, /chưa có ngày dữ liệu/);
+});
+
+test("A3: cảnh báo CHẶN OAN khi 14 ngày có doanh số mà 7 ngày không đơn", () => {
+  const risky = a3BlockRisk(term({ purchases_7d: 0, sales_14d: 42.5, currency: "USD" }));
+  assert.ok(risky, "phải có cảnh báo");
+  assert.match(risky as string, /doanh số trong 14 ngày/);
+  assert.match(risky as string, /USD 42\.50/);
+  assert.match(risky as string, /cắt phần này/);
+});
+
+test("A3: KHÔNG cảnh báo khi 14 ngày cũng không có doanh số, khi 7 ngày đã có đơn, hoặc thiếu số", () => {
+  assert.equal(a3BlockRisk(term({ purchases_7d: 0, sales_14d: 0 })), null);
+  assert.equal(a3BlockRisk(term({ purchases_7d: 0, sales_14d: null })), null);
+  assert.equal(a3BlockRisk(term({ purchases_7d: 0 })), null, "sales_14d undefined = chưa biết, không đoán");
+  assert.equal(
+    a3BlockRisk(term({ purchases_7d: 1, sales_14d: 99 })),
+    null,
+    "7 ngày đã có đơn thì bộ lọc SOP-04 không đụng tới dòng này",
+  );
+});
+
+/* ==========================================================================
+ * A3 (16/09/2026): yêu cầu chặn ĐANG BAY — chống bấm "Chặn" lần hai
+ * --------------------------------------------------------------------------
+ * Duyệt một gợi ý ⇒ `pending_suggestion_id` biến mất, gương negative chỉ có sau
+ * khi worker ghi THÀNH CÔNG. Khoảng giữa đó màn phải nói "đã có yêu cầu rồi",
+ * nếu không người vận hành tạo yêu cầu trùng và Amazon báo lỗi trùng.
+ * ========================================================================== */
+
+test("A3: khoá nối yêu cầu chặn phân biệt campaign · ad group · chữ (không phân biệt hoa thường)", () => {
+  assert.equal(a3ChangeKey("C1", "AG1", "Vali 20 inch"), "C1|AG1|vali 20 inch");
+  assert.equal(a3ChangeKey("C1", "AG2", "vali 20 inch"), "C1|AG2|vali 20 inch");
+  assert.equal(a3ChangeKey("C2", "AG1", "vali 20 inch"), "C2|AG1|vali 20 inch");
+  assert.equal(a3ChangeKey(null, null, null), "||");
+  assert.equal(a3ChangeKey("C1", "AG1", "  VALI  "), a3ChangeKey("C1", "AG1", "vali"));
+});
+
+test("A3: chỉ gom yêu cầu CHẶN search term — bỏ set_bid/set_budget và entity khác", () => {
+  const map = a3InFlightMap([
+    change({ id: "ch1", action: "add_negative_exact", entity_type: "search_term", entity_key: "vali to", ad_group_id: "AG-1", status: "approved" }),
+    change({ id: "ch2", action: "set_bid", entity_type: "keyword", entity_key: "vali to", ad_group_id: "AG-1", status: "approved" }),
+    change({ id: "ch3", action: "add_negative_phrase", entity_type: "keyword", entity_key: "vali to", ad_group_id: "AG-1", status: "approved" }),
+  ]);
+  assert.deepEqual(Object.keys(map), ["C-1|AG-1|vali to"]);
+  assert.equal(map["C-1|AG-1|vali to"].changeId, "ch1");
+});
+
+test("A3: dòng áp dụng được/đã huỷ KHÔNG tính là đang bay; dòng lỗi thì có (để cho thử lại)", () => {
+  const applied = a3InFlightMap([
+    change({ id: "ch1", action: "add_negative_exact", entity_type: "search_term", entity_key: "vali to", ad_group_id: "AG-1", status: "applied" }),
+    change({ id: "ch2", action: "add_negative_exact", entity_type: "search_term", entity_key: "vali to", ad_group_id: "AG-1", status: "cancelled" }),
+  ]);
+  assert.equal(a3HasOpenChange(applied, term({ term: "vali to" })), null);
+  assert.equal(applied["C-1|AG-1|vali to"].changeId, "ch2");
+
+  const failed = a3InFlightMap([
+    change({
+      id: "ch3",
+      action: "add_negative_exact",
+      entity_type: "search_term",
+      entity_key: "vali to",
+      ad_group_id: "AG-1",
+      status: "failed",
+      error: "HTTP 400 duplicate keyword",
+    }),
+  ]);
+  assert.equal(a3HasOpenChange(failed, term({ term: "vali to" })), null, "đã lỗi thì KHÔNG khoá nút gửi lại");
+  const retry = a3FailedChange(failed, term({ term: "vali to" }));
+  assert.ok(retry);
+  assert.match(retry?.error ?? "", /duplicate keyword/, "phải hiện nguyên văn lỗi Amazon để biết vì sao");
+});
+
+test("A3: cùng một term có cả dòng lỗi cũ và dòng đang bay ⇒ ĐANG BAY thắng", () => {
+  const map = a3InFlightMap([
+    change({ id: "old", action: "add_negative_exact", entity_type: "search_term", entity_key: "vali to", ad_group_id: "AG-1", status: "failed" }),
+    change({ id: "new", action: "add_negative_exact", entity_type: "search_term", entity_key: "vali to", ad_group_id: "AG-1", status: "applying" }),
+  ]);
+  const flying = a3HasOpenChange(map, term({ term: "vali to" }));
+  assert.equal(flying?.changeId, "new");
+  assert.equal(a3FailedChange(map, term({ term: "vali to" })), null);
+});
+
+test("A3: khớp theo CAMPAIGN + AD GROUP, không chỉ theo chữ (2 shop/campaign cùng term là 2 việc khác nhau)", () => {
+  const map = a3InFlightMap([
+    change({
+      id: "ch1",
+      action: "add_negative_exact",
+      entity_type: "search_term",
+      entity_key: "vali to",
+      campaign_id: "C-9",
+      ad_group_id: "AG-9",
+      status: "pending_approval",
+    }),
+  ]);
+  assert.equal(a3HasOpenChange(map, term({ campaign_id: "C-1", ad_group_id: "AG-1", term: "vali to" })), null);
+  assert.equal(a3HasOpenChange(map, term({ campaign_id: "C-9", ad_group_id: "AG-9", term: "vali to" }))?.changeId, "ch1");
+});
+
+test("A3: đọc được after_text khi view chỉ trả chữ đã chặn", () => {
+  const map = a3InFlightMap([
+    change({
+      id: "ch1",
+      action: "add_negative_exact",
+      entity_type: "search_term",
+      entity_key: "",
+      ad_group_id: "AG-1",
+      after_text: "Vali To",
+      status: "approved",
+    }),
+  ]);
+  assert.equal(a3HasOpenChange(map, term({ term: "vali to" }))?.changeId, "ch1");
+});
+test("A3: a3ReadyToBlock loại dòng ĐANG có yêu cầu chặn — nếu không, sau khi duyệt dòng lại bị đếm là 'chưa ai làm gì'", () => {
+  const rows = [
+    // đủ điều kiện SOP-04, chưa ai làm gì ⇒ phải được đếm
+    term({ term: "vali to", clicks_7d: 12, spend_7d: 18.4, purchases_7d: 0 }),
+    // đã duyệt gợi ý, đang chờ worker ghi ⇒ KHÔNG được đếm nữa
+    term({ term: "vali nho", clicks_7d: 20, spend_7d: 25, purchases_7d: 0 }),
+    // lần ghi trước LỖI ⇒ vẫn phải đếm (vẫn cần người thử lại)
+    term({ term: "vali dai", clicks_7d: 9, spend_7d: 11.2, purchases_7d: 0 }),
+  ];
+  const inFlight = a3InFlightMap([
+    change({ id: "f1", action: "add_negative_exact", entity_type: "search_term", entity_key: "vali nho", ad_group_id: "AG-1", status: "approved" }),
+    change({ id: "f2", action: "add_negative_exact", entity_type: "search_term", entity_key: "vali dai", ad_group_id: "AG-1", status: "failed", error: "…" }),
+  ]);
+  const ready = a3ReadyToBlock(rows, {}, inFlight).map((r) => r.term);
+  assert.deepEqual(ready, ["vali to", "vali dai"]);
+  // không truyền inFlight = hành vi cũ (để không phá chỗ gọi khác) — đúng 3 dòng
+  assert.equal(a3ReadyToBlock(rows).length, 3);
 });

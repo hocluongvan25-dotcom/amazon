@@ -10,6 +10,8 @@ export async function readOperations(
     value: string;
     sellerAccountId?: string;
   },
+  /** PHẠM VI SHOP (bộ chọn trên Topbar). `null`/bỏ trống = tất cả shop. */
+  shopId?: string | null,
 ) {
   const client = await createClient();
   if (!client) throw new Error("Supabase unavailable");
@@ -21,6 +23,9 @@ export async function readOperations(
       if (filter.sellerAccountId)
         query = query.eq("seller_account_id", filter.sellerAccountId);
     }
+    // Lọc NGAY Ở DB chứ không lọc sau khi tải: view có RLS, thêm `eq` chỉ thu hẹp
+    // phạm vi đọc — nhưng cũng để số dòng/tổng tiền trên bảng đúng phạm vi đã chọn.
+    if (shopId) query = query.eq("seller_account_id", shopId);
     return query.range(from, to);
   });
 }

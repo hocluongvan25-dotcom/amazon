@@ -686,6 +686,26 @@ export type AdsTargetRowInput = {
   adsProfileId?: string | null;
 };
 
+/**
+ * Negative keyword ĐANG CÓ trên Amazon (`POST /sp/negativeKeywords/list`).
+ *
+ * Vì sao phải có: gương `ads.negative_keywords` chỉ được ghi khi CHÍNH hệ thống
+ * tạo negative (RPC `vexim_worker_record_ads_change`). Negative do người dùng đặt
+ * thẳng trong Ads console — hoặc có trước khi hệ thống ra đời — không bao giờ
+ * xuất hiện nếu không đọc về, và khi đó màn A3 hiện "chưa chặn" cho một từ khoá
+ * ĐÃ bị chặn: người vận hành tưởng còn phải chặn (rồi ăn lỗi trùng từ Amazon),
+ * còn báo cáo thì đếm sai.
+ */
+export type AdsNegativeKeywordRowInput = {
+  keywordId: string;
+  campaignId: string;
+  adGroupId?: string | null;
+  keywordText: string;
+  matchType: string;
+  state?: string | null;
+  adsProfileId?: string | null;
+};
+
 export type AdsCampaignMetricRowInput = {
   day: string;
   campaignId: string;
@@ -968,6 +988,11 @@ export interface DbAdapter {
   upsertAdsAdGroups(sellerAccountId: string, rows: AdsAdGroupRowInput[]): Promise<AdsEntityCounts>;
   /** Keywords + product targets (một hàm vì màn A2 hiển thị chung một bảng) */
   upsertAdsTargets(sellerAccountId: string, rows: AdsTargetRowInput[]): Promise<AdsEntityCounts>;
+  /** Negative keyword hiện có trên Amazon — gương để A3 biết "đã chặn chưa" */
+  upsertAdsNegativeKeywords(
+    sellerAccountId: string,
+    rows: AdsNegativeKeywordRowInput[],
+  ): Promise<AdsEntityCounts>;
   /** Metrics campaign theo NGÀY (report spCampaigns, cửa sổ 7/14/30 ngày) */
   upsertAdsCampaignMetrics(
     sellerAccountId: string,
@@ -1238,15 +1263,22 @@ export class MockDbAdapter implements DbAdapter {
     error: string | null;
     appliedAt: string | null;
   })[] = [];
+  /**
+   * GƯƠNG negative keyword — hai đường ghi vào CÙNG một store:
+   *   • `recordAdsChange` khi hệ thống tự tạo negative trên Amazon (có changeRequestId)
+   *   • `upsertAdsNegativeKeywords` khi đồng bộ negative ĐANG CÓ trên Amazon (không có
+   *     changeRequestId) — nếu không đọc về thì A3 tưởng từ khoá chưa bị chặn.
+   */
   adsNegativeKeywords: {
     sellerAccountId: string;
-    adsProfileId: string;
+    adsProfileId: string | null;
     campaignId: string;
     adGroupId: string;
     keywordId: string;
     keywordText: string;
     matchType: string;
-    changeRequestId: string;
+    state: string;
+    changeRequestId: string | null;
   }[] = [];
   oauthTokens: (OauthTokenInput & {
     sellerAccountId: string;
@@ -1964,6 +1996,30 @@ export class MockDbAdapter implements DbAdapter {
     );
   }
 
+  async upsertAdsNegativeKeywords(
+    sellerAccountId: string,
+    rows: AdsNegativeKeywordRowInput[],
+  ): Promise<AdsEntityCounts> {
+    // Chuẩn hoá trước khi ghi gương: đúng những gì RPC 0021 làm (state mặc định
+    // ENABLED, negative đọc về KHÔNG gắn yêu cầu thay đổi nào ⇒ change_request_id null).
+    const normalized = rows.map((r) => ({
+      ...r,
+      state: r.state ?? "ENABLED",
+      adsProfileId: r.adsProfileId ?? null,
+      changeRequestId: null as string | null,
+    }));
+    return this.adsUpsert(
+      this.adsNegativeKeywords,
+      sellerAccountId,
+      normalized,
+      (r) => this.adsKey(r.sellerAccountId, [r.adGroupId, (r.keywordText ?? "").toLowerCase(), r.matchType]),
+      // Cùng luật với RPC 0021: thiếu chữ hoặc sai match type thì BỎ, không tạo rác.
+      (r) =>
+        (r.keywordText ?? "").trim() !== "" &&
+        ["NEGATIVE_EXACT", "NEGATIVE_PHRASE"].includes(String(r.matchType ?? "").toUpperCase()),
+    );
+  }
+
   async upsertAdsCampaignMetrics(
     sellerAccountId: string,
     rows: AdsCampaignMetricRowInput[],
@@ -2249,6 +2305,7 @@ export class MockDbAdapter implements DbAdapter {
         keywordId: keywordId ?? "",
         keywordText: after,
         matchType: c.action === "add_negative_phrase" ? "NEGATIVE_PHRASE" : "NEGATIVE_EXACT",
+        state: "ENABLED",
         changeRequestId: c.changeId,
       });
       mirrored = true;

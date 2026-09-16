@@ -40,7 +40,7 @@ function TargetsTable({
   if (rows.length === 0) {
     return (
       <div className="rounded-[10px] border border-dashed border-line px-3 py-4 text-center text-[12.5px] text-soft">
-        Ad group này chưa có từ khoá/nhóm sản phẩm trong dữ liệu (chạy <code>worker:ads-sync</code> để tải).
+        Ad group này chưa có từ khoá/nhóm sản phẩm trong dữ liệu (chạy <code>cd worker &amp;&amp; npm run worker:ads-sync</code> để tải).
       </div>
     );
   }
@@ -304,8 +304,7 @@ function CampaignBody({
       ) : (
         <Panel title="Không tìm thấy campaign này" hint={campaignIdHint(campaign, groups)}>
           <p className="text-[13px] text-soft">
-            Chưa có campaign trong DB: chạy <code>npm run worker:ads-sync</code> để tải cấu trúc campaign/ad group/target
-            từ Amazon, rồi mở lại.
+            Chưa có campaign trong DB: bấm “▶ Chạy đồng bộ Amazon Ads ngay” ở màn <a className="font-bold underline" href="/ppc">Quảng cáo (PPC)</a> (trên Vercel không có shell), hoặc chạy <code>cd worker &amp;&amp; npm run worker:ads-sync</code> trên máy có terminal, để tải cấu trúc campaign/ad group/target từ Amazon rồi mở lại.
           </p>
         </Panel>
       )}
@@ -422,5 +421,5 @@ function CampaignBody({
 function campaignIdHint(campaign: AdsCampaignRaw | undefined, groups: AdsAdGroupRaw[]): string {
   if (campaign) return campaign.campaign_id;
   if (groups.length > 0) return groups[0].campaign_id;
-  return "cần worker:ads-sync";
+  return "cần chạy worker:ads-sync";
 }
