@@ -12,6 +12,7 @@ import type {
   PainItemDraft,
   PainObservation,
 } from "../research/domain/pain.ts";
+import type { MetricToken, QuoteToken } from "../research/domain/report.ts";
 
 export type LlmProviderName = "openai" | "mock";
 
@@ -63,6 +64,26 @@ export type ReducePainOutput = {
   executiveNarrative: string;
 };
 
+/* ------------------------ NARRATIVE 1 SECTION (G5) ---------------------- */
+
+export type SectionNarrativeInput = {
+  assessmentId: string;
+  sectionKey: string;
+  sectionTitle: string;
+  brief: string;
+  /** con số được phép trích (hệ thống render thành chip khóa cứng) */
+  metrics: MetricToken[];
+  /** câu trích được phép dùng (phải là quote đã truy gốc ở G4) */
+  quotes: QuoteToken[];
+  /** bối cảnh chữ/số dạng văn bản do hệ thống dựng sẵn */
+  context: string;
+};
+
+export type SectionNarrativeOutput = {
+  /** markdown-lite theo quy ước prompts.ts; app convert sang TipTap doc */
+  markdown: string;
+};
+
 export interface LlmProvider {
   readonly name: LlmProviderName;
   readonly model: string;
@@ -70,12 +91,14 @@ export interface LlmProvider {
   mapPainChunk(input: MapChunkInput): Promise<LlmCallResult<MapChunkOutput>>;
   /** REDUCE: gom pain toàn ngách, chọn quote, gợi ý yêu cầu kỹ thuật. */
   reducePain(input: ReducePainInput): Promise<LlmCallResult<ReducePainOutput>>;
+  /** G5: soạn nháp 1 khối narrative của báo cáo. */
+  sectionNarrative(input: SectionNarrativeInput): Promise<LlmCallResult<SectionNarrativeOutput>>;
 }
 
 /** Bản ghi nhật ký 1 lần gọi LLM để ghi research.llm_runs. */
 export type LlmRunRecord = {
   assessmentId: string;
-  sectionKey: "pain_map" | "pain_reduce";
+  sectionKey: "pain_map" | "pain_reduce" | `narrative_${string}`;
   provider: LlmProviderName;
   model: string;
   promptHash: string;

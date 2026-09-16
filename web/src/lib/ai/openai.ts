@@ -11,6 +11,7 @@ import { DEFAULT_MODEL } from "./pricing.ts";
 import {
   buildMapMessages,
   buildReduceMessages,
+  buildSectionMessages,
 } from "./prompts.ts";
 import type {
   LlmCallResult,
@@ -19,6 +20,8 @@ import type {
   MapChunkOutput,
   ReducePainInput,
   ReducePainOutput,
+  SectionNarrativeInput,
+  SectionNarrativeOutput,
 } from "./types.ts";
 
 export class LlmNotConfiguredError extends Error {
@@ -143,6 +146,13 @@ export class OpenAiLlmProvider implements LlmProvider {
     return this.completeJson<ReducePainOutput>(
       buildReduceMessages(input) as RawMessage[],
       "pain_reduce",
+    );
+  }
+
+  async sectionNarrative(input: SectionNarrativeInput) {
+    return this.completeJson<SectionNarrativeOutput>(
+      buildSectionMessages(input) as RawMessage[],
+      `narrative_${input.sectionKey}`,
     );
   }
 }

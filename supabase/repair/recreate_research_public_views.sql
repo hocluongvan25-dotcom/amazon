@@ -152,10 +152,43 @@ grant select on public.vexim_research_runs, public.vexim_research_competitors,
   public.vexim_research_reviews, public.vexim_research_credit_monthly
   to authenticated, anon, service_role;
 
+
+create or replace view public.vexim_research_report_versions
+with (security_invoker = true) as
+select v.assessment_id, a.code, v.version_no, v.status, v.title, v.snapshot,
+       v.change_note, v.submitted_at, v.approved_at,
+       cu.display_name as created_name, ap.display_name as approver_name,
+       v.created_at, v.updated_at
+  from research.report_versions v
+  join research.assessments a on a.id = v.assessment_id
+  left join iam.user_profiles cu on cu.id = v.created_by
+  left join iam.user_profiles ap on ap.id = v.approver_id;
+
+create or replace view public.vexim_research_report_sections
+with (security_invoker = true) as
+select s.assessment_id, a.code, s.report_version, s.section_key, s.status,
+       s.content, s.source, s.generated_model,
+       s.verified_name, s.verified_at, s.updated_at,
+       s.lock_owner_name as lock_owner, s.locked_at,
+       (s.lock_owner = auth.uid()) as lock_is_mine,
+       (s.lock_owner is not null and s.lock_owner <> auth.uid()
+         and s.locked_at > now() - interval '2 minutes') as lock_active_other
+  from research.report_sections s
+  join research.assessments a on a.id = s.assessment_id;
+
+create or replace view public.vexim_research_veto_acks
+with (security_invoker = true) as
+select k.assessment_id, a.code, k.version_no, k.rule_code,
+       k.acknowledged_name, k.note, k.created_at
+  from research.veto_acknowledgements k
+  join research.assessments a on a.id = k.assessment_id;
+
 grant select on
   public.vexim_research_pain_clusters, public.vexim_research_pain_items,
   public.vexim_research_pain_quotes, public.vexim_research_improvement_specs,
-  public.vexim_research_llm_runs
+  public.vexim_research_llm_runs,
+  public.vexim_research_report_versions, public.vexim_research_report_sections,
+  public.vexim_research_veto_acks
   to authenticated, anon, service_role;
 
 -- Bắt PostgREST nạp lại schema cache (bắt buộc sau khi tạo view thủ công)
@@ -168,4 +201,5 @@ notify pgrst, 'reload schema';
 --
 -- assessments, competitors, credit_monthly, inputs, pnl, roadmap,
 -- reviews, runs, scorecards, vetoes,
--- pain_clusters, pain_items, pain_quotes, improvement_specs, llm_runs (G4, 15 view)
+-- pain_clusters, pain_items, pain_quotes, improvement_specs, llm_runs (G4),
+-- report_versions, report_sections, veto_acks (G5, 18 view)

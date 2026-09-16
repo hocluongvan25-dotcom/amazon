@@ -12,7 +12,7 @@ import type {
   AnalysisReview,
   PainObservation,
 } from "../research/domain/pain.ts";
-import type { MapChunkInput, ReducePainInput } from "./types.ts";
+import type { MapChunkInput, ReducePainInput, SectionNarrativeInput } from "./types.ts";
 
 const RULES = `Bạn là chuyên gia R&D thương mại điện tử Amazon (làm việc cho công ty bán hàng Việt Nam).
 Nhiệm vụ: phân tích review 1-3 SAO của đối thủ để tìm ĐIỂM ĐAU khách hàng.
@@ -146,6 +146,63 @@ TRẢ VỀ JSON:
       content: `Hồ sơ ${input.assessmentId} · ${input.observations.length} quan sát đã trích dẫn:\n\n${JSON.stringify(
         observations,
       )}`,
+    },
+  ];
+}
+
+/* ========================== G5 — NARRATIVE SECTION ======================= */
+
+
+/**
+ * Prompt soạn nháp 1 khối narrative cho Report Canvas. LLM CHỈ nhận:
+ *  - danh sách SỐ được phép trích (token {{metric:key}} — app render chip
+ *    khóa cứng, không gõ tay đè được);
+ *  - danh sách CÂU TRÍCH đã truy gốc (token {{quote:reviewId}});
+ *  - ngữ cảnh văn bản do hệ thống dựng.
+ * Không nhận review thô ở đây → không thể trích xuyên tạc/chế câu mới.
+ */
+export function buildSectionMessages(input: SectionNarrativeInput): {
+  role: "system" | "user";
+  content: string;
+}[] {
+  const metricList = input.metrics
+    .map((m) => `  - {{metric:${m.key}}} = ${m.label}: ${m.value}`)
+    .join("\n");
+  const quoteList = input.quotes
+    .slice(0, 12)
+    .map(
+      (q, i) =>
+        `  - {{quote:${q.reviewId}} = ${q.asin} ${q.stars ?? "?"}★ ngày ${q.reviewDate ?? "?"}: “${q.quote}”${i >= 8 ? " (còn nhiều, chỉ chọn câu điển hình nhất)" : ""}`,
+    )
+    .join("\n");
+
+  return [
+    {
+      role: "system",
+      content: `Bạn là chuyên viên R&D thương mại điện tử viết báo cáo thẩm định ngách cho công ty bán hàng Việt Nam (báo cáo nội bộ, tiếng Việt, ngắn gọn, có số).
+
+QUY TẮC BẮT BUỘC:
+1. CHỈ dùng các CON SỐ trong danh sách được cấp, trích bằng token đúng dạng {{metric:key}}. TUYỆT ĐỐI không gõ con số khác, không nội suy, không làm tròn theo trí nhớ; thiếu số thì viết "chưa đủ cơ sở".
+2. CHỈ trích review bằng token {{quote:reviewId}} từ danh sách được cấp; không viết lại câu trích, không tạo reviewId mới, không trích từ trí nhớ.
+3. Trả MARKDOWN TỐI GIẢN: đoạn văn, tiêu đề ###, đầu dòng "- ", **đậm**, [link](url). KHÔNG dùng bảng, không ảnh, không tiêu đề mức #.
+4. Độ dài 80–250 từ cho section điều hành/tổng kết; section phụ 40–150 từ. Giọng quyết định (nên/không nên, điều kiện), không sáo rỗng.
+5. Cờ veto đỏ phải được nêu ĐÚNG bản chất trong các section liên quan; không hạ thấp hay gỡ cờ bằng lời.
+6. Chỉ trả về JSON: {"markdown": "..."}, không lời dẫn.`,
+    },
+    {
+      role: "user",
+      content: `Hồ sơ: ${input.assessmentId}
+SECTION: ${input.sectionTitle} (${input.sectionKey})
+YÊU CẦU: ${input.brief}
+
+SỐ ĐƯỢC PHÉP TRÍCH:
+${metricList || "  (không có số nào được cấp cho section này — viết 'chưa đủ cơ sở', không bịa)"}
+
+CÂU TRÍCH ĐƯỢC PHÉP DÙNG:
+${quoteList || "  (không cấp câu trích nào cho section này)"}
+
+NGỮ CẢNH HỆ THỐNG (dẫn nguồn ngày/tháng, không sáng tạo thêm số):
+${input.context}`,
     },
   ];
 }

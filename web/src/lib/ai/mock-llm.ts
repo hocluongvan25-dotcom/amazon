@@ -13,7 +13,7 @@ import {
   type PainObservation,
 } from "../research/domain/pain.ts";
 import { hashMessages } from "./hash.ts";
-import { buildMapMessages, buildReduceMessages } from "./prompts.ts";
+import { buildMapMessages, buildReduceMessages, buildSectionMessages } from "./prompts.ts";
 import { MOCK_MODEL, estimateTokens } from "./pricing.ts";
 import type {
   LlmCallResult,
@@ -22,6 +22,8 @@ import type {
   MapChunkOutput,
   ReducePainInput,
   ReducePainOutput,
+  SectionNarrativeInput,
+  SectionNarrativeOutput,
 } from "./types.ts";
 
 type Suggestion = Omit<PainItemDraft, "itemKey" | "cluster" | "title" | "subLabel" | "reviewIds">;
@@ -292,6 +294,54 @@ export class MockLlmProvider implements LlmProvider {
       promptHash: hashMessages(buildReduceMessages(input)),
       usage: {
         promptTokens: estimateTokens(JSON.stringify(input.observations)),
+        outputTokens: estimateTokens(JSON.stringify(data)),
+      },
+      model: this.model,
+    };
+  }
+
+  /** G5: nháp narrative deterministic từ chính các token được cấp. */
+  async sectionNarrative(
+    input: SectionNarrativeInput,
+  ): Promise<LlmCallResult<SectionNarrativeOutput>> {
+    const m = input.metrics.slice(0, 5);
+    const q = input.quotes.slice(0, 3);
+    const lines: string[] = [];
+
+    const opening: Record<string, string> = {
+      exec_verdict:
+        "### Tóm tắt điều hành\nKhuyến nghị ở mức **kiểm chứng nhỏ trước khi quyết định nhập lớn**; mọi số dưới đây là số máy tính, chuyên viên phải đối chiếu lại.",
+      risk_register:
+        "### Sổ đăng ký rủi ro\nMọi cờ veto do engine tính phải được hội đồng nhìn nhận; chuyên viên chỉ ghi biên bản phản biện, không gỡ cờ.",
+      rd_specsheet:
+        "### Spec sheet gửi xưởng\nCác yêu cầu dưới đây là **llm_suggested**, chưa phải chỉ thị sản xuất; trưởng nhóm R&D phải ký xác nhận từng dòng.",
+      appendix_signoff:
+        "### Bảng ký tên\nTài liệu gồm phần AI soạn nháp và phần chuyên viên hiệu đính; mọi số lấy từ engine tại ngày chụp version.",
+    };
+    if (opening[input.sectionKey]) lines.push(opening[input.sectionKey]);
+
+    if (m.length) {
+      lines.push("Số liệu then chốt:");
+      for (const token of m) {
+        lines.push(`- ${token.label}: {{metric:${token.key}}} (chỉ dẫn ${token.value}).`);
+      }
+    } else {
+      lines.push("Hiện **chưa đủ cơ sở** cho các chỉ số của mục này; chờ thu thập thêm ở G2/G3.");
+    }
+    if (q.length && (input.sectionKey.startsWith("rd_") || input.sectionKey === "exec_verdict")) {
+      lines.push("Bằng chứng khách hàng tiêu biểu:");
+      for (const quote of q) lines.push(`- {{quote:${quote.reviewId}}`);
+    }
+    lines.push(
+      "*(Nội dung MOCK nháp để chạy quy trình; khi có LLM_API_KEY, phần này do gpt-4.1-mini soạn và vẫn phải hiệu đính trước khi ký.)*",
+    );
+
+    const data: SectionNarrativeOutput = { markdown: lines.join("\n") };
+    return {
+      data,
+      promptHash: hashMessages(buildSectionMessages(input)),
+      usage: {
+        promptTokens: estimateTokens(input.context + JSON.stringify(input.metrics)),
         outputTokens: estimateTokens(JSON.stringify(data)),
       },
       model: this.model,
