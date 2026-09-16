@@ -92,12 +92,14 @@ async function LiveListingEditorNew({
   marketplaceId: string;
 }) {
   const { readEditorActor, readProductTypeSchema, readShopOptions } = await import("@/lib/listing/editor");
+  const { shopOptionLabel } = await import("@/lib/listing/editor-access.ts");
   const [{ canWrite, isApprover, userId }, shops, productTypeSchema] = await Promise.all([
     readEditorActor(sellerAccountId),
     readShopOptions(),
     readProductTypeSchema({ marketplaceId, productType, requirements: "LISTING" }),
   ]);
-  const shop = shops.find((s) => s.sellerAccountId === sellerAccountId)?.shop ?? sellerAccountId;
+  const option = shops.find((s) => s.sellerAccountId === sellerAccountId);
+  const shop = option ? shopOptionLabel(option) : sellerAccountId;
 
   return (
     <ListingEditor

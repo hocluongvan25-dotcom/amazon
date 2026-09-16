@@ -19,6 +19,7 @@ import {
   type DraftRaw,
   type RevisionRaw,
 } from "@/lib/listing/editor";
+import { shopOptionLabel } from "@/lib/listing/editor-access.ts";
 import { DRAFT_STATUS_LABEL, type PublishRestrictions } from "@/lib/listing/editor-model.ts";
 import { ListingEditor, type EditorHistoryRow } from "./ListingEditor";
 
@@ -117,7 +118,16 @@ export async function LiveListingEditorDetail({ draftId }: { draftId: string }) 
 }
 
 export async function LiveListingDraftList() {
-  const [drafts, shops] = await Promise.all([readDrafts(), readShopOptions()]);
+  const drafts = await readDrafts();
+  // Danh sách shop chỉ để MỞ/TẠO bản nháp — lỗi ở đây không được làm sập danh sách
+  // bản nháp đang có (trước đây Promise.all ⇒ một lỗi là trắng cả trang).
+  let shops: Awaited<ReturnType<typeof readShopOptions>> = [];
+  let shopsError: string | null = null;
+  try {
+    shops = await readShopOptions();
+  } catch (error) {
+    shopsError = (error as Error).message;
+  }
 
   return (
     <>
@@ -125,10 +135,15 @@ export async function LiveListingDraftList() {
         <form className="flex flex-wrap items-end gap-3" action="/listing/editor" method="get">
           <label className="flex flex-col gap-1 text-[12px] font-bold text-soft">
             Shop
-            <select name="shop" className="rounded-[9px] border border-line px-3 py-2 text-[13px]" required>
+            <select
+              name="shop"
+              className="rounded-[9px] border border-line px-3 py-2 text-[13px]"
+              required
+              defaultValue={shops[0]?.sellerAccountId}
+            >
               {shops.map((s) => (
                 <option key={s.sellerAccountId} value={s.sellerAccountId}>
-                  {s.shop}
+                  {shopOptionLabel(s)}
                 </option>
               ))}
             </select>
@@ -145,9 +160,15 @@ export async function LiveListingDraftList() {
             Mở / tạo bản nháp
           </button>
         </form>
-        {shops.length === 0 ? (
+        {shopsError ? (
+          <div role="alert" className="mt-2 text-[12px] font-semibold text-[#a01717]">
+            Không đọc được danh sách shop: {shopsError}
+          </div>
+        ) : null}
+        {!shopsError && shops.length === 0 ? (
           <div className="mt-2 text-[12px] text-[#8a5602]">
-            Chưa có shop nào trong dữ liệu đồng bộ — chạy đồng bộ listing trước khi soạn.
+            Chưa có shop nào bạn có quyền xem — vào <b>Module 0 → Kết nối shop</b> để thêm/kết nối shop
+            (bộ chọn này đọc từ <code>vexim_shops</code>, không phụ thuộc listing đã đồng bộ hay chưa).
           </div>
         ) : null}
       </Panel>

@@ -216,6 +216,28 @@ export function ListingEditor(props: ListingEditorProps) {
         </div>
       ) : null}
 
+      {/* Nói RÕ vì sao form chỉ để đọc — trước đây chỉ có tooltip trên nút bị mờ nên
+          người dùng tưởng "nhấn vào không nhập được liệu" mà không biết đường sửa. */}
+      {!demo && !props.actor.canWrite ? (
+        <div
+          role="alert"
+          className="rounded-[13px] border border-amber/40 bg-amber-soft px-4 py-2.5 text-[12.5px] text-[#8a5602]"
+        >
+          <b>Tài khoản này chưa có quyền ghi trên shop “{props.shop}” nên form đang ở chế độ chỉ đọc.</b>
+          <div className="mt-1">
+            Quyền ghi đến từ 1 trong 2 nguồn: (1) vai trò <code>super_admin</code> (ghi được mọi shop), hoặc (2)
+            một dòng <code>iam.assignments</code> có <code>can_write = true</code> cho đúng shop này. Cách cấp:
+            đăng nhập bằng tài khoản <code>super_admin</code> → <b>Module 0 → Người dùng</b> → nút{" "}
+            <b>Quyền</b> → chọn vai trò <b>Dept Lead</b> (Trưởng phòng) hoặc <b>Operator</b> và tick shop này —
+            hệ thống tự gán đủ module kèm quyền ghi cho shop đó.
+          </div>
+          <div className="mt-1">
+            Đây là chặn THẬT ở tầng dữ liệu (RLS + trigger 0014 kiểm lại khi lưu), không phải lỗi giao diện —
+            nội dung bên dưới vẫn xem được bình thường.
+          </div>
+        </div>
+      ) : null}
+
       {/* ---------------- Thanh trạng thái + hành động ---------------- */}
       <section className="rounded-[13px] border border-line bg-card px-[18px] py-4">
         <div className="flex flex-wrap items-center gap-3">

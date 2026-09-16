@@ -21,6 +21,14 @@ import {
   type ListingDraftPayload,
   type ValidationReport,
 } from "@/lib/listing/editor-model.ts";
+import {
+  normalizeShopOptions,
+  resolveEditorAccess,
+  type ShopOption,
+  type ShopOptionRow,
+} from "@/lib/listing/editor-access.ts";
+
+export type { ShopOption } from "@/lib/listing/editor-access.ts";
 
 /* ------------------------------------------------------------------ */
 /* Kiểu dữ liệu                                                       */
@@ -100,6 +108,17 @@ export const REVISION_SELECT =
 
 export const QUEUE_SELECT =
   "id,draft_id,seller_account_id,shop,sku,marketplace_id,product_type,requirements,method,status,block_reason,attempts,submission_id,issues,last_error,created_at,processed_at";
+
+/**
+ * Cột của view `vexim_shops` dùng cho bộ chọn shop — chọn theo mức migration đã
+ * chạy, đọc bản mới trước rồi lùi dần (deploy code trước migration không vỡ màn):
+ *   V1 (0016) → seller_account_id, shop, marketplace, status, data_source, …
+ *   V2 (0024) → thêm display_name
+ *   V3 (0031) → thêm store_name (tên shop trên Amazon)
+ */
+export const SHOP_OPTION_SELECT = "seller_account_id,shop,status,data_source";
+export const SHOP_OPTION_SELECT_V2 = SHOP_OPTION_SELECT + ",display_name";
+export const SHOP_OPTION_SELECT_V3 = SHOP_OPTION_SELECT_V2 + ",store_name";
 
 /* ------------------------------------------------------------------ */
 /* Đọc                                                                */
@@ -408,8 +427,15 @@ export type EditorActor = {
 
 /**
  * Quyền của người đang đăng nhập đối với một shop.
- * Đây chỉ là lớp GỢI Ý cho UI (ẩn/hiện nút); quyền thật do RLS + trigger 0014
- * quyết định khi ghi.
+ *
+ * Luật trong `resolveEditorAccess` MIRROR `iam.can_write_seller_account(uuid)`
+ * (0001 + 0022: khóa tài khoản ⇒ mất quyền; super_admin ⇒ mọi shop; còn lại cần
+ * `iam.assignments.can_write` trên đúng shop đó). Trước 16/09/2026 hàm này bỏ
+ * sót nhánh super_admin ⇒ shop kết nối sau 0007 không có dòng assignment làm
+ * form khóa cứng dù DB vẫn cho ghi.
+ *
+ * Đây vẫn chỉ là lớp GỢI Ý cho UI (ẩn/hiện nút); quyền thật do RLS + trigger
+ * 0014 quyết định khi ghi.
  */
 export async function readEditorActor(sellerAccountId: string): Promise<EditorActor> {
   const client = await createClient();
@@ -420,41 +446,71 @@ export async function readEditorActor(sellerAccountId: string): Promise<EditorAc
   } = await client.auth.getUser();
   if (!user) return { userId: null, email: null, canWrite: false, isApprover: false };
 
-  const [{ data: assignments }, { data: roles }] = await Promise.all([
+  const [profileRes, rolesRes, assignmentsRes] = await Promise.all([
+    client.schema("iam").from("user_profiles").select("status").eq("id", user.id).maybeSingle(),
+    client.schema("iam").from("role_assignments").select("role,department_id").eq("user_id", user.id),
     client
       .schema("iam")
       .from("assignments")
       .select("can_write")
       .eq("user_id", user.id)
       .eq("seller_account_id", sellerAccountId),
-    client.schema("iam").from("role_assignments").select("role,department_id").eq("user_id", user.id),
   ]);
 
-  const canWrite = (assignments ?? []).some((row) => (row as { can_write?: boolean }).can_write === true);
-  const roleRows = (roles ?? []) as { role: string; department_id: string | null }[];
-  let isApprover = roleRows.some((r) => r.role === "super_admin" || r.role === "org_admin");
-  if (!isApprover && roleRows.some((r) => r.role === "dept_lead")) {
-    const { data: dept } = await client.schema("iam").from("departments").select("id").eq("code", "listing").maybeSingle();
-    const listingDeptId = (dept as { id?: string } | null)?.id ?? null;
-    isApprover = roleRows.some((r) => r.role === "dept_lead" && r.department_id === listingDeptId);
+  const roles = (rolesRes.data ?? []) as { role: string; department_id: string | null }[];
+  // Chỉ hỏi phòng ban listing khi có dept_lead — tiết kiệm 1 vòng request cho mọi người khác
+  let listingDepartmentId: string | null = null;
+  if (roles.some((r) => r.role === "dept_lead")) {
+    const { data: dept } = await client
+      .schema("iam")
+      .from("departments")
+      .select("id")
+      .eq("code", "listing")
+      .maybeSingle();
+    listingDepartmentId = (dept as { id?: string } | null)?.id ?? null;
   }
+
+  const { canWrite, isApprover } = resolveEditorAccess({
+    profileStatus: (profileRes.data as { status?: string } | null)?.status ?? null,
+    roles,
+    assignments: (assignmentsRes.data ?? []) as { can_write?: boolean }[],
+    listingDepartmentId,
+  });
 
   return { userId: user.id, email: user.email ?? null, canWrite, isApprover };
 }
 
-/** Shop có thể chọn để soạn listing (lấy từ listing đã đồng bộ về). */
-export async function readShopOptions(): Promise<{ sellerAccountId: string; shop: string }[]> {
+/**
+ * Shop có thể chọn để soạn listing — đọc từ view `public.vexim_shops`
+ * (RLS lọc sẵn), KHÔNG đọc từ `vexim_listings`.
+ *
+ * Vì sao: shop vừa kết nối CHƯA có listing nào để đồng bộ, nếu lấy shop từ
+ * listing thì bộ chọn rỗng và không soạn được bản nháp đầu tiên. Cùng nguyên tắc
+ * với `web/src/lib/data/cost-inputs.ts` (bộ chọn shop của màn giá vốn).
+ *
+ * Chọn cột theo mức migration đã chạy: 0031 có `store_name`, chưa chạy thì lùi
+ * về shape 0016 — deploy code trước migration không làm trắng trang.
+ */
+export async function readShopOptions(): Promise<ShopOption[]> {
   const client = await createClient();
   if (!client) throw new Error("Supabase unavailable");
-  const { data, error } = await client
-    .from("vexim_listings")
-    .select("seller_account_id,shop")
-    .order("shop")
-    .limit(1000);
-  if (error) throw new Error(`Không đọc được danh sách shop: ${error.message}`);
-  const seen = new Map<string, string>();
-  for (const row of (data ?? []) as { seller_account_id: string; shop: string }[]) {
-    if (!seen.has(row.seller_account_id)) seen.set(row.seller_account_id, row.shop);
+
+  const selects = [SHOP_OPTION_SELECT_V3, SHOP_OPTION_SELECT_V2, SHOP_OPTION_SELECT];
+  let rows: ShopOptionRow[] = [];
+  let lastError: string | null = null;
+  for (const select of selects) {
+    const { data, error } = await client
+      .from("vexim_shops")
+      .select(select)
+      .order("shop")
+      .limit(1000);
+    if (!error) {
+      rows = (data ?? []) as ShopOptionRow[];
+      lastError = null;
+      break;
+    }
+    lastError = error.message;
   }
-  return [...seen.entries()].map(([sellerAccountId, shop]) => ({ sellerAccountId, shop }));
+  if (lastError) throw new Error(`Không đọc được danh sách shop (vexim_shops): ${lastError}`);
+  return normalizeShopOptions(rows);
 }

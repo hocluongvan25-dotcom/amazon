@@ -1295,3 +1295,24 @@ Chi tiết đầy đủ + checklist API + SQL kiểm tra: **`docs/bao-cao-loi-te
 **Kiểm chứng:** `supabase npm test` **TẤT CẢ PASS** (thêm **BƯỚC 32** ~30 assert trên Postgres 18: 0032 chạy sạch + chạy lại vẫn sạch, 6 mock đã revoked mà 2 shop production vẫn active, `seller_id` cho NULL, chặn non-admin, thêm shop ⇒ `paused` và `active_production_shops()` bỏ qua, trùng seller id giữ tên cũ, chặn tên/marketplace/seller id/data_source sai, xoá bước 1 chỉ đếm rồi xoá thật khi `force=true`, audit xoá sống sót, shop có token ⇒ bắt buộc xác nhận + bản đếm nêu `oauth_tokens`, claim seller id đủ 3 nhánh, web **không đọc được** bảng token) · `web tsc --noEmit` sạch · `web npm test` **368/368** (11 test mới `tests/shop-admin.test.ts`) · `next build` OK · `worker npm test` **481/481**.
 
 **VEXIM cần làm:** chạy `0032_shop_admin.sql` trong SQL Editor **SAU `0031`** → Redeploy web → mở **Module 0 → Kết nối shop**: 6 shop demo biến mất, bấm **[+ Thêm shop mới]** để tạo shop rồi mới authorize (callback tự điền seller id thật), shop cũ không dùng nữa thì bấm **[Xoá]** và xác nhận bước 2. **Không cần** tự chạy SQL `update` tay nữa.
+
+---
+
+## 16/09/2026 (lần 2) — Module 1: "không thấy shop nào" + "nhấn vào không nhập được liệu" (đã sửa — KHÔNG cần migration mới)
+
+**Triệu chứng (chủ dự án báo trên preview):** mở `/listing/editor` (và trang danh sách listing) **không thấy shop nào** dù shop đã kết nối; nhấn vào form thì **không nhập được liệu**.
+
+**Nguyên nhân 1 — bộ chọn shop đọc SAI NGUỒN.** `readShopOptions()` (`web/src/lib/listing/editor.ts`) lấy danh sách shop từ **`vexim_listings`**, tức chỉ thấy shop **đã đồng bộ listing**. Shop vừa kết nối chưa có SKU nào ⇒ bộ chọn rỗng, kèm câu thông báo sai hướng *"Chưa có shop nào trong dữ liệu đồng bộ — chạy đồng bộ listing trước khi soạn"*.
+**Sửa:** đọc từ view **`vexim_shops`** (RLS lọc sẵn — cùng nguồn với màn Kết nối shop và màn giá vốn), lùi cột an toàn khi deployment chưa chạy 0024/0031 (V3 `store_name` → V2 `display_name` → V1), ẩn shop `revoked` (shop demo/đã gỡ), **giữ shop `paused`** (shop vừa tạo bằng [+ Thêm shop mới] vẫn chọn được để soạn bản nháp đầu tiên).
+
+**Nguyên nhân 2 — quyền ghi ở UI THIẾU NHÁNH super_admin.** `readEditorActor()` chỉ coi `iam.assignments.can_write = true` là có quyền ghi. Shop kết nối **sau** migration 0007 không có dòng assignment nào (0007 chỉ gán cho các shop tồn tại lúc đó, còn `vexim_admin_set_user_access` **bỏ qua super_admin** vì "super_admin không cần gán shop") ⇒ super_admin mở form thấy **mọi ô bị khoá, nút Lưu mờ** — đúng hiện tượng "không cho nhập liệu" — dù DB (`iam.can_write_seller_account`) vẫn cho ghi.
+**Sửa:** `resolveEditorAccess()` mirror **đúng** luật DB (tài khoản bị khoá ⇒ mất quyền thật; `super_admin` ⇒ ghi được mọi shop; còn lại cần `iam.assignments.can_write` trên đúng shop đó) + **banner nói rõ lý do** và cách cấp quyền (Module 0 → Người dùng → Quyền → chọn Dept Lead/Operator + tick shop) thay vì chỉ có tooltip trên nút bị mờ.
+
+**Kèm theo (cùng gốc "tưởng mất shop"):**
+- Trang `/listing`, `/listing/list`, `/listing/queue`: khi chưa có dòng nào trong `vexim_listings`, hiện khung **"Chưa có listing nào để hiển thị"** kèm **danh sách shop ĐÃ KẾT NỐI** (đọc từ `vexim_shops`) + việc cần làm (`listings:sync` / chờ cron) — thay cho câu "Không có SKU nào khớp bộ lọc." gây hiểu sai là mất shop.
+- Bộ chọn shop hiện nhãn vận hành kèm tên Amazon khi đã có: `VEXIM US - Chính · 🏪 Vexim Global`.
+- Lỗi đọc danh sách shop **không còn làm trắng** cả trang danh sách bản nháp (trước đây `Promise.all` ⇒ một lỗi là sập trang).
+
+**Kiểm chứng:** `web npm test` **379/379** (11 test mới `tests/listing-editor-access.test.ts`) · `web tsc --noEmit` sạch · `next build` OK · `supabase npm test` **TẤT CẢ PASS** (không đổi DB) · `worker npm test` **481/481**.
+
+**VEXIM cần làm:** chỉ cần **Redeploy web** (không có migration mới). Nếu vẫn không thấy shop: kiểm tra tài khoản đăng nhập có vai trò `super_admin` chưa — tài khoản không phải super_admin mà không được gán shop sẽ chỉ thấy shop trong tổ chức của mình (RLS `iam.can_read_seller_account`), và form sẽ hiện banner nói rõ.
