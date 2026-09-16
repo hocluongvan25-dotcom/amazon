@@ -165,6 +165,12 @@ export default async function ConnectPage({
     days?: string;
     warn?: string;
     replaced?: string;
+    /** nhãn vận hành của shop vừa kết nối */
+    shop?: string;
+    /** TÊN SHOP AMAZON (storeName) vừa lấy được ở callback */
+    store?: string;
+    /** lý do chưa lấy được tên shop Amazon */
+    storeMsg?: string;
   }>;
 }) {
   const session = await requireSession();
@@ -176,8 +182,13 @@ export default async function ConnectPage({
       ? {
           tone: "green" as const,
           text:
-            `Đã lưu refresh token cho shop ${sp.seller ?? ""}` +
+            `Đã lưu refresh token cho shop ${sp.shop || sp.seller || ""}` +
             (sp.days ? ` (còn ${sp.days} ngày).` : ".") +
+            (sp.store
+              ? ` Tên shop trên Amazon: “${sp.store}”.`
+              : sp.storeMsg
+                ? ` Chưa lấy được tên shop Amazon — ${sp.storeMsg}`
+                : " Chưa lấy được tên shop Amazon — bấm [Đồng bộ tên shop Amazon] để thử lại.") +
             (sp.replaced === "1" ? " Token cũ đã được thay." : ""),
         }
       : sp.oauth === "error"
@@ -230,7 +241,10 @@ export default async function ConnectPage({
       <PageHeader
         title="Kết nối shop Amazon"
         sub={`SOP-11 · ${prodCount} gian hàng chính · ${shops.length} tổng (có ${shops.filter((s) => (s.dataSource ?? "mock") === "mock").length} demo)`}
-        desc="Refresh token lưu trong DB. Đã nhóm theo Seller ID + thêm version=beta (fix MD1000) + validate redirect_uri 100% (fix MD9100). Tên kỹ thuật A1/B1/P1 nên đổi thành tên thân thiện."
+        desc={
+          "Refresh token lưu trong DB. Đã nhóm theo Seller ID + version=beta (fix MD1000) + validate redirect_uri 100% (fix MD9100). " +
+          "Tên shop Amazon lấy từ Sellers API v1 (getMarketplaceParticipations.storeName) — KHÁC nhãn vận hành A1/B1/P1/VEXIM US."
+        }
       />
 
       {banner ? (

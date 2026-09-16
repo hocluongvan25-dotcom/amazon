@@ -304,3 +304,109 @@ test("6. chọn marketplace đầu tiên KHÔNG suspended + parse helpers", asyn
   assert.equal(r.marketplaces.length, 2);
   assert.equal(r.ok, true);
 });
+
+/**
+ * TÊN SHOP AMAZON (storeName) — sự cố 16/09/2026: "kết nối được shop nhưng không
+ * hiển thị tên shop Amazon đã kéo về".
+ *
+ * API KHÔNG lỗi: `getMarketplaceParticipations` trả `storeName` (Sellers API v1,
+ * field bắt buộc từ 18/12/2024 — "the name of the seller's store as displayed in
+ * the marketplace"). Lỗi nằm ở client: parseMarketplaces bỏ qua field này.
+ */
+const US_WITH_STORE = {
+  marketplace: {
+    id: "ATVPDKIKX0DER",
+    name: "Amazon.com",
+    countryCode: "US",
+    defaultCurrencyCode: "USD",
+    domainName: "www.amazon.com",
+  },
+  participation: { isParticipating: true, hasSuspendedListings: false },
+  storeName: "VEXIM Store US",
+};
+const CA_WITH_STORE = {
+  marketplace: {
+    id: "A2EUQ1WTGCTBG2",
+    name: "Amazon.ca",
+    countryCode: "CA",
+    defaultCurrencyCode: "CAD",
+    domainName: "www.amazon.ca",
+  },
+  participation: { isParticipating: true, hasSuspendedListings: false },
+  storeName: "VEXIM Store CA",
+};
+
+test("7. storeName được giữ lại (khác marketplace.name) + whoami trả tên shop US ưu tiên", async () => {
+  const list = parseMarketplaces({ payload: [CA_WITH_STORE, US_WITH_STORE] });
+  assert.equal(list.length, 2);
+  assert.equal(list[0].name, "Amazon.ca", "name = tên SÀN");
+  assert.equal(list[0].storeName, "VEXIM Store CA", "storeName = tên SHOP");
+  assert.equal(list[1].storeName, "VEXIM Store US");
+
+  const spapi = mockSpapi((method, path) => {
+    if (path.includes("marketplaceParticipations")) {
+      return { status: 200, data: { payload: [CA_WITH_STORE, US_WITH_STORE] } };
+    }
+    if (path.includes("/fba/inventory/")) return { status: 200, data: SUMMARIES };
+    if (path.includes("/fees/")) return { status: 200, data: FEES_OK };
+    throw new Error(`unexpected ${method} ${path}`);
+  });
+
+  const r = await discoverSellerIdentity({ spapi, region: "NA" });
+  assert.equal(r.marketplace?.id, "ATVPDKIKX0DER", "chốt marketplace US");
+  assert.equal(r.storeName, "VEXIM Store US", "tên shop phải là tên của marketplace đã chốt (US)");
+  assert.deepEqual(r.storeNames.map((s) => [s.marketplaceId, s.storeName]), [
+    ["A2EUQ1WTGCTBG2", "VEXIM Store CA"],
+    ["ATVPDKIKX0DER", "VEXIM Store US"],
+  ]);
+  // SQL hint khai shop phải kèm store_name để UI có tên ngay sau khi khai
+  assert.match(r.sqlHint ?? "", /store_name/);
+  assert.match(r.sqlHint ?? "", /VEXIM Store US/);
+  assert.match(r.sqlHint ?? "", /VEXIM Store CA/);
+});
+
+test("8. thiếu storeName ⇒ null (KHÔNG lấy tên sàn thay thế) và sqlHint không có cột store_name", async () => {
+  const legacyUs = {
+    marketplace: {
+      id: "ATVPDKIKX0DER",
+      name: "Amazon.com",
+      countryCode: "US",
+      defaultCurrencyCode: "USD",
+      domainName: "www.amazon.com",
+    },
+    participation: { isParticipating: true, hasSuspendedListings: false },
+  };
+  const parse = parseMarketplaces({ payload: [legacyUs] });
+  assert.equal(parse[0].storeName, null, "Amazon không trả storeName ⇒ null, không bịa 'Amazon.com'");
+
+  const spapi = mockSpapi((method, path) => {
+    if (path.includes("marketplaceParticipations")) return { status: 200, data: { payload: [legacyUs] } };
+    if (path.includes("/fba/inventory/")) return { status: 200, data: SUMMARIES };
+    if (path.includes("/fees/")) return { status: 200, data: FEES_OK };
+    throw new Error(`unexpected ${method} ${path}`);
+  });
+  const r = await discoverSellerIdentity({ spapi, region: "NA" });
+  assert.equal(r.storeName, null);
+  assert.equal(r.storeNames[0].storeName, null);
+  assert.ok(!/store_name/.test(r.sqlHint ?? ""), "không có tên shop ⇒ không sinh cột store_name");
+});
+
+test("9. storeName có nháy đơn ⇒ sqlHint escape đúng (không phá SQL)", () => {
+  const tricky = {
+    marketplace: { id: "ATVPDKIKX0DER", name: "Amazon.com", countryCode: "US" },
+    participation: { isParticipating: true, hasSuspendedListings: false },
+    storeName: "O'Brien & Sons",
+  };
+  const list = parseMarketplaces({ payload: [tricky] });
+  assert.equal(list[0].storeName, "O'Brien & Sons");
+  // sqlHint chỉ sinh khi có sellerId ⇒ kiểm tra qua discoverSellerIdentity
+  const spapi = mockSpapi((method, path) => {
+    if (path.includes("marketplaceParticipations")) return { status: 200, data: { payload: [tricky] } };
+    if (path.includes("/fba/inventory/")) return { status: 200, data: SUMMARIES };
+    if (path.includes("/fees/")) return { status: 200, data: FEES_OK };
+    throw new Error(`unexpected ${method} ${path}`);
+  });
+  return discoverSellerIdentity({ spapi, region: "NA" }).then((r) => {
+    assert.match(r.sqlHint ?? "", /'O''Brien & Sons'/);
+  });
+});

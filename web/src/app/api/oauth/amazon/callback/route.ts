@@ -10,11 +10,18 @@
  *   - Nay đọc cả `spapi_oauth_code` và `code` (ưu tiên spapi_oauth_code)
  *   - Thêm bypass /api/oauth trong middleware để tránh 404/redirect login
  *   - Log full URL để debug
+ *
+ * FIX TÊN SHOP 16/09/2026 ("kết nối được mà không hiện tên shop Amazon"):
+ *   Ngay sau khi lưu refresh token, gọi Sellers API v1 bằng CHÍNH token vừa đổi
+ *   để lấy `storeName` của từng marketplace và lưu vào DB (cột store_name —
+ *   migration 0031). Lỗi ở bước này KHÔNG được làm hỏng kết nối (token đã lưu
+ *   thành công rồi) — chỉ trả thêm thông báo để người vận hành bấm đồng bộ lại.
  */
 
 import { NextResponse } from "next/server";
 
 import { normalizeRegion, exchangeCodeForRefreshToken, explainLwaError, validateRedirectUri } from "@/lib/spapi/oauth";
+import { listShopCredentials, syncStoreNamesWithFreshToken } from "@/lib/data/shop-names";
 
 export const dynamic = "force-dynamic";
 
@@ -132,14 +139,29 @@ export async function GET(req: Request) {
     return back(req, { oauth: "error", seller: sellerId, msg: "Thiếu redirect_uri/clientId/clientSecret trên server." });
   }
 
-  const shopRes = await adminRest(
-    `/rest/v1/seller_accounts?id=eq.${sellerId}&select=${SHOP_SELECT}&limit=1`,
-    { method: "GET" },
-  );
-  if (!shopRes.ok) {
-    return back(req, { oauth: "error", msg: `Không đọc được shop: ${shopRes.error}` });
+  /**
+   * Đọc shop theo hai đường:
+   *   1. RPC public.vexim_worker_list_shop_credentials (0031) — KHÔNG phụ thuộc
+   *      việc schema `connections` có nằm trong "Exposed schemas" hay không.
+   *   2. Fallback REST cũ — để code chạy được ngay cả khi chưa chạy 0031.
+   */
+  let shop: ShopRow | undefined;
+  const credentials = await listShopCredentials();
+  if (credentials.ok) {
+    const found = credentials.shops.find((s) => s.sellerAccountId === sellerId);
+    if (found) {
+      shop = { id: found.sellerAccountId, display_name: found.displayName, seller_id: found.sellerId };
+    }
+  } else {
+    const shopRes = await adminRest(
+      `/rest/v1/seller_accounts?id=eq.${sellerId}&select=${SHOP_SELECT}&limit=1`,
+      { method: "GET" },
+    );
+    if (!shopRes.ok) {
+      return back(req, { oauth: "error", msg: `Không đọc được shop: ${shopRes.error}` });
+    }
+    shop = (Array.isArray(shopRes.data) ? shopRes.data[0] : undefined) as ShopRow | undefined;
   }
-  const shop = (Array.isArray(shopRes.data) ? shopRes.data[0] : undefined) as ShopRow | undefined;
   if (!shop) return back(req, { oauth: "error", msg: "Shop không tồn tại." });
 
   if (sellingPartnerId !== "" && shop.seller_id && shop.seller_id !== sellingPartnerId) {
@@ -178,20 +200,59 @@ export async function GET(req: Request) {
     | { days_left?: number; replaced?: boolean }
     | undefined;
 
-  if (sellingPartnerId !== "" && !shop.seller_id) {
-    await adminRest(`/rest/v1/seller_accounts?id=eq.${sellerId}`, {
-      method: "PATCH",
-      body: { seller_id: sellingPartnerId },
-      prefer: "return=minimal",
-    });
+  // ---------------------------------------------------------------------------
+  // TÊN SHOP AMAZON (storeName) — DÙNG CHÍNH TOKEN VỪA ĐỔI ĐƯỢC
+  // ---------------------------------------------------------------------------
+  // Sellers API v1 (GET /sellers/v1/marketplaceParticipations) trả `storeName`
+  // cho từng marketplace: "The name of the seller's store as displayed in the
+  // marketplace". Token vừa đổi thuộc ĐÚNG seller này ⇒ ghi tên vào đúng dòng
+  // shop, không thể lẫn shop khác.
+  //
+  // Không chặn kết nối: token đã lưu xong. Lỗi chỉ hiện thành ghi chú vàng trên
+  // màn Kết nối shop, kèm nút [Đồng bộ tên shop] để thử lại.
+  let storeName: string | null = null;
+  let storeNote: string | null = null;
+  const sellerKey = sellingPartnerId || shop.seller_id || "";
+  if (sellerKey !== "") {
+    try {
+      const sync = await syncStoreNamesWithFreshToken({
+        sellerId: sellerKey,
+        refreshToken: exchanged.refreshToken,
+        region: normalizeRegion(process.env.AMAZON_SP_API_REGION),
+      });
+      const row = sync.rows.find((r) => r.sellerAccountId === sellerId);
+      storeName = row?.storeName ?? null;
+      if (!storeName) {
+        storeNote =
+          row?.message ??
+          `Chưa lấy được tên shop Amazon cho seller ${sellerKey}: ${sync.message}`;
+      }
+      console.log(
+        `[OAuth Callback] storeName sync: updated=${sync.updated} unchanged=${sync.unchanged} ` +
+          `missing=${sync.missing} failed=${sync.failed} skipped=${sync.skipped} | ${sync.message}`,
+      );
+    } catch (e) {
+      storeNote = `Không lấy được tên shop Amazon: ${e instanceof Error ? e.message : String(e)}`;
+      console.error(`[OAuth Callback] storeName sync threw: ${storeNote}`);
+    }
+  } else {
+    storeNote =
+      "Amazon không trả selling_partner_id trong callback nên chưa đối chiếu được shop — " +
+      "bấm [Đồng bộ tên shop] trên màn Kết nối shop.";
   }
 
-  console.log(`[OAuth Callback] Success seller=${sellerId} days=${savedRow?.days_left} replaced=${savedRow?.replaced}`);
+  console.log(
+    `[OAuth Callback] Success seller=${sellerId} days=${savedRow?.days_left} ` +
+      `replaced=${savedRow?.replaced} storeName=${storeName ?? "(chưa có)"}`,
+  );
 
   return back(req, {
     oauth: "ok",
     seller: sellerId,
+    shop: shop.display_name ?? "",
     days: String(savedRow?.days_left ?? ""),
     replaced: savedRow?.replaced === true ? "1" : "0",
+    store: storeName ?? "",
+    storeMsg: storeNote ?? "",
   });
 }

@@ -5390,7 +5390,127 @@ await ex("reset role; rollback;");
 await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
 
 // ============================================================================
-console.log("\n=== BƯỚC 31: repair/recreate_research_public_views.sql (19 view gồm G4+G5+G7) ===");
+console.log("\n=== BƯỚC 31: 0031 — TÊN SHOP AMAZON (storeName) cho màn Kết nối shop ===");
+// ============================================================================
+// Bối cảnh sự cố 16/09/2026: "kết nối được shop nhưng KHÔNG hiển thị tên shop
+// Amazon đã kéo về". API không lỗi — getMarketplaceParticipations có trả
+// `storeName` ("the name of the seller's store as displayed in the marketplace",
+// Sellers API v1), nhưng client bỏ qua field đó và DB cũng chưa có cột nào chứa
+// tên shop. Bước này kiểm chứng phần DB của bản sửa.
+//
+// Trạng thái trước 0031: harness KHÔNG chạy 0023/0024 nên view đang ở shape 0016.
+// Dựng lại view theo shape 0024 (đúng như production đang có) để kiểm chứng
+// ĐƯỜNG THẬT trên Supabase: "create or replace view + thêm 2 cột ở CUỐI".
+await ex("drop view if exists public.vexim_shops");
+await ex(`create view public.vexim_shops with (security_invoker = true) as
+  select sa.id as seller_account_id, sa.seller_id as seller_id, sa.display_name as shop,
+         sa.display_name as display_name, sa.marketplace as marketplace,
+         sa.marketplace as marketplace_id, sa.status, sa.data_source, sa.health_status,
+         sa.last_sync_at
+    from connections.seller_accounts sa`);
+ok(
+  (await colsOf("vexim_shops")) ===
+    "seller_account_id,seller_id,shop,display_name,marketplace,marketplace_id,status," +
+      "data_source,health_status,last_sync_at",
+  "0031 (chuẩn bị): vexim_shops ở shape 0024 giống production",
+);
+
+await ex(rd("migrations/0031_shop_store_name.sql"), "0031 lần 1");
+ok(true, "0031 chạy sạch (cột store_name · view · 2 RPC service_role)");
+ok(
+  (await colsOf("vexim_shops")) ===
+    "seller_account_id,seller_id,shop,display_name,marketplace,marketplace_id,status," +
+      "data_source,health_status,last_sync_at,store_name,store_name_synced_at",
+  `0031: view thêm store_name + store_name_synced_at Ở CUỐI, khớp SHOP_SELECT_V3 của oauth.ts — nhận: ${await colsOf("vexim_shops")}`,
+);
+await ex(rd("migrations/0031_shop_store_name.sql"), "0031 lần 2");
+ok(
+  (await colsOf("vexim_shops")) ===
+    "seller_account_id,seller_id,shop,display_name,marketplace,marketplace_id,status," +
+      "data_source,health_status,last_sync_at,store_name,store_name_synced_at",
+  "0031 idempotent (chạy lại không nhân đôi cột, không lỗi)",
+);
+
+const s31 = (
+  await one(
+    "select id from connections.seller_accounts where seller_id='AQMVYI4HJTI4C' and marketplace='ATVPDKIKX0DER'",
+  )
+).id;
+ok(!!s31, "0031: shop production US của 0009 vẫn nguyên vẹn để test");
+
+await ex("begin");
+// 1. Người dùng web KHÔNG gọi được 2 RPC này (chỉ service_role)
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',true);`);
+ok(
+  await mustBlock(`select * from public.vexim_worker_set_shop_store_name('${s31}', 'Tên giả')`),
+  "0031 CHẶN: người dùng web không ghi được tên shop",
+);
+ok(
+  await mustBlock("select * from public.vexim_worker_list_shop_credentials()"),
+  "0031 CHẶN: người dùng web KHÔNG đọc được refresh token của shop",
+);
+
+// 2. service_role (worker/callback) ghi tên shop
+await ex("reset role; set local role service_role; select set_config('request.jwt.claim.sub','',true);");
+const saved31 = await one(
+  `select * from public.vexim_worker_set_shop_store_name('${s31}', 'VEXIM Store US') limit 1`,
+);
+ok(
+  saved31?.store_name === "VEXIM Store US" && saved31?.changed === true,
+  `0031: service_role lưu được tên shop (nhận ${JSON.stringify(saved31)})`,
+);
+await cmp(
+  "0031: tên shop nằm đúng dòng seller_accounts + có mốc đồng bộ",
+  `select count(*) n from connections.seller_accounts
+    where id='${s31}' and store_name='VEXIM Store US'
+      and store_name_source='spapi' and store_name_synced_at is not null`,
+  1,
+);
+
+// 3. Tên RỖNG không được ghi đè (Amazon trả thiếu storeName ⇒ giữ tên cũ)
+const blank31 = await one(
+  `select * from public.vexim_worker_set_shop_store_name('${s31}', '   ') limit 1`,
+);
+ok(blank31?.changed === false, "0031: tên rỗng KHÔNG ghi đè tên đang có");
+await cmp(
+  "0031: tên cũ vẫn nguyên sau khi gọi với tên rỗng",
+  `select count(*) n from connections.seller_accounts where id='${s31}' and store_name='VEXIM Store US'`,
+  1,
+);
+const creds31 = await one("select count(*)::int n from public.vexim_worker_list_shop_credentials()");
+ok(creds31?.n >= 2, `0031: list_shop_credentials đọc được shop + token (nhận ${creds31?.n})`);
+
+// 4. Web (authenticated, có RLS) ĐỌC được tên shop qua view
+await ex("reset role; set local role authenticated; select set_config('request.jwt.claim.sub','" + adminId + "',true);");
+await cmp(
+  "0031: web đọc được store_name qua view (RLS seller_accounts vẫn áp)",
+  `select count(*) n from public.vexim_shops
+    where seller_account_id='${s31}' and store_name='VEXIM Store US'`,
+  1,
+);
+await ex("reset role; rollback;");
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+
+// 5. Deployment NHẢY CÓC (chưa từng chạy 0024): view còn shape 0016 ⇒ 0031 phải
+//    dựng lại được thay vì lỗi "cannot change name of view column".
+await ex("begin");
+await ex("drop view if exists public.vexim_shops");
+await ex(`create view public.vexim_shops with (security_invoker = true) as
+  select sa.id as seller_account_id, sa.display_name as shop, sa.marketplace,
+         sa.status, sa.data_source, sa.health_status, sa.last_sync_at
+    from connections.seller_accounts sa`);
+await ex(rd("migrations/0031_shop_store_name.sql"), "0031 trên shape 0016");
+ok(
+  (await colsOf("vexim_shops")) ===
+    "seller_account_id,seller_id,shop,display_name,marketplace,marketplace_id,status," +
+      "data_source,health_status,last_sync_at,store_name,store_name_synced_at",
+  "0031: shape 0016 (nhảy cóc 0024) vẫn dựng lại được view 12 cột",
+);
+await ex("rollback");
+await ex(`select set_config('request.jwt.claim.sub','${adminId}',false)`);
+
+// ============================================================================
+console.log("\n=== BƯỚC 32: repair/recreate_research_public_views.sql (19 view gồm G4+G5+G7) ===");
 await ex(rd("repair/recreate_research_public_views.sql"), "repair views G7");
 await cmp("repair: đủ 19 view public.vexim_research_*",
   `select count(*) n from information_schema.views

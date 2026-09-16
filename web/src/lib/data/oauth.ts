@@ -24,9 +24,15 @@ import { MARKETPLACE_META, marketplaceLabel, connectStatusOf, groupBySeller } fr
 export type { ConnectShopRow } from "./oauth-shared";
 export { MARKETPLACE_META, marketplaceLabel, connectStatusOf, groupBySeller };
 
-// Cố gắng lấy seller_id và display_name nếu view đã được migrate (0024), fallback về view cũ
+// Chọn cột theo mức migration đã chạy:
+//   V3 (0031) → có store_name (tên shop Amazon) + store_name_synced_at
+//   V2 (0024) → có seller_id + display_name
+//   V1 (0016) → chỉ shop/marketplace
+// Đọc V3 trước, thiếu cột thì lùi dần — deploy code trước khi chạy migration
+// không làm vỡ màn Kết nối shop.
 const SHOP_SELECT = "seller_account_id,shop,marketplace,status,data_source";
 const SHOP_SELECT_V2 = "seller_account_id,shop,marketplace,status,data_source,seller_id,display_name";
+const SHOP_SELECT_V3 = SHOP_SELECT_V2 + ",store_name,store_name_synced_at";
 const TOKEN_SELECT =
   "seller_account_id,shop,is_active,is_expired,needs_reauth,days_left,expires_at," +
   "authorized_at,notice_days,refresh_count,rotate_reminder_sent,notice_sent_at,ads_profiles";
@@ -36,15 +42,26 @@ export async function readConnectShops(): Promise<ConnectShopRow[]> {
   if (!client) throw new Error("Supabase unavailable");
 
   let shops: Record<string, unknown>[] = [];
+  let shopSelect = SHOP_SELECT_V3;
   try {
     shops = await readAll<Record<string, unknown>>((from, to) =>
-      client.from("vexim_shops").select(SHOP_SELECT_V2).order("shop").range(from, to),
+      client.from("vexim_shops").select(SHOP_SELECT_V3).order("shop").range(from, to),
     );
   } catch {
-    shops = await readAll<Record<string, unknown>>((from, to) =>
-      client.from("vexim_shops").select(SHOP_SELECT).order("shop").range(from, to),
-    );
+    // Migration 0031 chưa chạy → view chưa có cột store_name
+    shopSelect = SHOP_SELECT_V2;
+    try {
+      shops = await readAll<Record<string, unknown>>((from, to) =>
+        client.from("vexim_shops").select(SHOP_SELECT_V2).order("shop").range(from, to),
+      );
+    } catch {
+      shopSelect = SHOP_SELECT;
+      shops = await readAll<Record<string, unknown>>((from, to) =>
+        client.from("vexim_shops").select(SHOP_SELECT).order("shop").range(from, to),
+      );
+    }
   }
+  const hasStoreNameColumn = shopSelect === SHOP_SELECT_V3;
 
   let tokens: Record<string, unknown>[] = [];
   try {
@@ -64,7 +81,13 @@ export async function readConnectShops(): Promise<ConnectShopRow[]> {
       const marketplaceId = String(s.marketplace ?? "");
       const displayName = String((s as any).display_name ?? s.shop ?? id);
       const sellerId = (s as any).seller_id ? String((s as any).seller_id) : null;
+      const storeName =
+        hasStoreNameColumn && (s as any).store_name ? String((s as any).store_name) : null;
       return {
+        storeName,
+        storeNameSyncedAt: (s as any).store_name_synced_at
+          ? String((s as any).store_name_synced_at)
+          : null,
         sellerAccountId: id,
         shop: String(s.shop ?? id),
         marketplace: marketplaceId,

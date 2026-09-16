@@ -94,6 +94,12 @@ supabase db push        # tự chạy theo thứ tự
 
 **Cách 3 — Dashboard SQL Editor:** mở **SQL Editor** trên supabase.com, dán & chạy **lần lượt theo thứ tự tên file** trong thư mục `migrations/` (bắt đầu từ `0001_init.sql` cho tới file số cao nhất hiện có), cuối cùng chạy `seed.sql`. Riêng các file 0025–0027 (Module 8) bắt buộc chạy SAU khi đã có đủ 0001–0024.
 
+> **`0031_shop_store_name.sql`** — tên shop Amazon (Sellers API v1 · `storeName`) đổ về
+> `connections.seller_accounts.store_name` + view `vexim_shops` + 2 RPC `service_role`
+> (`vexim_worker_set_shop_store_name`, `vexim_worker_list_shop_credentials`).
+> Chạy SAU 0030. Idempotent; tự dựng lại view được cả khi deployment cũ chưa chạy 0024.
+> Chi tiết điều tra & cách kiểm chứng: `docs/bao-cao-loi-ten-shop-amazon.md`.
+
 > `seed/seed_demo.sql` **không còn cần** cho phần admin/alerts — 0007 đã thay thế
 > vì nó không phụ thuộc `auth.uid()` (thứ khiến seed_demo âm thầm bỏ qua trong SQL Editor).
 

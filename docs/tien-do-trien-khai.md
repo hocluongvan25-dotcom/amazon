@@ -1245,3 +1245,27 @@ Code chỉ đọc **5 tên** này (`grep -rn "process.env" web/src`):
 9 biến còn lại trên Vercel (`POSTGRES_*`, `SUPABASE_PUBLISHABLE_KEY`,
 `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`, `SUPABASE_ANON_KEY`,
 `SUPABASE_URL`, `SUPABASE_JWT_SECRET`) **code không đọc** — không gây hại, có thể để nguyên.
+
+---
+
+## 16/09/2026 — Sự cố "kết nối shop rồi mà không thấy tên shop Amazon" (đã xử lý)
+
+**Triệu chứng (chủ dự án báo):** shop kết nối thành công, token lưu bình thường, nhưng không thấy **tên shop Amazon** ở đâu cả — màn Kết nối shop chỉ hiện nhãn vận hành "VEXIM US - Chính".
+
+**Kết luận điều tra: KHÔNG lỗi API.** Theo mô hình chính thức (`amzn/selling-partner-api-models`, `models/sellers-api-model/sellers.json`), `GET /sellers/v1/marketplaceParticipations` trả `storeName` = *"the name of the seller's store as displayed in the marketplace"* (field **bắt buộc**, có từ changelog SP-API **18/12/2024**). Lỗi ở phía mình, 3 chỗ:
+1. `parseMarketplaces()` (web/src/lib/spapi/whoami.ts) chỉ lấy `marketplace.name` (= "Amazon.com", tên **sàn**) và **bỏ qua `storeName`**;
+2. DB `connections.seller_accounts` **không có cột** nào chứa tên shop (`display_name` là nhãn vận hành VEXIM tự đặt);
+3. UI chỉ hiển thị `display_name`.
+
+**Đã sửa:**
+- Đọc `storeName` (giữ theo **từng marketplace**: US ≠ CA) — `whoami.ts`, `/api/amazon/whoami` trả thêm `storeName` + `storeNames[]`, `sqlHint` khai shop kèm `store_name`.
+- Migration **`0031_shop_store_name.sql`**: 3 cột `store_name`/`store_name_source`/`store_name_synced_at`; view `vexim_shops` phơi thêm 2 cột ở cuối; RPC `vexim_worker_set_shop_store_name` + `vexim_worker_list_shop_credentials` (**chỉ service_role**, web vẫn không ghi thẳng được — chốt bằng self-check + test).
+- Module mới `web/src/lib/spapi/shop-name.ts` + `web/src/lib/data/shop-names.ts`: lấy tên bằng **đúng refresh token của shop đó** (token env chỉ dùng khi `seller_id` trùng, mặc định `AQMVYI4HJTI4C`); tên rỗng **không** ghi đè.
+- **Ngay sau khi authorize** (callback OAuth) tự lấy tên shop; màn Kết nối shop có nút **[⤓ Đồng bộ tên shop Amazon]** + hiện "🏪 Tên trên Amazon" từng shop; mọi lỗi (invalid_grant / 403 / 401 / 429 / thiếu storeName / chưa chạy 0031) được dịch thành câu tiếng Việt có việc-cần-làm.
+- `worker/src/amazon/sellers.ts` hết stub — thành client Sellers API thật.
+- 2 test Module 0 cũ (`worker/tests/ads-jobs.test.ts`, phần `oauth-reminder`) dùng mốc thời gian cứng nên **đỏ dần theo lịch** — đã chuyển sang tính theo `Date.now()`.
+
+**Kiểm chứng:** `worker npm test` **481/481 PASS** (thêm 24 test mới: shop-name 9 · shop-name-sync 12 · whoami +3) · `supabase npm test` **TẤT CẢ PASS** (BƯỚC 31 mới kiểm chứng 0031 trên Postgres 18: idempotent, hợp đồng 12 cột view, chặn web, tên rỗng không ghi đè, nhánh nhảy cóc 0024) · `web tsc --noEmit` sạch · `web npm test` 357/357 · `next build` OK.
+
+**VEXIM cần làm:** chạy migration `0031` (SQL Editor) → Redeploy web → mở Module 0 → Kết nối shop → bấm **[⤓ Đồng bộ tên shop Amazon]**.
+Chi tiết đầy đủ + checklist API + SQL kiểm tra: **`docs/bao-cao-loi-ten-shop-amazon.md`**.

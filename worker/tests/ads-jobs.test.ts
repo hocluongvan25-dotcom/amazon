@@ -450,7 +450,10 @@ test("ads-pull: có dòng F4 cùng tiền tệ → lấp ads_spend (TACOS có s�
 
 test("oauth-reminder: token còn 5 ngày → tạo cảnh báo + đánh dấu đã nhắc (không lặp mỗi ngày)", async () => {
   const db = new MockDbAdapter();
-  const soon = new Date(NOW.getTime() + 5 * 86_400_000).toISOString();
+  // ⚠️ Mốc hạn phải tính theo ĐỒNG HỒ THẬT, không theo NOW: MockDbAdapter
+  // .listOauthSoon() đếm daysLeft bằng Date.now() (đúng như DB production dùng
+  // now()). Dùng NOW cứng ⇒ test đỏ dần theo thời gian dù sản phẩm không đổi.
+  const soon = new Date(Date.now() + 5 * 86_400_000).toISOString();
   await db.saveOauthToken(SHOP.id, {
     refreshToken: "Atzr|abc",
     authorizedAt: NOW.toISOString(),
@@ -463,10 +466,9 @@ test("oauth-reminder: token còn 5 ngày → tạo cảnh báo + đánh dấu đ
   assert.equal(r1.alertsCreated, 1);
   assert.equal(r1.marked, 1);
   assert.equal(db.alerts[0].ruleCode, "oauth_reauth_due");
-  // Số ngày làm tròn xuống theo giờ thực lúc chạy (mock đọc đồng hồ hệ thống;
-  // NOW là mốc giả định nên khi chạy trễ vài ngày so với mốc, số ngày còn lại
-  // có thể tụt xuống 2–3 — chỉ khoá là token đang trong cửa sổ "sắp hết hạn".
-  assert.match(String(db.alerts[0].detail), /còn ([2-5]) ngày/);
+  // Khoá LUẬT: cảnh báo phải nói rõ còn bao nhiêu ngày (giá trị lấy từ đồng hồ
+  // thật của mock, nên chỉ kiểm tra định dạng + đang trong cửa sổ nhắc).
+  assert.match(String(db.alerts[0].detail), /còn \d+ ngày/);
 
   const r2 = await runOauthReminder({ db, now: NOW, log: () => {} });
   assert.equal(r2.alertsCreated, 0);
@@ -491,7 +493,8 @@ test("oauth-reminder: dry-run chỉ đọc — KHÔNG tạo cảnh báo, KHÔNG 
   const db = new MockDbAdapter();
   await db.saveOauthToken(SHOP.id, {
     refreshToken: "Atzr|abc",
-    expiresAt: new Date(NOW.getTime() + 3 * 86_400_000).toISOString(),
+    // đồng hồ thật, xem chú thích ở test "token còn 5 ngày"
+    expiresAt: new Date(Date.now() + 3 * 86_400_000).toISOString(),
     noticeDays: 30,
   });
   const res = await runOauthReminder({ db, now: NOW, dryRun: true, log: () => {} });

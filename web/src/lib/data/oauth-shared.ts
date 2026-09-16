@@ -11,6 +11,14 @@ export type ConnectShopRow = {
   marketplaceId: string;
   sellerId: string | null;
   displayName: string;
+  /**
+   * TÊN SHOP TRÊN AMAZON (Sellers API v1 — `storeName` của getMarketplaceParticipations).
+   * KHÁC `displayName` (nhãn vận hành VEXIM đặt). null = chưa đồng bộ được
+   * ⇒ UI hiện nút [Chưa có tên Amazon — bấm để lấy].
+   */
+  storeName: string | null;
+  /** Lần cuối storeName được đồng bộ từ Amazon */
+  storeNameSyncedAt: string | null;
   dataSource: string | null;
   status: string | null;
   hasToken: boolean;
