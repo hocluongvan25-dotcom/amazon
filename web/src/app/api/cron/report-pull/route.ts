@@ -19,7 +19,7 @@
  *   chờ: poll 2 lần cách nhau vài giây, chưa xong thì ghi trạng thái vào
  *   connections.report_requests và lần chạy sau poll tiếp ĐÚNG reportId đó (job
  *   đã xử lý). Muốn chờ lâu hơn thì chạy CLI:
- *   `npm run worker:reports-pull` / `npm run worker:ads-pull` (không bị trần 60s).
+ *   `cd worker && npm run worker:reports-pull` / `npm run worker:ads-pull` (không bị trần 60s).
  *
  * Protect bằng CRON_SECRET (Authorization: Bearer <CRON_SECRET>) — Vercel Cron tự
  * gửi header này. Thiếu CRON_SECRET trên production → trả 500 kèm hướng dẫn

@@ -123,7 +123,7 @@ export async function decideSuggestionAction(form: FormData): Promise<ActionStat
 /* ==========================================================================
  * PHẦN 1 — KÉO DỮ LIỆU VỀ (Module 5 phần 1): nút "Chạy đồng bộ ngay"
  * ==========================================================================
- * Trên Vercel không có shell để chạy `npm run worker:ads-sync`, nên người vận
+ * Trên Vercel không có shell để chạy `cd worker && npm run worker:ads-sync`, nên người vận
  * hành cần một nút chạy ĐÚNG 2 job của cron (sync cấu trúc → kéo 5 report Ads)
  * và đọc được kết quả thật (kể cả lỗi Amazon trả về).
  *

@@ -21,13 +21,19 @@ import { ChangeForm } from "@/components/ppc/ChangeForm";
 import { Chip, Panel, tableCls } from "@/components/ui";
 import {
   A3_DEFAULT_FILTER,
+  a3BlockRisk,
+  a3FailedChange,
+  a3HasOpenChange,
+  changeStatusMeta,
   a3Evidence,
+  a3Freshness,
   adsMoney,
   adsNum,
   adsPct,
   filterSearchTerms,
   matchTypeLabel,
   suggestionShortLabel,
+  type A3InFlight,
   type AdsSearchTermRaw,
 } from "@/lib/data/ppc-model";
 
@@ -38,9 +44,23 @@ type Props = {
   /** Cố định theo campaign khi mở từ A2. */
   campaignId?: string | null;
   campaignName?: string | null;
+  /** true = đã chạm trần số dòng đọc về (chỉ thấy phần chi nhiều nhất). */
+  truncated?: boolean;
+  /**
+   * Yêu cầu CHẶN còn bay (khoá = campaign|ad group|chữ) — để không tạo yêu cầu
+   * trùng cho term vừa duyệt, và để nói rõ lần ghi trước có lỗi hay không.
+   */
+  inFlight?: Record<string, A3InFlight>;
 };
 
-export function SearchTermsBoard({ rows, canDecide, campaignId, campaignName }: Props) {
+export function SearchTermsBoard({
+  rows,
+  canDecide,
+  campaignId,
+  campaignName,
+  truncated = false,
+  inFlight = {},
+}: Props) {
   const [q, setQ] = useState("");
   const [minSpend, setMinSpend] = useState(String(A3_DEFAULT_FILTER.minSpend));
   const [minClicks, setMinClicks] = useState(String(A3_DEFAULT_FILTER.minClicks));
@@ -81,6 +101,13 @@ export function SearchTermsBoard({ rows, canDecide, campaignId, campaignName }: 
     return { spend, clicks, blocked };
   }, [shown]);
 
+  /** Nhiều shop cùng hiện ⇒ phải nói rõ dòng nào của shop nào (tránh chặn nhầm shop). */
+  const shops = useMemo(() => new Set(rows.map((r) => r.shop).filter(Boolean)), [rows]);
+  /** Số dòng 7 ngày không đơn nhưng 14 ngày CÓ doanh số — chặn là cắt phần đang ra đơn. */
+  const risky = useMemo(() => shown.filter((r) => a3BlockRisk(r) !== null).length, [shown]);
+  /** Số liệu 7/14 ngày tính theo NGÀY DỮ LIỆU CUỐI, không phải hôm nay. */
+  const fresh = useMemo(() => a3Freshness(rows), [rows]);
+
   function decide(suggestionId: string, decision: "approve" | "reject" | "dismiss", term: string | null) {
     startTransition(async () => {
       setMsg(null);
@@ -102,6 +129,14 @@ export function SearchTermsBoard({ rows, canDecide, campaignId, campaignName }: 
           }`}
         >
           {msg.text}
+        </div>
+      ) : null}
+
+      {!msg && fresh.stale ? (
+        <div className="mb-3 rounded-[10px] bg-amber-soft px-3.5 py-2.5 text-[13px] font-semibold text-[#8a5602]">
+          Dữ liệu search term dừng ở ngày <b>{fresh.day}</b> (cách đây {fresh.ageDays} ngày). Các cột “7 ngày / 14 ngày”
+          tính theo NGÀY DỮ LIỆU CUỐI, không phải hôm nay — đừng chặn từ khoá dựa trên số cũ. Kiểm tra cron/credential ở
+          màn <a className="font-bold underline" href="/ppc">Quảng cáo (PPC)</a> rồi chạy lại đồng bộ.
         </div>
       ) : null}
 
@@ -147,6 +182,20 @@ export function SearchTermsBoard({ rows, canDecide, campaignId, campaignName }: 
             {adsNum(totals.clicks)} click · {totals.blocked} đã chặn
           </span>
         </div>
+        <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[11.5px] text-soft">
+          <span>{fresh.label}</span>
+          {shops.size > 1 ? <span>· {shops.size} shop đang trộn trong bảng (cột shop hiện ở mỗi dòng)</span> : null}
+          {risky > 0 ? (
+            <span className="font-semibold text-[#8a5602]">
+              · {risky} dòng có doanh số 14 ngày nhưng 0 đơn 7 ngày (cân nhắc trước khi chặn)
+            </span>
+          ) : null}
+          {truncated ? (
+            <span className="font-semibold text-[#8a5602]">
+              · chỉ đọc 3.000 dòng chi nhiều nhất — thu hẹp theo campaign/shop để xem phần còn lại
+            </span>
+          ) : null}
+        </div>
       </Panel>
 
       <Panel
@@ -156,7 +205,15 @@ export function SearchTermsBoard({ rows, canDecide, campaignId, campaignName }: 
         {shown.length === 0 ? (
           <div className="rounded-[10px] border border-dashed border-line px-3 py-6 text-center text-[13px] text-soft">
             Không có dòng nào khớp bộ lọc. Đây là tin TỐT: không có search term nào đốt tiền mà không ra đơn ở
-            ngưỡng hiện tại. (Cần dữ liệu thì chạy <code>npm run worker:ads-pull -- --kind=search-terms</code>.)
+            ngưỡng hiện tại.
+            {rows.length === 0 ? (
+              <>
+                {" "}
+                Còn nếu bảng chưa có dòng nào (0/{rows.length}) thì chưa có dữ liệu để lọc: xem khối “Chưa có dữ liệu
+                search term” phía trên hoặc chẩn đoán kết nối ở màn <a className="font-bold underline" href="/ppc">Quảng
+                cáo (PPC)</a>.
+              </>
+            ) : null}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -175,6 +232,9 @@ export function SearchTermsBoard({ rows, canDecide, campaignId, campaignName }: 
               <tbody>
                 {shown.map((r) => {
                   const blocked = r.negative_keyword_id !== null;
+                  // Yêu cầu chặn còn bay / đã lỗi — tính trước để JSX đọc được như câu văn.
+                  const flying = a3HasOpenChange(inFlight, r);
+                  const failedChange = a3FailedChange(inFlight, r);
                   return (
                     <tr key={`${r.seller_account_id}-${r.campaign_id}-${r.ad_group_id}-${r.term}-${r.match_type}`}>
                       <td className={tableCls.td}>
@@ -185,6 +245,9 @@ export function SearchTermsBoard({ rows, canDecide, campaignId, campaignName }: 
                         ) : (
                           <div className="text-[11px] font-semibold text-amber">Chưa ra đơn lần nào trong dữ liệu</div>
                         )}
+                        {a3BlockRisk(r) ? (
+                          <div className="mt-0.5 text-[11px] font-semibold text-[#8a5602]">⚠ {a3BlockRisk(r)}</div>
+                        ) : null}
                       </td>
                       <td className={tableCls.td}>
                         <div className="text-[12px]">{r.keyword_text ?? "—"}</div>
@@ -192,6 +255,7 @@ export function SearchTermsBoard({ rows, canDecide, campaignId, campaignName }: 
                           {matchTypeLabel(r.match_type)} · {r.ad_group_name ?? r.ad_group_id}
                         </div>
                         <div className="text-[11px] text-soft">{r.campaign_name ?? r.campaign_id}</div>
+                        {shops.size > 1 ? <div className="text-[11px] font-semibold text-soft">🏬 {r.shop}</div> : null}
                       </td>
                       <td className={tableCls.tdNum}>{adsMoney(r.spend_7d, r.currency ?? "")}</td>
                       <td className={tableCls.tdNum}>
@@ -229,7 +293,39 @@ export function SearchTermsBoard({ rows, canDecide, campaignId, campaignName }: 
                         )}
                       </td>
                       <td className={tableCls.td}>
-                        {r.pending_suggestion_id ? (
+                        {flying ? (
+                          <>
+                            <Chip tone={changeStatusMeta(flying.status).tone}>{changeStatusMeta(flying.status).label}</Chip>
+                            <div className="mt-0.5 text-[11px] text-soft">
+                              Đã có yêu cầu chặn cho term này — KHÔNG tạo thêm để Amazon không báo trùng.
+                            </div>
+                          </>
+                        ) : failedChange ? (
+                          <>
+                            <Chip tone="red">Lần ghi trước LỖI</Chip>
+                            <div className="mt-0.5 text-[11px] text-soft">
+                              {failedChange.error
+                                ? failedChange.error.slice(0, 160)
+                                : "Amazon từ chối — xem màn Duyệt & ghi (A4)."}
+                            </div>
+                            <div className="mt-1.5">
+                              <ChangeForm
+                                sellerAccountId={r.seller_account_id}
+                                action="add_negative_exact"
+                                entityType="search_term"
+                                entityKey={r.term ?? ""}
+                                campaignId={r.campaign_id}
+                                adGroupId={r.ad_group_id}
+                                label={r.term ?? r.keyword_text ?? ""}
+                                valueLabel="Chữ cần chặn"
+                                defaultValue={r.term ?? ""}
+                                submitLabel="Thử chặn lại (Exact)"
+                                hint="Yêu cầu cũ đã LỖI nên có thể gửi lại; thêm negative vẫn không cần duyệt ngưỡng."
+                                inputWidth="w-44"
+                              />
+                            </div>
+                          </>
+                        ) : r.pending_suggestion_id ? (
                           <div className="flex flex-col gap-1.5">
                             {canDecide ? (
                               <div className="flex items-center gap-1.5">

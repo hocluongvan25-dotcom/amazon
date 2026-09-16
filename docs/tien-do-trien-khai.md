@@ -1,6 +1,6 @@
 # TIẾN ĐỘ TRIỂN KHAI — VEXIM OPS
 
-> Cập nhật: 16/09/2026 (Module 5 PPC/Ads: rà soát API + chẩn đoán kết nối · quản lý shop Module 0 · tên shop Amazon) · G1+G2 Module 8 · Thứ tự build đã chốt: **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** (21 màn Đợt 1)
+> Cập nhật: 16/09/2026 (Module 5 PPC/Ads: rà soát API + sửa media type v3 + nối gương negative keyword + rà trang A3 Search term · quản lý shop Module 0 · tên shop Amazon) · G1+G2 Module 8 · Thứ tự build đã chốt: **0 → 7 → 4 → 3 → 1(đọc) → 2 → 6(đọc)** (21 màn Đợt 1)
 
 ## Cập nhật 15/09 — MODULE 8 GIAI ĐOẠN 3: tập trung thị trường CR3/CR5/HHI, Amazon 1P, velocity (migration 0027)
 
@@ -1369,3 +1369,65 @@ quả màn trống, 5 cổng, 3 bước bật thật, giới hạn "chưa chứn
 - Luật URL dùng CHUNG một chỗ: `isHttpsImageUrl()` trong `editor-model.ts` — cổng validation gửi Amazon và ảnh xem trước không thể lệch nhau.
 
 **Kiểm chứng:** `web npm test` **381/381** (thêm 2 test: luật URL https + lưu/xoá link theo từng ô) · `tsc` sạch · `next build` OK · `supabase npm test` TẤT CẢ PASS · `worker` 481/481. Preview demo (port 3000) đã dựng sẵn để thử: bản nháp demo có sẵn 1 link ở “Ảnh chính” nên thumbnail hiện ngay khi mở trang.
+
+## 16/09/2026 (lần 5) — Module 5: rà trang "A3 — Search term & Negative keyword" (`/ppc/search-terms`)
+
+**Yêu cầu (chủ dự án):** gửi link `…/ppc/search-terms` + *"Vậy còn trang này, xem có bị thiếu hay sai gì không?"*
+
+**Cách rà:** đọc luồng dữ liệu của trang từ đầu tới cuối (`page.tsx` → `SearchTermsBoard.tsx` →
+`ppc-model.ts` → view `vexim_ads_search_terms` ở migration 0020 §19.4 / 0021 §8.5 → RPC
+`vexim_worker_record_ads_change`), đối chiếu lại với 2 collection Postman chính thức trong
+`amzn/ads-advanced-tools-docs` và manifest connector Airbyte đã chạy thật. (Link Vercel của dự án có
+**Deployment Protection** nên không mở trực tiếp được — rà bằng bản build trong repo.)
+
+**Phát hiện & sửa — tầng gọi Amazon (2 lỗi thật, đây là phần quan trọng):**
+
+1. **Thiếu media type v3 ở MỌI lời gọi `/sp/*`** (đã sửa). Amazon Ads API v3 không dùng
+   `application/json`: mỗi tài nguyên một media type riêng, gửi ở cả `Accept` lẫn `Content-Type`
+   (`application/vnd.spCampaign.v3+json`, `spAdGroup.v3`, `spKeyword.v3`, `spTargetingClause.v3`,
+   `spNegativeKeyword.v3`; riêng `/sp/campaigns/budget/usage` chỉ Accept `…spcampaignbudgetusage.v1+json`).
+   Thêm hằng `ADS_SP_MEDIA_TYPE` + `spOpts()` và truyền vào **7 call site**. ⇒ **Đính chính báo cáo (lần 4):**
+   câu "tầng HTTP khớp Postman, không sửa gì" đúng phần đường dẫn/body/auth nhưng **sai ở media type**.
+2. **Gương negative keyword chưa được nối vào job sync** (đã nối). `vexim_worker_record_ads_change` có ghi
+   gương khi change là `add_negative_*`, nhưng `ads-sync` **chưa bao giờ kéo ngược** danh sách negative của
+   Amazon về ⇒ negative đã chặn thật vẫn hiện như "chưa chặn" ⇒ dễ chặn lần hai. Thêm `pullNegativeKeywords()`:
+   hỏi gộp theo profile, nếu Amazon trả 400/415 thì hỏi **từng campaign** (trần 25/N, **ghi rõ trong message**),
+   lỗi luôn vào `out.errors` với tiền tố "gương negative keyword có thể THIẾU", bộ đếm mới `negativeKeywords`.
+
+**Phát hiện & sửa — tầng giao diện / ngữ cảnh vận hành (6 chỗ thiếu + 1 chỗ chống thao tác trùng):**
+
+- Bảng rỗng ⇒ hiện **panel chẩn đoán 5 cổng** + nút *"▶ Chạy đồng bộ Amazon Ads ngay"* (trước chỉ có câu
+  "Chưa có dữ liệu Amazon Ads", không nói tắc ở đâu).
+- **Băng cảnh báo dữ liệu CŨ** khi ngày mới nhất > 2 ngày (`A3_STALE_DAYS`) — trước đây dữ liệu tuần trước vẫn
+  hiện y như mới.
+- Panel **"Nạp dữ liệu search term bằng cách nào"** (4 cách), có ghi rõ **`cd worker`**.
+- **Nhãn tên shop** trên từng dòng khi tài khoản thấy > 1 shop.
+- Cảnh báo khi bảng bị **cắt ở trần 3.000 dòng** (`ROW_LIMIT` + prop `truncated`).
+- Cảnh báo **"chặn oan"**: `sales_14d > 0` mà `purchases_7d = 0`.
+- **Chống chặn trùng (mới):** duyệt gợi ý xong thì `pending_suggestion_id` biến mất, nhưng gương negative chỉ có
+  sau khi worker ghi **thành công** ⇒ khoảng giữa đó người vận hành rất dễ bấm "Chặn" lần nữa và ăn lỗi trùng của
+  Amazon. Cột *Thao tác* giờ khoá theo yêu cầu đang bay: hiện **chip trạng thái** + câu *"Đã có yêu cầu chặn cho
+  term này — KHÔNG tạo thêm để Amazon không báo trùng."*; nếu lần ghi trước **LỖI** thì hiện **nguyên văn lỗi**
+  + nút *"Thử chặn lại (Exact)"*. Nếu **không đọc được** hàng đợi thì bảng **không bị trắng**: hiện băng đỏ nói rõ lớp
+  chống trùng đang tắt, phải tải lại + xem A4 trước khi bấm chặn. Con số *"N dòng đáng xem chưa ai làm gì"* ở tiêu đề cũng
+  trừ dòng đã có yêu cầu đang bay (`a3ReadyToBlock(rows, filter, inFlight)`). **DEMO MODE có đủ 6 trạng thái hiện sẵn**
+  (chờ duyệt · đã chặn · cảnh báo chặn oan · đã duyệt chờ ghi · lần ghi trước LỖI + nút thử lại · form chặn tay).
+  Luật thuần ở `ppc-model.ts`: `a3ChangeKey` · `a3InFlightMap` ·
+  `isOpenChangeStatus` · `a3HasOpenChange` · `a3FailedChange`; trang đọc `readAdsChanges` với
+  `statuses: ["pending_approval","approved","applying","failed"]` (phải có `failed` vì `is_open` chỉ tính 3
+  trạng thái đang bay ⇒ ca "đã lỗi, cần thử lại" sẽ bị ẩn mất).
+
+**Soát lại toàn bộ cột/`groupBy` 5 report — 5/5 HỢP LỆ** (đối chiếu từng tên cột): `spCampaigns` [campaign] 18/49 ·
+`spTargeting` [targeting] 20/60 · `spSearchTerm` [searchTerm] 19/60 · `spAdvertisedProduct` [advertiser] 17/56 ·
+`spPurchasedProduct` [asin] 21/48. Ghi chú: report `spAdvertisedProduct` cần **Advertiser/Marketplace ID** đúng —
+`PENDING` mãi thì **kiểm profile ID trước**, đừng đổi `groupBy` (issues #324/#338 chính thức).
+
+**Kiểm chứng:** `web npm test` **403/403** (`ppc-model` 23 → **30**) · `tsc` sạch · `next build` OK
+(`/ppc/search-terms` 5.02 kB) · `worker npm test` **490/490** (`ads-engine` 23/23 có mục 7 media type + negative,
+`ads-jobs` 22/22) · `supabase npm test` TẤT CẢ PASS · chạy bản build mới: `/ppc/search-terms` **HTTP 200**,
+hiện *"dữ liệu tới 2026-09-15 · cách đây 1 ngày"*.
+
+**VEXIM cần làm:** không có migration mới (dùng lại RPC `vexim_worker_upsert_ads_negative_keywords` đã có ở 0021).
+Chỉ cần **Redeploy web** để lấy bản sửa media type + gương negative; sau đó chạy đồng bộ một lần
+(trên `/ppc` bấm nút, hoặc `cd worker && npm run worker:ads-sync` rồi `npm run worker:ads-pull`).
+Báo cáo đầy đủ: `docs/bao-cao-module-ppc-ads.md` mục 8.

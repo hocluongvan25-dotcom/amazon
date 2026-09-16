@@ -13,14 +13,14 @@
 |---|---|
 | Module PPC đã **kết nối** Amazon Ads chưa? | **Chưa** — trên Vercel chưa có credential Amazon Ads ⇒ phần Ads **không chạy**, job trả `skipped` (bỏ qua, không phải lỗi). |
 | Vì sao màn `/ppc` trống? | Vì chưa bao giờ có dữ liệu được nhập: chưa có credential ⇒ chưa từng chạy sync/pull/cron thành công. Màn hình chỉ nói "Chưa có dữ liệu Amazon Ads" mà **không nói tắc ở đâu** ⇒ đã sửa (mục 4). |
-| Code gọi API có **đúng chuẩn** không? | Tầng HTTP (`amazon/ads.ts`) **khớp Postman chính thức**, không cần sửa. Nhưng có **2 lỗi sai hợp đồng API** ở tầng cấu hình report (sai `groupBy`/tên cột) ⇒ **đã sửa** (mục 3). Nếu để nguyên, khi bật credential lên 2/5 report sẽ ăn lỗi **400** của Amazon. |
+| Code gọi API có **đúng chuẩn** không? | Tầng HTTP (`amazon/ads.ts`) khớp Postman chính thức về **đường dẫn/body/auth**. Đã tìm & sửa **3 nhóm sai hợp đồng**: (a) 2 lỗi `groupBy`/tên cột report (mục 2.2), (b) **thiếu media type v3** ở mọi lời gọi `/sp/*` (mục 8.1), (c) **gương negative keyword chưa được nối** vào job sync (mục 8.2). Nếu để nguyên, khi bật credential sẽ ăn **400/415** của Amazon. |
 | Cần làm gì để có số liệu thật? | (1) Thêm 3 biến env Ads trên Vercel → Redeploy; (2) bấm nút **"▶ Chạy đồng bộ Amazon Ads ngay"** trên `/ppc` (hoặc `npm run worker:ads-sync` / `worker:ads-pull`); (3) report v3 là **bất đồng bộ** — lần đầu có thể phải chờ/bấm lại. Chi tiết ở mục 5. |
 
 ---
 
 ## 2. ĐỐI CHIẾU CODE VỚI TÀI LIỆU CHÍNH THỨC
 
-### 2.1. Tầng HTTP — ĐÚNG, không sửa gì
+### 2.1. Tầng HTTP — ĐÚNG về đường dẫn/body/auth; **media type v3 thì SAI — đã vá ở mục 8.1**
 
 File: `web/src/lib/worker/amazon/ads.ts` (801 dòng). Đối chiếu từng điểm với Postman
 `Amazon_Ads_API.postman_collection.json` + `Amazon_Ads_API_Environment.postman_environment.json`
@@ -36,6 +36,12 @@ trong repo chính thức:
 | Reporting v3 | `POST /reporting/reports` body `{name,startDate,endDate,configuration{adProduct,groupBy,columns,reportTypeId,timeUnit,format}}` → `GET /reporting/reports/{reportId}` → tải file nén GZIP khi `COMPLETED` | đúng luồng, có poll + giải nén | ✅ |
 | Lỗi | 401/`invalid_grant` = token hết hạn ⇒ phải re-authorize; 429/5xx ⇒ chờ & thử lại | phân loại lỗi + retry 429/5xx, 401 báo "kết nối lại shop" | ✅ |
 | Vùng dữ liệu | `format`, `timeUnit` (`SUMMARY`/`DAILY`) theo report | đúng theo từng report trong `registry.ts` | ✅ |
+
+> ⚠️ **ĐÍNH CHÍNH 16/09/2026 (vòng rà trang A3 — xem mục 8.1):** dòng *"Campaign Management v3"* ở bảng trên
+> đúng về **đường dẫn**, nhưng khi đó code **chưa gửi media type riêng của từng tài nguyên** (`Accept` +
+> `Content-Type` dạng `application/vnd.sp*.v3+json`). Với Amazon Ads API v3, media type là **một phần của hợp
+> đồng**, không phải tùy chọn: gửi `application/json` có thể ăn **415/400** hoặc bị đọc sai kiểu dữ liệu.
+> Đây chính là chỗ báo cáo này từng kết luận *"không sửa gì"* — kết luận đó **sai một phần**; đã sửa và có test mục 7.
 
 > Lưu ý tương lai (không phải lỗi hiện tại): Amazon đã giới thiệu **Unified API** (`/adsApi/v1`, header
 > `Amazon-Ads-AccountId`) và README của repo chính thức khuyến nghị cho *tích hợp mới*. Bộ API theo
@@ -128,7 +134,9 @@ Vercel → Project → Settings → Environment Variables → thêm cho **cả P
 **Bước 2 — Chạy đồng bộ.** Chọn 1 trong 3, khuyến nghị (a):
 
 - **(a)** Mở `/ppc` → bấm **"▶ Chạy đồng bộ Amazon Ads ngay"** (nhanh nhất, xem được nhật ký ngay trên màn).
-- **(b)** Tại máy chủ/CLI: trong `web/` chạy `npm run worker:ads-sync` rồi `npm run worker:ads-pull`.
+- **(b)** Tại máy chủ/CLI: **`cd worker`** rồi chạy `npm run worker:ads-sync` và `npm run worker:ads-pull`.
+  ⚠️ Hai script này khai trong `worker/package.json` ⇒ **phải đứng trong thư mục `worker/`**; chạy ở `web/` sẽ báo
+  "Missing script" (xem mục 8.6).
 - **(c)** Chờ cron `/api/cron/report-pull` (có thể gọi kèm tham số: `?adsKinds=`, `?days=`, `?dryRun=1` để thử).
 
 **Bước 3 — Đợi report v3.** Reporting v3 là **bất đồng bộ**: xin report → Amazon tạo file → ta tải.
@@ -165,3 +173,123 @@ panel nói rõ tắc ở cổng nào + nguyên văn lỗi Amazon.
    trong test trước.
 3. **Unified API (`/adsApi/v1`)**: chưa dùng, chỉ ghi nhận là hướng cho tích hợp mới.
 4. **Cron Ads mặc định đang bật** cùng cron report: ai muốn tắt nhanh thì thêm `?ads=0` vào URL cron.
+
+---
+
+## 8. BỔ SUNG 16/09/2026 — RÀ TRANG A3 (`/ppc/search-terms`) VÀ 2 LỖI TẦNG WORKER
+
+Vòng rà này xuất phát từ yêu cầu *"trang search-terms có bị thiếu hay sai gì không?"*.
+Kết quả: **giao diện thiếu 6 chỗ** (đã bù) và **tầng gọi Amazon sai/thiếu 2 chỗ** (đã sửa, có test).
+
+### 8.1. LỖI NẶNG — mọi lời gọi `/sp/*` thiếu **media type v3** (đã sửa)
+
+Amazon Ads API v3 không dùng `application/json` cho các tài nguyên `/sp/*`: mỗi tài nguyên có media type riêng,
+và phải gửi ở **cả `Accept` lẫn `Content-Type`**. Trước đây `amazon/ads.ts` chỉ gửi `Authorization` + 2 header
+client/scope ⇒ request hoặc bị **415 Unsupported Media Type**, hoặc Amazon trả **200 nhưng body rỗng/khác kiểu**.
+
+Đã thêm hằng `ADS_SP_MEDIA_TYPE` + `spOpts()` trong `web/src/lib/worker/amazon/ads.ts`, và truyền media type
+vào `listAll()` cùng **7 call site** `/sp/*`:
+
+| Tài nguyên | Media type |
+|---|---|
+| `/sp/campaigns/list` | `application/vnd.spCampaign.v3+json` |
+| `/sp/adGroups/list` | `application/vnd.spAdGroup.v3+json` |
+| `/sp/keywords/list` | `application/vnd.spKeyword.v3+json` |
+| `/sp/targets/list` | `application/vnd.spTargetingClause.v3+json` |
+| `/sp/negativeKeywords/list` + `POST /sp/negativeKeywords` | `application/vnd.spNegativeKeyword.v3+json` |
+| `/sp/campaigns/budget/usage` | **chỉ `Accept`**: `application/vnd.spcampaignbudgetusage.v1+json` (v1, không phải v3) |
+
+**Bằng chứng:** mục **7** mới của `worker/tests/ads-engine.test.ts` khoá đúng hợp đồng này (server giả bắt
+*"sai media type thì trả 415"*), `ads-engine` **23/23 pass**.
+
+### 8.2. THIẾU — gương `ads.negative_keywords` chưa được nối vào job (đã nối)
+
+`vexim_worker_record_ads_change` (0021) **có** ghi gương negative khi change action là `add_negative_*`, nhưng
+`ads-sync.job.ts` **chưa bao giờ kéo ngược danh sách negative từ Amazon về**. Hệ quả: negative đã chặn thật trên
+Amazon mà UI A3 vẫn hiện như "chưa chặn" ⇒ dễ chặn lại lần hai (Amazon báo lỗi trùng), và cột "đã chặn" sai.
+
+Đã nối `pullNegativeKeywords()` vào cuối `ads-sync`:
+
+- Nhịp 1: `listNegativeKeywords(profileId, {})` — hỏi gộp theo profile.
+- Nếu Amazon trả **400/415** (API có profile không hỗ trợ hỏi gộp): nhịp 2 hỏi **từng campaign**, có trần
+  `NEGATIVE_KEYWORD_FALLBACK_CAMPAIGNS = 25` và **ghi rõ trong message** là *"CHỈ hỏi 25/N campaign"* để không ai
+  tưởng đã đủ.
+- Ghi về DB qua RPC `vexim_worker_upsert_ads_negative_keywords` (adapter `upsertAdsNegativeKeywords`).
+- **Mọi lỗi đều vào `out.errors`** với tiền tố `"gương negative keyword có thể THIẾU"` ⇒ không im lặng, vì đây
+  đúng là loại dữ liệu mà "thiếu" nguy hiểm hơn "sai".
+- Bộ đếm mới `negativeKeywords` trong nhật ký job (`AdsSyncCounts`).
+
+**Test:** `worker/tests/ads-jobs.test.ts` **22/22 pass**, thêm 3 test (kéo được · nhịp 2 khi lỗi · lỗi luôn báo).
+
+### 8.3. Soát lại toàn bộ cột/`groupBy` của 5 report — 5/5 HỢP LỆ
+
+Đối chiếu lần hai (từng tên cột một, không chỉ `groupBy`) với tài liệu Amazon + manifest Airbyte:
+
+| Report | `groupBy` | Số cột dùng | Kết quả |
+|---|---|---|---|
+| `spCampaigns` | `[campaign]` | 18/49 | ✅ hợp lệ 100% |
+| `spTargeting` | `[targeting]` | 20/60 | ✅ |
+| `spSearchTerm` | `[searchTerm]` | 19/60 | ✅ |
+| `spAdvertisedProduct` | `[advertiser]` | 17/56 | ✅ (có `date` + `advertisedAsin`/`advertisedSku`) |
+| `spPurchasedProduct` | `[asin]` | 21/48 | ✅ (max 31 ngày/lần xin) |
+
+Ghi chú vận hành: report `spAdvertisedProduct` cần **Advertiser ID + Marketplace ID** đúng; nếu thấy `PENDING` mãi
+thì **kiểm profile ID trước**, đừng đổi `groupBy` (issue #324/#338 của repo chính thức cho thấy nhiều ca
+"đổi groupBy" là chữa sai bệnh).
+
+### 8.4. Giao diện A3 — 6 chỗ thiếu + 1 chỗ chống thao tác trùng
+
+| # | Thiếu gì | Đã bù |
+|---|---|---|
+| 1 | Bảng rỗng ⇒ chỉ có câu "Chưa có dữ liệu", không nói tắc ở đâu | Hiện **panel chẩn đoán 5 cổng** + nút *"▶ Chạy đồng bộ Amazon Ads ngay"* |
+| 2 | Dữ liệu cũ vẫn hiện như mới | Băng cảnh báo khi ngày mới nhất **> 2 ngày** (`A3_STALE_DAYS`) |
+| 3 | Không nói làm sao có dữ liệu | Panel *"Nạp dữ liệu search term bằng cách nào"* — 4 cách |
+| 4 | Nhiều shop nhưng không rõ dòng của shop nào | Nhãn **tên shop** hiện khi có >1 shop |
+| 5 | Cắt bớt dòng mà không báo | Cảnh báo **trần 3.000 dòng** (`ROW_LIMIT`) + `truncated` |
+| 6 | Chỉ nhìn `purchases_7d` nên dễ "chặn oan" | Cảnh báo khi **`sales_14d > 0` mà `purchases_7d = 0`** |
+| 7 | Duyệt gợi ý xong term biến mất khỏi gợi ý nhưng gương chưa có ⇒ **bấm "Chặn" lần hai** | Cột *Thao tác* khoá theo yêu cầu đang bay: hiện **chip trạng thái** + câu *"Đã có yêu cầu chặn cho term này — KHÔNG tạo thêm để Amazon không báo trùng."*; nếu lần ghi trước **LỖI** thì hiện **nguyên văn lỗi** + nút *"Thử chặn lại (Exact)"* |
+
+**Hai chi tiết dễ bỏ sót (đã làm luôn trong vòng này):**
+- Nếu **không đọc được** hàng đợi thay đổi thì màn **không được trắng bảng**: phần đọc này tách khỏi phần đọc search term,
+  lỗi chỉ làm mất lớp chống trùng và hiện **băng đỏ** *"Chưa kiểm tra được yêu cầu chặn còn bay … tải lại trang, xem màn
+  Duyệt & ghi (A4) trước khi bấm chặn"* — vì lúc đó nút chặn KHÔNG tự khoá được.
+- `a3ReadyToBlock(rows, filter, inFlight)`: con số *"N dòng đáng xem chưa ai làm gì"* ở tiêu đề phải **trừ** những dòng đã
+  có yêu cầu đang bay, nếu không thì sau khi duyệt gợi ý, dòng vẫn bị đếm là "chưa ai làm gì" — đúng cái nhầm dẫn tới chặn trùng.
+
+**DEMO MODE có đủ 6 trạng thái** để nghiệm thu bằng mắt (mặc định đã hiện sẵn, không phải chỉnh bộ lọc):
+chờ duyệt (2 dòng) · **đã chặn** · **có doanh số 14 ngày nhưng 0 đơn 7 ngày** (cảnh báo chặn oan) ·
+**đã duyệt — chờ ghi Amazon** (chip khoá, đây là tính năng mới) · **lần ghi trước LỖI** (kèm nguyên văn lỗi
+`DUPLICATE_KEYWORD` + nút "Thử chặn lại (Exact)").
+
+Cơ chế chống chặn trùng nằm ở `web/src/lib/data/ppc-model.ts` (thuần, dễ test):
+`a3ChangeKey` (khoá `campaign|adGroup|term`) · `a3InFlightMap` (gộp yêu cầu đang bay, ưu tiên dòng đang bay hơn dòng
+`failed`) · `isOpenChangeStatus` · `a3HasOpenChange` · `a3FailedChange`. Trang đọc `readAdsChanges` với
+`statuses: ["pending_approval","approved","applying","failed"]` — **phải có `failed`**, vì view `is_open` chỉ tính 3
+trạng thái đang bay nên nếu chỉ dựa vào `is_open` thì ca "đã lỗi, cần thử lại" sẽ bị ẩn mất.
+
+### 8.5. Kiểm chứng vòng rà này
+
+| Hạng mục | Kết quả |
+|---|---|
+| `web npm test` | **403/403 pass** (trước 396; `ppc-model` 23 → **30**) |
+| `web npx tsc --noEmit` | sạch |
+| `web npm run build` | ✓ biên dịch thành công (`/ppc/search-terms` 5.02 kB) |
+| `worker npm test` | **490/490 pass** (`ads-engine` 23/23 gồm mục 7 media type + negative; `ads-jobs` 22/22) |
+| `supabase npm test` | TẤT CẢ PASS |
+| Chạy thật trên bản build mới | `/ppc/search-terms` **HTTP 200**, hiện "dữ liệu tới 2026-09-15 · cách đây 1 ngày";
+kiểm bằng curl: đủ **6 trạng thái** nêu ở 8.4 (chống chặn trùng · thử lại sau lỗi · cảnh báo chặn oan · đã chặn · chờ duyệt · form chặn) |
+
+### 8.6. Hướng dẫn vận hành — đọc kỹ chỗ này
+
+`worker:ads-sync`, `worker:ads-pull`, `worker:ads-apply`, `worker:reports-pull`, `worker:oauth-soon` được khai
+trong **`worker/package.json`** ⇒ câu lệnh đúng là:
+
+```bash
+cd worker
+npm run worker:ads-sync
+npm run worker:ads-pull
+```
+
+Chạy ở `web/` sẽ báo *Missing script*. `web/package.json` chỉ có `{dev, build, start, typecheck, test, worker:research-collect}`.
+Đã sửa 4 chỗ text hướng dẫn trong UI/comment còn ghi thiếu `cd worker`
+(`ppc/actions.ts`, `lib/data/ppc.ts`, `api/cron/report-pull/route.ts`, `ppc/campaigns/[campaignId]/page.tsx`).

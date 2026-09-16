@@ -756,11 +756,159 @@ export function a3Evidence(row: AdsSearchTermRaw): string {
   return `${adsNum(row.clicks_7d)} click · ${adsNum(row.purchases_7d)} đơn · ${spend} · 7 ngày`;
 }
 
-/** Số dòng A3 đáng chặn mà CHƯA có gợi ý nào (để nhắc "bấm mở A3"). */
-export function a3ReadyToBlock(rows: AdsSearchTermRaw[], filter: Partial<A3Filter> = {}): AdsSearchTermRaw[] {
+/**
+ * Dòng A3 đáng chặn mà CHƯA ai làm gì (để nhắc "bấm mở A3").
+ *
+ * `inFlight` (tuỳ chọn): bản đồ yêu cầu chặn đang bay. Phải truyền vào, nếu không
+ * thì sau khi duyệt gợi ý (pending_suggestion_id = null, gương negative chưa có)
+ * dòng vẫn bị đếm là "chưa ai làm gì" — đúng cái nhầm đã dẫn tới chặn trùng.
+ * Dòng đã LỖI vẫn nằm trong danh sách này vì nó vẫn cần người xử lý (thử lại).
+ */
+export function a3ReadyToBlock(
+  rows: AdsSearchTermRaw[],
+  filter: Partial<A3Filter> = {},
+  inFlight: Record<string, A3InFlight> = {},
+): AdsSearchTermRaw[] {
   return filterSearchTerms(rows, filter).filter(
-    (r) => r.negative_keyword_id === null && r.pending_suggestion_id === null,
+    (r) =>
+      r.negative_keyword_id === null &&
+      r.pending_suggestion_id === null &&
+      a3HasOpenChange(inFlight, r) === null,
   );
+}
+
+/* ---------------- A3: dữ liệu này CŨ tới đâu? (chống đọc số cũ rồi chặn oan) ---------------- */
+
+/**
+ * Ngày dữ liệu mới nhất trong tập search term.
+ *
+ * Vì sao phải hiện con số này: các cột `*_7d` của view KHÔNG phải "7 ngày gần
+ * hôm nay" mà là "7 ngày cuối cùng CÓ dữ liệu" (`last_day` theo từng shop). Cron
+ * ngừng chạy 3 tuần thì màn vẫn hiện "chi 7 ngày" của 3 tuần trước — nhìn như số
+ * mới. Nói rõ ngày dữ liệu là cách duy nhất để người vận hành không chặn từ khoá
+ * dựa trên số cũ.
+ */
+export function a3LatestDay(rows: AdsSearchTermRaw[]): string | null {
+  let max: string | null = null;
+  for (const r of rows) {
+    const d = r.last_day;
+    if (!d) continue;
+    if (max === null || d > max) max = d;
+  }
+  return max;
+}
+
+export type A3Freshness = {
+  /** ngày dữ liệu mới nhất (null = chưa có dòng nào) */
+  day: string | null;
+  /** số ngày kể từ ngày dữ liệu tới hôm nay (null = không tính được) */
+  ageDays: number | null;
+  /** true = dữ liệu đứng quá lâu (cron không chạy) — phải cảnh báo TRƯỚC khi chặn */
+  stale: boolean;
+  label: string;
+};
+
+/** Ngưỡng coi là "cũ": report Ads theo ngày, trễ 2 ngày là bình thường (T-1 + giờ Amazon). */
+export const A3_STALE_DAYS = 2;
+
+export function a3Freshness(rows: AdsSearchTermRaw[], today: Date = new Date()): A3Freshness {
+  const day = a3LatestDay(rows);
+  if (day === null) {
+    return { day: null, ageDays: null, stale: false, label: "chưa có ngày dữ liệu" };
+  }
+  const parsed = Date.parse(`${day}T00:00:00Z`);
+  if (Number.isNaN(parsed)) {
+    return { day, ageDays: null, stale: false, label: `dữ liệu tới ${day}` };
+  }
+  const todayUtc = Date.parse(`${today.toISOString().slice(0, 10)}T00:00:00Z`);
+  const ageDays = Math.round((todayUtc - parsed) / 86_400_000);
+  const stale = ageDays > A3_STALE_DAYS;
+  return {
+    day,
+    ageDays,
+    stale,
+    label:
+      ageDays <= 0
+        ? `dữ liệu tới ${day} (hôm nay)`
+        : `dữ liệu tới ${day} · cách đây ${ageDays} ngày${stale ? " — CŨ" : ""}`,
+  };
+}
+
+/**
+ * Cảnh báo CHẶN OAN cho một dòng: bộ lọc SOP-04 chỉ soi 7 ngày
+ * (`purchases_7d = 0`), nhưng view có sẵn doanh số 14 ngày. Dòng nào 14 ngày CÓ
+ * doanh số thì chặn là cắt luôn phần đang ra đơn ⇒ phải nói ra trước khi bấm.
+ */
+export function a3BlockRisk(row: AdsSearchTermRaw): string | null {
+  const sales14 = row.sales_14d;
+  if (sales14 === null || sales14 === undefined || Number(sales14) <= 0) return null;
+  if ((row.purchases_7d ?? 0) > 0) return null;
+  return `Có doanh số trong 14 ngày (${adsMoney(sales14, row.currency ?? "")}) — 7 ngày qua không đơn: chặn là cắt phần này.`;
+}
+
+/* ---------------- A3: yêu cầu chặn ĐANG BAY (chống chặn trùng) ---------------- */
+
+/** Hành động của A3 trong hàng đợi: chỉ 2 loại này mới liên quan search term. */
+const A3_NEGATIVE_ACTIONS = ["add_negative_exact", "add_negative_phrase"] as const;
+
+/** Khoá tự nhiên nối 1 dòng A3 với yêu cầu ghi: campaign · ad group · chữ đã chặn. */
+export function a3ChangeKey(campaignId: string | null, adGroupId: string | null, term: string | null): string {
+  return [campaignId ?? "", adGroupId ?? "", (term ?? "").trim().toLowerCase()].join("|");
+}
+
+export type A3InFlight = {
+  changeId: string;
+  status: string;
+  /** lỗi Amazon của lần ghi trước (chỉ có khi status = failed) */
+  error: string | null;
+};
+
+/**
+ * Gom các yêu cầu chặn CÒN BAY (`pending_approval` / `approved` / `applying`) và
+ * cả dòng `failed` — để A3 biết một term ĐÃ có yêu cầu rồi.
+ *
+ * Vì sao cần: sau khi duyệt, `pending_suggestion_id` biến mất còn gương negative
+ * chỉ có sau khi worker ghi THÀNH CÔNG. Khoảng giữa đó, nếu màn chỉ nhìn 2 cột ấy
+ * thì dòng trông y như "chưa làm gì" ⇒ người vận hành bấm "Chặn (Exact)" lần nữa và
+ * Amazon trả lỗi trùng (hoặc tệ hơn: tạo 2 yêu cầu cho cùng một chữ).
+ */
+export function a3InFlightMap(changes: AdsChangeRaw[]): Record<string, A3InFlight> {
+  const out: Record<string, A3InFlight> = {};
+  for (const c of changes) {
+    if (!(A3_NEGATIVE_ACTIONS as readonly string[]).includes(c.action)) continue;
+    if (c.entity_type !== "search_term") continue;
+    // `entity_key` là `text not null default ''` trong DB ⇒ chuỗi RỖNG là ca thật,
+    // không phải null. Rỗng thì lấy chữ đã chặn từ after_value.value (view trả sẵn).
+    const rawTerm = (c.entity_key ?? "").trim() !== "" ? c.entity_key : c.after_text;
+    const key = a3ChangeKey(c.campaign_id, c.ad_group_id, rawTerm ?? null);
+    const next: A3InFlight = {
+      changeId: c.id,
+      status: c.status,
+      error: c.error ?? null,
+    };
+    // Cùng một term có thể có nhiều dòng: ưu tiên dòng ĐANG BAY hơn dòng đã lỗi
+    // (nếu lần trước lỗi mà lần này đã duyệt lại thì cái đang bay mới là sự thật).
+    const cur = out[key];
+    if (!cur || !isOpenChangeStatus(cur.status)) out[key] = next;
+  }
+  return out;
+}
+
+/** Trạng thái "đang bay": chưa tới Amazon (hoặc Amazon chưa trả lời) — TS gọn cho UI. */
+export function isOpenChangeStatus(status: string | null | undefined): boolean {
+  return status === "pending_approval" || status === "approved" || status === "applying";
+}
+
+/** Dòng A3 có yêu cầu chặn đang bay (KHÔNG được tạo thêm) hay không. */
+export function a3HasOpenChange(map: Record<string, A3InFlight>, row: AdsSearchTermRaw): A3InFlight | null {
+  const hit = map[a3ChangeKey(row.campaign_id, row.ad_group_id, row.term)];
+  return hit && isOpenChangeStatus(hit.status) ? hit : null;
+}
+
+/** Yêu cầu chặn của dòng này đã LỖI ở lần ghi trước (được phép thử lại). */
+export function a3FailedChange(map: Record<string, A3InFlight>, row: AdsSearchTermRaw): A3InFlight | null {
+  const hit = map[a3ChangeKey(row.campaign_id, row.ad_group_id, row.term)];
+  return hit && hit.status === "failed" ? hit : null;
 }
 
 /* ---------------- Hàng đợi duyệt (P3) ---------------- */

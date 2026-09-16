@@ -42,6 +42,36 @@ export function adsHostForRegion(region: string | null | undefined): string {
   return ADS_HOSTS[key] ?? ADS_HOSTS.NA;
 }
 
+/**
+ * MEDIA TYPE của Campaign Management v3 — BẮT BUỘC theo tài liệu Amazon.
+ *
+ * Bộ Postman chính thức (amzn/ads-advanced-tools-docs → `Amazon_Ads_API.postman_collection.json`)
+ * đặt CẢ `Accept` lẫn `Content-Type` thành đúng loại phiên bản của TÀI NGUYÊN cho
+ * mọi endpoint `/sp/*`, ví dụ `/sp/negativeKeywords/list`:
+ *     Accept: application/vnd.spNegativeKeyword.v3+json
+ *     Content-Type: application/vnd.spNegativeKeyword.v3+json
+ *
+ * Gửi `application/json` trần (bản cũ của file này) là lệch hợp đồng: Amazon trả
+ * 415/400 khó đoán và KHÔNG phải lỗi người dùng sửa được. Mọi lời gọi `/sp/*` đi
+ * qua hằng số dưới đây — đổi/bổ sung endpoint phải đối chiếu lại Postman.
+ */
+export const ADS_SP_MEDIA_TYPE = {
+  campaigns: "application/vnd.spCampaign.v3+json",
+  adGroups: "application/vnd.spAdGroup.v3+json",
+  keywords: "application/vnd.spKeyword.v3+json",
+  targets: "application/vnd.spTargetingClause.v3+json",
+  negativeKeywords: "application/vnd.spNegativeKeyword.v3+json",
+} as const;
+
+/**
+ * Tham số header cho MỌI request Campaign Management v3: `Accept` và
+ * `Content-Type` cùng đúng loại phiên bản của tài nguyên (theo Postman chính thức).
+ */
+function spOpts(profileId: string, mediaType: string): { profileId: string; contentType: string; accept: string } {
+  return { profileId, contentType: mediaType, accept: mediaType };
+}
+
+
 export type AdsErrorShape = { code: string; message: string; status: number };
 
 export class AdsApiRequestError extends Error {
@@ -176,6 +206,16 @@ export type AdsAdGroup = {
   defaultBid: number | null;
 };
 
+/** Negative keyword ĐANG có trên Amazon (POST /sp/negativeKeywords/list). */
+export type AdsNegativeKeyword = {
+  keywordId: string;
+  campaignId: string;
+  adGroupId: string | null;
+  keywordText: string;
+  matchType: string;
+  state: string;
+};
+
 export type AdsTarget = {
   /** keywordId hoặc targetId — khoá tự nhiên trong DB (`target_key`) */
   targetKey: string;
@@ -307,7 +347,7 @@ export class AdsClient {
       maxResults: clampMaxResults(opts.maxResults),
       includeExtendedDataFields: true,
     };
-    const items = await this.listAll(profileId, "/sp/campaigns/list", body, ["campaigns", "data", "results"]);
+    const items = await this.listAll(profileId, "/sp/campaigns/list", body, ["campaigns", "data", "results"], ADS_SP_MEDIA_TYPE.campaigns);
     return items.map((raw) => normalizeCampaign(raw as Record<string, unknown>)).filter((c) => c.campaignId !== "");
   }
 
@@ -316,7 +356,7 @@ export class AdsClient {
       maxResults: clampMaxResults(opts.maxResults),
       includeExtendedDataFields: true,
     };
-    const items = await this.listAll(profileId, "/sp/adGroups/list", body, ["adGroups", "data", "results"]);
+    const items = await this.listAll(profileId, "/sp/adGroups/list", body, ["adGroups", "data", "results"], ADS_SP_MEDIA_TYPE.adGroups);
     return items.map((raw) => normalizeAdGroup(raw as Record<string, unknown>)).filter((g) => g.adGroupId !== "");
   }
 
@@ -328,9 +368,10 @@ export class AdsClient {
   async listTargets(profileId: string, opts: { maxResults?: number } = {}): Promise<AdsTarget[]> {
     const maxResults = clampMaxResults(opts.maxResults);
     const keywords = await this.listAll(profileId, "/sp/keywords/list",
-      { maxResults, includeExtendedDataFields: true }, ["keywords", "data", "results"]);
+      { maxResults, includeExtendedDataFields: true }, ["keywords", "data", "results"], ADS_SP_MEDIA_TYPE.keywords);
     const targets = await this.listAll(profileId, "/sp/targets/list",
-      { maxResults, includeExtendedDataFields: true }, ["targetingClauses", "targets", "data", "results"]);
+      { maxResults, includeExtendedDataFields: true }, ["targetingClauses", "targets", "data", "results"],
+      ADS_SP_MEDIA_TYPE.targets);
     return [
       ...keywords.map((raw) => normalizeKeyword(raw as Record<string, unknown>)),
       ...targets.map((raw) => normalizeProductTarget(raw as Record<string, unknown>)),
@@ -358,7 +399,7 @@ export class AdsClient {
         : {}),
       ...(it.state ? { state: it.state.toUpperCase() } : {}),
     }));
-    const json = await this.request<unknown>("PUT", "/sp/campaigns", { campaigns }, { profileId });
+    const json = await this.request<unknown>("PUT", "/sp/campaigns", { campaigns }, spOpts(profileId, ADS_SP_MEDIA_TYPE.campaigns));
     return normalizeWriteResponse(json, items.length, ["campaignId"]);
   }
 
@@ -372,7 +413,7 @@ export class AdsClient {
       ...(it.bid !== undefined ? { bid: round2(it.bid) } : {}),
       ...(it.state ? { state: it.state.toUpperCase() } : {}),
     }));
-    const json = await this.request<unknown>("PUT", "/sp/keywords", { keywords }, { profileId });
+    const json = await this.request<unknown>("PUT", "/sp/keywords", { keywords }, spOpts(profileId, ADS_SP_MEDIA_TYPE.keywords));
     return normalizeWriteResponse(json, items.length, ["keywordId"]);
   }
 
@@ -396,22 +437,45 @@ export class AdsClient {
       matchType: it.matchType,
       state: "ENABLED",
     }));
-    const json = await this.request<unknown>("POST", "/sp/negativeKeywords", { negativeKeywords }, { profileId });
+    const json = await this.request<unknown>("POST", "/sp/negativeKeywords", { negativeKeywords }, spOpts(profileId, ADS_SP_MEDIA_TYPE.negativeKeywords));
     return normalizeWriteResponse(json, items.length, ["keywordId"]);
   }
 
-  /** POST /sp/negativeKeywords/list — đọc negative ĐANG CÓ trên Amazon (để đối chiếu gương). */
+  /**
+   * POST /sp/negativeKeywords/list — đọc negative ĐANG CÓ trên Amazon.
+   *
+   * Bộ Postman CHÍNH THỨC gửi kèm `campaignIdFilter.include:[...]`, KHÔNG gửi body
+   * rỗng ⇒ hàm này hỏi theo từng campaign rồi gộp lại (một số tài khoản trả 400 nếu
+   * không có filter). Danh sách rỗng thì gọi không filter — nơi gọi phải chịu được
+   * lỗi đó và coi là "chưa đối chiếu được", KHÔNG được coi là "không có negative nào".
+   */
   async listNegativeKeywords(
     profileId: string,
-    opts: { maxResults?: number } = {},
-  ): Promise<Record<string, unknown>[]> {
-    const rows = await this.listAll(
-      profileId,
-      "/sp/negativeKeywords/list",
-      { maxResults: clampMaxResults(opts.maxResults), includeExtendedDataFields: true },
-      ["negativeKeywords", "data", "results"],
-    );
-    return rows.map((r) => r as Record<string, unknown>);
+    opts: { campaignIds?: string[]; maxResults?: number } = {},
+  ): Promise<AdsNegativeKeyword[]> {
+    const maxResults = clampMaxResults(opts.maxResults);
+    const ids = (opts.campaignIds ?? []).map((x) => String(x).trim()).filter((x) => x !== "");
+    const bodies: Record<string, unknown>[] =
+      ids.length === 0 ? [{}] : ids.map((campaignId) => ({ campaignIdFilter: { include: [campaignId] } }));
+
+    const out: AdsNegativeKeyword[] = [];
+    for (const extra of bodies) {
+      const rows = await this.listAll(
+        profileId,
+        "/sp/negativeKeywords/list",
+        { maxResults, includeExtendedDataFields: true, ...extra },
+        ["negativeKeywords", "data", "results"],
+        ADS_SP_MEDIA_TYPE.negativeKeywords,
+      );
+      out.push(...rows.map((raw) => normalizeNegativeKeyword(raw as Record<string, unknown>)));
+    }
+    // Trùng giữa các lần hỏi (Amazon có thể trả lại cùng dòng) — khử theo keywordId.
+    const seen = new Set<string>();
+    return out.filter((k) => {
+      if (k.keywordId === "" || k.keywordText === "" || seen.has(k.keywordId)) return false;
+      seen.add(k.keywordId);
+      return true;
+    });
   }
 
   // --------------------------------------------------------------------------
@@ -490,6 +554,7 @@ export class AdsClient {
     path: string,
     body: Record<string, unknown>,
     keys: string[],
+    mediaType?: string,
   ): Promise<unknown[]> {
     const out: unknown[] = [];
     let nextToken: string | null = null;
@@ -498,7 +563,7 @@ export class AdsClient {
     for (let page = 0; page < 50; page++) {
       const payload: Record<string, unknown> = { ...body };
       if (nextToken) payload.nextToken = nextToken;
-      const json = await this.request<unknown>("POST", path, payload, { profileId });
+      const json = await this.request<unknown>("POST", path, payload, { profileId, accept: mediaType, contentType: mediaType });
       const items = pickArray(json, keys);
       out.push(...items);
       nextToken = pickNextToken(json);
@@ -511,7 +576,7 @@ export class AdsClient {
     method: "GET" | "POST" | "PUT",
     path: string,
     body?: unknown,
-    opts: { profileId?: string; contentType?: string } = {},
+    opts: { profileId?: string; contentType?: string; accept?: string } = {},
   ): Promise<T> {
     let lastWait = 1000;
     let lastError: Error | null = null;
@@ -524,7 +589,7 @@ export class AdsClient {
           Authorization: `Bearer ${token}`,
           "Amazon-Advertising-API-ClientId": this.clientId,
           ...(opts.profileId ? { "Amazon-Advertising-API-Scope": opts.profileId } : {}),
-          Accept: "application/json",
+          Accept: opts.accept ?? "application/json",
           "User-Agent": USER_AGENT,
           ...(body !== undefined
             ? { "Content-Type": opts.contentType ?? "application/json" }
@@ -671,6 +736,17 @@ function normalizeAdGroup(raw: Record<string, unknown>): AdsAdGroup {
     name: str(raw?.name),
     state: str(raw?.state),
     defaultBid: num(raw?.defaultBid),
+  };
+}
+
+function normalizeNegativeKeyword(raw: Record<string, unknown>): AdsNegativeKeyword {
+  return {
+    keywordId: str(raw.keywordId) ?? "",
+    campaignId: str(raw.campaignId) ?? "",
+    adGroupId: str(raw.adGroupId),
+    keywordText: str(raw.keywordText) ?? "",
+    matchType: (str(raw.matchType) ?? "").toUpperCase(),
+    state: (str(raw.state) ?? "").toUpperCase(),
   };
 }
 
