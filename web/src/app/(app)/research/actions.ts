@@ -16,6 +16,8 @@ import {
   parseAsinAutofill,
   validateAssumptions,
 } from "@/lib/research/domain";
+import { referralRatePctFromFee } from "@/lib/worker/domain/product-fees";
+import { lookupSpApiFeesForAsin } from "@/lib/worker/run-product-fees";
 import { createClient } from "@/lib/supabase/server";
 import { formToAssumptions, type ResearchFormRaw } from "@/lib/data/research-model";
 
@@ -264,6 +266,83 @@ export async function lookupSeedAsinAction(asinRaw: string): Promise<AsinLookupS
       price: parsed.price,
       suggestedPrices: parsed.suggestedPrices,
       missing: parsed.missing,
+    },
+  };
+}
+
+/* ============ G1+ — PHÍ CHUẨN SP-API (getMyFeesEstimateForASIN) ============ */
+
+export type OfficialFeesState = {
+  ok: boolean;
+  message: string;
+  fees?: {
+    referralFee: number | null;
+    fulfillmentFee: number | null;
+    variableClosingFee: number | null;
+    totalFees: number | null;
+    currency: string | null;
+    /** % referral suy từ phí chuẩn — form điền vào ô Referral % */
+    referralRatePct: number | null;
+    timeOfEstimation: string | null;
+  };
+};
+
+/**
+ * Bấm "Lấy phí chuẩn SP-API" ở form G1: gọi getMyFeesEstimateForASIN với GIÁ
+ * CƠ SỞ user đang xét, trả referral + phí FBA CHUẨN (cùng nguồn số với Revenue
+ * Calculator của Seller Central) để tự điền ô Referral % và Phí FBA thực.
+ * Chạy phía server vì cần LWA refresh token.
+ */
+export async function lookupOfficialFeesAction(
+  asinRaw: string,
+  priceBase: number,
+): Promise<OfficialFeesState> {
+  const session = await getAppSession();
+  if (!session) return { ok: false, message: "Chưa đăng nhập." };
+  if (session.persona !== "ceo") {
+    return { ok: false, message: "Màn thẩm định ngách chỉ dành cho persona CEO." };
+  }
+
+  const asin = asinRaw.trim().toUpperCase();
+  if (!/^[A-Z0-9]{10}$/.test(asin)) {
+    return { ok: false, message: "Cần ASIN hạt nhân hợp lệ (10 ký tự) để tra phí chuẩn — lấy ASIN ở mục 1 trước." };
+  }
+  if (!Number.isFinite(priceBase) || priceBase <= 0) {
+    return { ok: false, message: "Cần Giá CƠ SỞ > 0 — Amazon ước phí theo mức giá này (bấm Lấy dữ liệu ASIN để tự điền)." };
+  }
+
+  const res = await lookupSpApiFeesForAsin({ asin, price: priceBase });
+  if (!res.ok || !res.estimate || !res.estimate.ok) {
+    return {
+      ok: false,
+      message:
+        res.reason ??
+        (res.estimate?.errorMessage ?? "Không lấy được phí chuẩn SP-API — nhập tay ô Referral % và Phí FBA thực."),
+    };
+  }
+
+  const e = res.estimate;
+  const scope = res.marketplaceFallback
+    ? "marketplace US mặc định (chưa có shop production trong DB)"
+    : `${res.shopName ?? "shop"} · ${res.marketplaceId}`;
+  const parts: string[] = [];
+  if (e.referralFee !== null) parts.push(`giới thiệu $${e.referralFee.toFixed(2)}`);
+  if (e.fulfillmentFee !== null) parts.push(`FBA $${e.fulfillmentFee.toFixed(2)}`);
+  if (e.totalFees !== null) parts.push(`tổng $${e.totalFees.toFixed(2)}`);
+
+  return {
+    ok: true,
+    message:
+      `Phí CHUẨN SP-API @ $${priceBase.toFixed(2)} (${scope}): ${parts.join(", ")}.` +
+      " Đã điền Referral % và Phí FBA thực — kết quả nay khớp Revenue Calculator.",
+    fees: {
+      referralFee: e.referralFee,
+      fulfillmentFee: e.fulfillmentFee,
+      variableClosingFee: e.variableClosingFee,
+      totalFees: e.totalFees,
+      currency: e.currency,
+      referralRatePct: referralRatePctFromFee(e.referralFee, priceBase),
+      timeOfEstimation: e.timeOfEstimation,
     },
   };
 }

@@ -12,7 +12,7 @@ import { useRouter } from "next/navigation";
 import { Panel } from "@/components/ui";
 import type { ResearchFormRaw } from "@/lib/data/research-model";
 import { CheckField, FieldGroup, NumField, TextField } from "./controls";
-import { lookupSeedAsinAction, type AsinLookupState } from "../actions";
+import { lookupOfficialFeesAction, lookupSeedAsinAction, type AsinLookupState, type OfficialFeesState } from "../actions";
 import {
   BLANK_FORM,
   SECTION_LABEL,
@@ -32,7 +32,9 @@ export function NewResearchForm() {
   const [form, setForm] = useState<ResearchFormRaw>(BLANK_FORM);
   const [submitted, setSubmitted] = useState(false);
   const [lookup, setLookup] = useState<AsinLookupState | null>(null);
+  const [feesLookup, setFeesLookup] = useState<OfficialFeesState | null>(null);
   const [lookupPending, startLookup] = useTransition();
+  const [feesPending, startFeesLookup] = useTransition();
   const router = useRouter();
   const refs = {
     nganh: useRef<HTMLDivElement>(null),
@@ -71,6 +73,31 @@ export function NewResearchForm() {
         }
         return { ...f, ...patch };
       });
+    });
+  };
+
+  /** Bấm "Lấy phí chuẩn SP-API": referral + FBA thật theo GIÁ CƠ SỞ đang xét. */
+  const fetchOfficialFees = () => {
+    const asin = (form.seedAsin ?? "").trim();
+    const price = Number(form.priceBase.replace(",", ".").trim());
+    if (!asin) {
+      setFeesLookup({ ok: false, message: "Nhập ASIN hạt nhân ở mục 1 trước đã." });
+      return;
+    }
+    if (!Number.isFinite(price) || price <= 0) {
+      setFeesLookup({ ok: false, message: "Nhập Giá CƠ SỞ trước đã (hoặc bấm “Lấy dữ liệu ASIN” để tự điền)." });
+      return;
+    }
+    setFeesLookup(null);
+    startFeesLookup(async () => {
+      const r = await lookupOfficialFeesAction(asin, price);
+      setFeesLookup(r);
+      if (r.ok && r.fees) {
+        const patch: Partial<ResearchFormRaw> = {};
+        if (r.fees.fulfillmentFee !== null) patch.fbaFeeOverride = fmtNum(r.fees.fulfillmentFee);
+        if (r.fees.referralRatePct !== null) patch.referralRate = String(r.fees.referralRatePct);
+        set(patch);
+      }
     });
   };
 
@@ -173,9 +200,28 @@ export function NewResearchForm() {
                   <NumField label="Cước VN→FBA/đơn *" value={form.inboundFreightPerUnit} onChange={(v) => set({ inboundFreightPerUnit: v })} suffix="$" placeholder="vd: 1.5" hint="1 trong 2 ô BẮT BUỘC phải gõ tay" />
                   <NumField label="Chi phí khác/đơn" value={form.otherPerUnit ?? ""} onChange={(v) => set({ otherPerUnit: v })} suffix="$" placeholder="vd: 0.5" hint="bao bì, dán nhãn… — trống = 0" />
                   <NumField label="Referral %" value={form.referralRate ?? ""} onChange={(v) => set({ referralRate: v })} suffix="%" placeholder="vd: 15" hint="trống = mặc định 15%" />
-                  <NumField label="Phí FBA thực (SP-API)" value={form.fbaFeeOverride ?? ""} onChange={(v) => set({ fbaFeeOverride: v })} suffix="$" hint="trống = ước lượng bảng 2026 từ kích thước" />
+                  <NumField label="Phí FBA thực (SP-API)" value={form.fbaFeeOverride ?? ""} onChange={(v) => set({ fbaFeeOverride: v })} suffix="$" hint="trống = ước lượng bảng 2026 — bấm nút dưới lấy số chuẩn" />
                   <NumField label="Tỉ lệ trả hàng" value={form.returnRatePct ?? ""} onChange={(v) => set({ returnRatePct: v })} suffix="%" placeholder="vd: 4" hint="trống = mặc định 4%" />
                 </div>
+                <div className="mt-2.5 flex flex-wrap items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={fetchOfficialFees}
+                    disabled={feesPending || lookupPending}
+                    className="rounded-[9px] border border-[#1f3a5f]/40 bg-white px-3 py-1.5 text-[11.5px] font-extrabold text-[#1f3a5f] hover:bg-[#eef4ff] disabled:opacity-40"
+                  >
+                    {feesPending ? "Đang hỏi SP-API…" : "Lấy phí chuẩn SP-API (giới thiệu + FBA) theo Giá cơ sở"}
+                  </button>
+                </div>
+                {feesLookup && (
+                  <p
+                    className={`mt-2 rounded-[9px] px-3 py-2 text-[12px] font-semibold ${
+                      feesLookup.ok ? "bg-green/10 text-[#14532d]" : "bg-red-soft text-[#a01717]"
+                    }`}
+                  >
+                    {feesLookup.message}
+                  </p>
+                )}
               </FieldGroup>
 
               <FieldGroup title="Quảng cáo & chuyển đổi">

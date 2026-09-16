@@ -32,6 +32,18 @@ export { AdsClient, AdsLwaTokenManager, AdsApiRequestError } from "./amazon/ads"
 /* ---- Module 4 (Orders API v0): đồng bộ đơn hàng qua GET /orders/v0/orders ---- */
 export { runOrdersSyncAll } from "./run-orders-sync";
 export type { OrdersSyncRunResult, OrdersSyncOutcome } from "./run-orders-sync";
+
+/* ---- Product Fees API v0: phí chuẩn SP-API cho thẩm định ngách G1 ---- */
+export { lookupSpApiFeesForAsin } from "./run-product-fees";
+export type { SpApiFeesLookupResult } from "./run-product-fees";
+export { ProductFeesClient, PRODUCT_FEES_RATE_LIMIT } from "./amazon/product-fees";
+export type { FeesEstimateForAsinInput } from "./amazon/product-fees";
+export {
+  mapFeesEstimateResponse,
+  referralRatePctFromFee,
+  SP_API_FEE_TYPES,
+} from "./domain/product-fees";
+export type { SpApiFeesEstimate, SpApiFeeLine } from "./domain/product-fees";
 export { OrdersClient, TokenBucket, ORDERS_RATE_LIMIT, ordersHostForRegion, clampTooRecentBefore } from "./amazon/orders";
 export type { OrdersListQuery, OrdersClientOptions } from "./amazon/orders";
 export {
