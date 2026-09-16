@@ -27,8 +27,14 @@ import {
   ORDERS_RATE_LIMIT,
   OrdersClient,
   TokenBucket,
+  clampTooRecentBefore,
   ordersHostForRegion,
 } from "../src/lib/worker/amazon/orders.ts";
+import {
+  SP_API_BEFORE_SAFETY_MARGIN_MINUTES,
+  SP_API_ORDERS_DATA_LAG_MINUTES,
+  spApiSafeBefore,
+} from "../src/lib/worker/domain/orders.ts";
 import { groupOrdersByDay, runOrdersSyncAll, utcDayKey } from "../src/lib/worker/run-orders-sync.ts";
 import type { DbAdapter, OrderRowInput } from "../src/lib/worker/db/adapter.ts";
 import type { LwaTokenManager } from "../src/lib/worker/amazon/lwa.ts";
@@ -221,6 +227,89 @@ test("getOrdersPage: gửi đủ MarketplaceIds/MaxResultsPerPage và đọc Nex
   assert.ok(urls[1].includes("NextToken=T1"));
 });
 
+/* -------- chặn mốc "...Before" quá mới — sự cố 400 InvalidInput 16/09/2026 -------- */
+
+test("spApiSafeBefore: lùi đúng 2 phút trễ dữ liệu + 1 phút biên độ đồng hồ", () => {
+  const now = new Date("2026-09-16T10:00:00Z");
+  assert.equal(SP_API_ORDERS_DATA_LAG_MINUTES, 2);
+  assert.equal(SP_API_BEFORE_SAFETY_MARGIN_MINUTES, 1);
+  assert.equal(spApiSafeBefore(now).toISOString(), "2026-09-16T09:57:00.000Z");
+  assert.equal(spApiSafeBefore(now, 2).toISOString(), "2026-09-16T09:55:00.000Z");
+});
+
+test("clampTooRecentBefore: mốc mới hơn now−3 phút bị lùi về mốc an toàn; mốc cũ giữ nguyên", () => {
+  const nowMs = new Date("2026-09-16T10:00:00Z").getTime();
+  const logs: string[] = [];
+  const log = (s: string): void => {
+    logs.push(s);
+  };
+  // `now` và mốc TƯƠNG LAI đều bị kẹp về đúng now − 3 phút (2 trễ + 1 biên độ)
+  assert.equal(clampTooRecentBefore("2026-09-16T10:00:00.000Z", log, nowMs), "2026-09-16T09:57:00.000Z");
+  assert.equal(clampTooRecentBefore("2026-09-16T12:00:00.000Z", log, nowMs), "2026-09-16T09:57:00.000Z");
+  // đúng mốc an toàn thì KHÔNG kẹp (chỉ kẹp khi mới hơn nghiêm ngặt)
+  assert.equal(clampTooRecentBefore("2026-09-16T09:57:00.000Z", log, nowMs), "2026-09-16T09:57:00.000Z");
+  // mốc đã đủ cũ → giữ nguyên, không log
+  const old = "2026-09-10T00:00:00.000Z";
+  assert.equal(clampTooRecentBefore(old, log, nowMs), old);
+  assert.equal(logs.length, 2);
+  assert.equal(clampTooRecentBefore(undefined, log, nowMs), undefined);
+});
+
+test("getOrdersPage: LastUpdatedBefore = now bị kẹp về mốc ≥ 2 phút trước hiện tại", async () => {
+  const urls: string[] = [];
+  const logs: string[] = [];
+  const fetchFn = (async (url: string | URL) => {
+    urls.push(String(url));
+    return jsonResponse({ payload: { Orders: [] } });
+  }) as unknown as typeof fetch;
+  const client = new OrdersClient(lwaFake, {
+    fetchFn,
+    sleep: async () => {},
+    host: "https://example.test",
+    log: (s) => logs.push(s),
+  });
+  await client.listOrders({
+    marketplaceIds: ["ATVPDKIKX0DER"],
+    // mốc "tương lai" — chắc chắn bị Amazon coi là quá mới (độ trễ dữ liệu 2 phút)
+    lastUpdatedBefore: new Date(Date.now() + 60_000),
+  });
+  const sent = new URL(urls[0]).searchParams.get("LastUpdatedBefore");
+  assert.ok(sent, "phải gửi LastUpdatedBefore");
+  const t = new Date(sent as string).getTime();
+  assert.ok(t <= Date.now() - 2 * 60_000, `mốc gửi đi phải sớm hơn hiện tại ≥ 2 phút, nhận ${sent}`);
+  assert.ok(t >= Date.now() - 10 * 60_000, `không được lùi quá xa gây mất dữ liệu, nhận ${sent}`);
+  assert.ok(logs.some((l) => l.includes("tự lùi")), "phải log rõ việc tự lùi mốc");
+});
+
+test("getOrdersPage: mốc đủ cũ giữ nguyên; cửa sổ sập (Before ≤ After sau clamp) ⇒ lỗi TRƯỚC khi gọi mạng", async () => {
+  const urls: string[] = [];
+  const fetchFn = (async (url: string | URL) => {
+    urls.push(String(url));
+    return jsonResponse({ payload: { Orders: [] } });
+  }) as unknown as typeof fetch;
+  const client = new OrdersClient(lwaFake, { fetchFn, sleep: async () => {}, host: "https://example.test" });
+
+  await client.listOrders({
+    marketplaceIds: ["ATVPDKIKX0DER"],
+    lastUpdatedAfter: new Date("2026-09-09T00:00:00Z"),
+    lastUpdatedBefore: new Date("2026-09-10T00:00:00Z"),
+  });
+  assert.ok(urls[0].includes("LastUpdatedBefore=2026-09-10T00%3A00%3A00.000Z"));
+
+  const callsBeforeReject = urls.length;
+  // After và Before đều "quá mới": clamp lùi Before về now−3 phút ⇒ Before < After
+  await assert.rejects(
+    () =>
+      client.listOrders({
+        marketplaceIds: ["ATVPDKIKX0DER"],
+        lastUpdatedAfter: new Date(Date.now() - 60_000),
+        lastUpdatedBefore: new Date(Date.now() - 30_000),
+      }),
+    /không hợp lệ/i,
+  );
+  assert.equal(urls.length, callsBeforeReject, "KHÔNG được gọi mạng khi cửa sổ sập");
+});
+
 test("getOrdersPage: THIẾU MarketplaceIds ⇒ ném lỗi TRƯỚC khi gọi mạng", async () => {
   let called = 0;
   const fetchFn = (async () => {
@@ -298,9 +387,21 @@ function fakeDb(): FakeDb {
   return store;
 }
 
-function fakeClient(orders: ApiOrder[], opts: { onItem?: (id: string) => void } = {}) {
+type ListQueryLike = {
+  marketplaceIds?: readonly string[];
+  lastUpdatedAfter?: Date;
+  lastUpdatedBefore?: Date;
+};
+
+function fakeClient(
+  orders: ApiOrder[],
+  opts: { onItem?: (id: string) => void; onList?: (q: ListQueryLike) => void } = {},
+) {
   return {
-    listOrders: async () => ({ orders, pages: 1, truncated: false, throttled: false, requestId: "r1", rateLimitHint: null }),
+    listOrders: async (q: ListQueryLike) => {
+      opts.onList?.(q);
+      return { orders, pages: 1, truncated: false, throttled: false, requestId: "r1", rateLimitHint: null };
+    },
     listOrderItems: async (id: string) => {
       opts.onItem?.(id);
       return { items: [ITEM_OK], pages: 1, throttled: false };
@@ -330,6 +431,33 @@ test("runOrdersSyncAll: ghi orders + order_daily + alert FBM, và báo số đơ
   assert.equal(db.alerts.length, 1); // MFN Unshipped quá hạn LatestShipDate
   assert.equal((db.alerts[0] as { ruleCode: string }).ruleCode, "fbm_late_ship");
   assert.equal(db.jobs.length, 2); // running + done
+});
+
+test("runOrdersSyncAll: LastUpdatedBefore gửi đi sớm hơn now ≥ 2 phút (chốt sự cố 400 InvalidInput 16/09/2026)", async () => {
+  const db = fakeDb();
+  const now = new Date("2026-09-16T00:00:00Z");
+  let seen: ListQueryLike | null = null;
+  const res = await runOrdersSyncAll({
+    adapter: db.adapter,
+    days: 7,
+    now,
+    clientFor: () =>
+      fakeClient([ORDER_OK], {
+        onList: (q) => {
+          seen = q;
+        },
+      }),
+  });
+  assert.equal(res.failed, 0);
+  assert.ok(seen, "runner phải gọi listOrders");
+  const q = seen as ListQueryLike;
+  assert.ok(q.lastUpdatedBefore, "phải truyền LastUpdatedBefore");
+  // Trước đây truyền watermark = now ⇒ Amazon trả 400 cho MỌI shop. Nay mốc phải
+  // đúng bằng now − 3 phút (2 phút trễ dữ liệu + 1 phút biên độ đồng hồ).
+  assert.equal((q.lastUpdatedBefore as Date).toISOString(), "2026-09-15T23:57:00.000Z");
+  assert.ok((q.lastUpdatedBefore as Date).getTime() <= now.getTime() - 2 * 60_000);
+  // 7 ngày nhìn lại + 5 phút chồng lấn của orderDeltaWindow
+  assert.equal((q.lastUpdatedAfter as Date).toISOString(), "2026-09-08T23:55:00.000Z");
 });
 
 test("runOrdersSyncAll: ngân sách item = 0 ⇒ KHÔNG gọi orderItems, đơn vẫn được ghi", async () => {

@@ -25,6 +25,7 @@ import {
   type ApiOrder,
   type ApiOrderItem,
 } from "../domain/orders-api.ts";
+import { SP_API_BEFORE_LAG_TOTAL_MS } from "../domain/orders.ts";
 
 const USER_AGENT = "VEXIM-Worker/1.0 (Language=TypeScript; Platform=Vercel)";
 const API_PATH = "/orders/v0";
@@ -144,6 +145,32 @@ function isoOrUndefined(value?: Date | string | null): string | undefined {
   return dt.toISOString();
 }
 
+/**
+ * PHÒNG THỦ SỰ CỐ 16/09/2026 (mọi shop 400 InvalidInput): Amazon đòi mốc
+ * `...Before` phải sớm hơn giờ hiện tại ÍT NHẤT 2 phút (dữ liệu getOrders có độ trễ
+ * hệ thống ~2 phút). Caller nào lỡ truyền mốc quá mới (vd `now`) thì tự động lùi về
+ * mốc an toàn nhất và log rõ — thu hẹp cửa sổ vài phút còn hơn cả lượt sync chết.
+ * `nowMs` tách riêng để test được mà không phụ thuộc đồng hồ thật.
+ */
+export function clampTooRecentBefore(
+  iso: string | undefined,
+  log: (line: string) => void = () => {},
+  nowMs: number = Date.now(),
+): string | undefined {
+  if (!iso) return undefined;
+  const t = new Date(iso).getTime();
+  const safeMax = nowMs - SP_API_BEFORE_LAG_TOTAL_MS;
+  if (!Number.isNaN(t) && t > safeMax) {
+    const clamped = new Date(safeMax).toISOString();
+    log(
+      `[orders] LastUpdatedBefore=${iso} mới hơn mức Amazon chấp nhận (phải sớm hơn hiện tại ≥ 2 phút) ` +
+        `→ tự lùi về ${clamped}.\n`,
+    );
+    return clamped;
+  }
+  return iso;
+}
+
 export class OrdersClient {
   private readonly lwa: LwaTokenManager;
   private readonly host: string;
@@ -178,14 +205,28 @@ export class OrdersClient {
       MaxResultsPerPage: String(clampMaxResultsPerPage(query.maxResultsPerPage)),
     };
     const lastUpdatedAfter = isoOrUndefined(query.lastUpdatedAfter);
-    const lastUpdatedBefore = isoOrUndefined(query.lastUpdatedBefore);
     const createdAfter = isoOrUndefined(query.createdAfter);
+    const lastUpdatedBefore = clampTooRecentBefore(isoOrUndefined(query.lastUpdatedBefore), (s) => this.log(s));
     if (lastUpdatedAfter) params.LastUpdatedAfter = lastUpdatedAfter;
     if (lastUpdatedBefore) params.LastUpdatedBefore = lastUpdatedBefore;
     if (createdAfter) params.CreatedAfter = createdAfter;
     if (query.orderStatuses?.length) params.OrderStatuses = query.orderStatuses.join(",");
     if (query.fulfillmentChannels?.length) params.FulfillmentChannels = query.fulfillmentChannels.join(",");
     if (query.nextToken) params.NextToken = query.nextToken;
+
+    // Cửa sổ sập sau khi clamp (Before ≤ After) thì Amazon cũng từ chối bằng 400
+    // InvalidInput — ném lỗi TRƯỚC để job log nói rõ nguyên nhân thay vì lỗi mơ hồ.
+    if (
+      lastUpdatedAfter &&
+      lastUpdatedBefore &&
+      new Date(lastUpdatedBefore).getTime() <= new Date(lastUpdatedAfter).getTime()
+    ) {
+      throw new Error(
+        `getOrders: cửa sổ không hợp lệ — LastUpdatedBefore (${lastUpdatedBefore}) không được sớm hơn hoặc bằng ` +
+          `LastUpdatedAfter (${lastUpdatedAfter}). Khoảng kéo đang ngắn hơn độ trễ dữ liệu ~2 phút của getOrders.` +
+          " Hãy nới khoảng kéo hoặc bỏ LastUpdatedBefore.",
+      );
+    }
 
     const { json, rateLimitHint } = await this.request<{
       payload?: { Orders?: ApiOrder[]; NextToken?: string | null };

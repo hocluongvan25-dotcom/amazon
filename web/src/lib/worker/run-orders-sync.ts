@@ -31,7 +31,7 @@ import { LwaTokenManager } from "./amazon/lwa.ts";
 import { OrdersClient, ordersHostForRegion } from "./amazon/orders.ts";
 import { MockDbAdapter, type ActiveShop, type AlertRowInput, type DbAdapter, type OrderDailyRowInput, type OrderRowInput, type SyncJobRecord } from "./db/adapter.ts";
 import { SupabaseDbAdapter } from "./db/supabase.ts";
-import { buildFbmQueue, fbmShipAlert, orderDeltaWindow } from "./domain/orders.ts";
+import { buildFbmQueue, fbmShipAlert, orderDeltaWindow, spApiSafeBefore } from "./domain/orders.ts";
 import { apiOrderToRowInput, orderDailyFromApiOrders } from "./domain/orders-api.ts";
 
 export type OrdersSyncOutcome = {
@@ -181,6 +181,13 @@ export async function runOrdersSyncAll(
       });
     });
 
+  // CHỐT SỰ CỐ 16/09/2026 (mọi shop 400 InvalidInput): Amazon BẮT BUỘC mốc
+  // LastUpdatedBefore phải sớm hơn giờ hiện tại ÍT NHẤT 2 phút (dữ liệu getOrders có
+  // độ trễ hệ thống ~2 phút). Trước đây ta truyền `watermark = now` nên request nào
+  // cũng bị từ chối. Nay chặn trên lùi 3 phút (2 phút trễ + 1 phút biên độ đồng hồ);
+  // cửa sổ 3 phút bỏ lỡ sẽ được lượt sau phủ lại vì nhìn lại nhiều ngày.
+  const lastUpdatedBefore = spApiSafeBefore(now);
+
   const outcomes: OrdersSyncOutcome[] = [];
   const errors: { shopId: string; error: string }[] = [];
   let ordersUpserted = 0;
@@ -220,6 +227,7 @@ export async function runOrdersSyncAll(
     const jobPayload: Record<string, unknown> = {
       source: "orders-api-v0",
       lastUpdatedAfter: window.lastUpdatedAfter.toISOString(),
+      lastUpdatedBefore: lastUpdatedBefore.toISOString(),
       days,
     };
     const job: SyncJobRecord = {
@@ -235,7 +243,9 @@ export async function runOrdersSyncAll(
       const listed = await client.listOrders({
         marketplaceIds: [shop.marketplace],
         lastUpdatedAfter: window.lastUpdatedAfter,
-        lastUpdatedBefore: window.watermark,
+        // KHÔNG dùng window.watermark (= now) — Amazon đòi mốc "...Before" phải sớm
+        // hơn giờ hiện tại ít nhất 2 phút, không thì 400 InvalidInput.
+        lastUpdatedBefore,
         maxResultsPerPage: 100,
       });
       pages += listed.pages;
@@ -330,7 +340,7 @@ export async function runOrdersSyncAll(
       outcomes.push({
         shop: shop.displayName,
         shopId: shop.id,
-        window: `${window.lastUpdatedAfter.toISOString()} → ${window.watermark.toISOString()}`,
+        window: `${window.lastUpdatedAfter.toISOString()} → ${lastUpdatedBefore.toISOString()}`,
         orders: rows.length,
         items: shopItems,
         pages: listed.pages,

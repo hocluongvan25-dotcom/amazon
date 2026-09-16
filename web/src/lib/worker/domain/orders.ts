@@ -451,6 +451,33 @@ export function orderDeltaWindow(
   };
 }
 
+/**
+ * Độ trễ dữ liệu HỆ THỐNG của getOrders do Amazon công bố: đơn tạo/cập nhật trong
+ * ~2 phút gần nhất CHƯA xuất hiện trong kết quả. Vì vậy `CreatedBefore` /
+ * `LastUpdatedBefore` mà KHÔNG sớm hơn "giờ hiện tại" ít nhất 2 phút là bị từ chối
+ * bằng 400 InvalidInput (sự cố 16/09/2026: runner truyền `watermark = now` nên MỌI
+ * shop đều lỗi, màn /orders không bao giờ có đơn).
+ */
+export const SP_API_ORDERS_DATA_LAG_MINUTES = 2;
+
+/** Biên độ an toàn cộng thêm: lệch đồng hồ giữa máy ta và server Amazon + thời gian mạng. */
+export const SP_API_BEFORE_SAFETY_MARGIN_MINUTES = 1;
+
+/** Tổng số phút phải lùi mốc "...Before" so với `now` (2 phút trễ + 1 phút biên độ). */
+export const SP_API_BEFORE_LAG_TOTAL_MS =
+  (SP_API_ORDERS_DATA_LAG_MINUTES + SP_API_BEFORE_SAFETY_MARGIN_MINUTES) * 60_000;
+
+/**
+ * Mốc chặn trên AN TOÀN cho getOrders (`LastUpdatedBefore`/`CreatedBefore`):
+ * `now − (2 phút trễ dữ liệu + 1 phút biên độ)`. KHÔNG BAO GIỜ truyền `now` hoặc
+ * mốc mới hơn — Amazon sẽ trả 400 InvalidInput. Kéo delta bỏ lỡ cửa sổ 3 phút cuối
+ * cũng không sao: lần chạy sau chồng lấn lại (DELTA_OVERLAP_MINUTES) và cửa sổ mặc
+ * định nhìn lại nhiều ngày.
+ */
+export function spApiSafeBefore(now: Date = new Date(), extraMarginMinutes = 0): Date {
+  return new Date(now.getTime() - SP_API_BEFORE_LAG_TOTAL_MS - extraMarginMinutes * 60_000);
+}
+
 /* ============================================================================
  * 6. CẢNH BÁO (alert_rules đã seed ở migration 0001/0010)
  * ==========================================================================*/

@@ -32,8 +32,14 @@ export { AdsClient, AdsLwaTokenManager, AdsApiRequestError } from "./amazon/ads"
 /* ---- Module 4 (Orders API v0): đồng bộ đơn hàng qua GET /orders/v0/orders ---- */
 export { runOrdersSyncAll } from "./run-orders-sync";
 export type { OrdersSyncRunResult, OrdersSyncOutcome } from "./run-orders-sync";
-export { OrdersClient, TokenBucket, ORDERS_RATE_LIMIT, ordersHostForRegion } from "./amazon/orders";
+export { OrdersClient, TokenBucket, ORDERS_RATE_LIMIT, ordersHostForRegion, clampTooRecentBefore } from "./amazon/orders";
 export type { OrdersListQuery, OrdersClientOptions } from "./amazon/orders";
+export {
+  spApiSafeBefore,
+  SP_API_ORDERS_DATA_LAG_MINUTES,
+  SP_API_BEFORE_SAFETY_MARGIN_MINUTES,
+  SP_API_BEFORE_LAG_TOTAL_MS,
+} from "./domain/orders";
 export {
   apiOrderToRowInput,
   apiItemToRowInput,
