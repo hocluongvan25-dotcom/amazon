@@ -185,3 +185,69 @@ export function buildGates(
   return gates;
 }
 
+/* ==========================================================================
+ * Cho các màn CON (A3 — Search term & chặn)
+ * --------------------------------------------------------------------------
+ * Vì sao cần: `/ppc` (A1) và `/ppc/search-terms` (A3) trước đây khi CHƯA CÓ DỮ LIỆU
+ * đều render đúng một panel chẩn đoán 5 cổng giống hệt nhau ⇒ nhìn như hai trang
+ * trùng nhau. Màn con chỉ cần MỘT câu: tắc ở cổng nào + vì sao RIÊNG màn này trống.
+ * ========================================================================== */
+
+export type AdsStuckGate = { key: AdsGateKey; label: string; detail: string; fix: string };
+
+/** Cổng ĐANG chặn thật sự (không phải cổng "chờ"), `null` = không cổng nào chặn. */
+export function stuckGate(data: { firstBlocked: AdsGate | null; gates?: AdsGate[] }): AdsStuckGate | null {
+  const gate = data.firstBlocked ?? (data.gates ?? []).find((g) => !g.ok && !g.blocked) ?? null;
+  if (!gate) return null;
+  return { key: gate.key, label: gate.label, detail: gate.detail, fix: gate.fix };
+}
+
+/**
+ * Vì sao RIÊNG màn A3 trống khi phần Ads có thể đã chạy?
+ *
+ * Khác hẳn "Ads chưa kết nối": A3 đọc `ads.search_terms` — thứ chỉ có khi report
+ * `spSearchTerm` về tới DB. Bốn ca thật, mỗi ca một việc cần làm khác nhau:
+ *   chưa cấu hình Ads · có keyword nhưng chưa có dòng search term (report chưa về)
+ *   · có campaign nhưng chưa có keyword/target · có profile nhưng 0 campaign.
+ */
+export function a3EmptyReason(
+  counts: AdsCounts,
+  opts: { credentialsOk: boolean; hasReadError?: boolean } = { credentialsOk: false },
+): string {
+  if (opts.hasReadError) {
+    return "Không đọc được số liệu từ DB (lỗi kết nối/quyền). Kiểm tra Supabase + migration 0019/0020/0021 rồi mở lại trang.";
+  }
+  if (!opts.credentialsOk) {
+    return (
+      "Amazon Ads chưa được cấu hình (thiếu credential) nên chưa từng có lần kéo report nào — " +
+      "xem cổng 1 ở màn Quảng cáo (PPC) để biết cần thêm biến nào."
+    );
+  }
+  const profiles = counts.profiles ?? 0;
+  const campaigns = counts.campaigns ?? 0;
+  const targets = counts.targets ?? 0;
+  const terms = counts.searchTerms ?? 0;
+  if (profiles > 0 && campaigns === 0) {
+    return (
+      "Đã có profile Ads nhưng 0 campaign trong DB ⇒ đồng bộ cấu trúc chưa chạy tới nơi, " +
+      "hoặc profile bị chọn sai marketplace (shop US nhưng profile là CA)."
+    );
+  }
+  if (campaigns > 0 && targets === 0) {
+    return (
+      "Có campaign nhưng CHƯA có keyword/target nào ⇒ chưa thể có search term. " +
+      "Kiểm tra ad group/keyword đã tạo và đang ENABLED trên Amazon, rồi chạy lại worker:ads-sync."
+    );
+  }
+  if (targets > 0 && terms === 0) {
+    return (
+      "Đã có keyword/target nhưng CHƯA có dòng search term nào: report `spSearchTerm` chưa về tới DB. " +
+      "Report v3 là BẤT ĐỒNG BỘ — lần đầu Amazon còn PENDING, chờ 1–2 phút rồi chạy lại (job nhớ report cũ, không xin trùng). " +
+      "Cũng có thể cửa sổ đọc chưa có click nào được ghi."
+    );
+  }
+  return (
+    "Chưa có dòng search term nào trong DB. Nguyên nhân thường gặp: report `spSearchTerm` mới chạy lần đầu còn PENDING, " +
+    "hoặc ad group chưa có click nào trong cửa sổ đọc."
+  );
+}

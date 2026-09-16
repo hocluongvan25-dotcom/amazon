@@ -1,8 +1,8 @@
-import { AdsDiagnosticsPanel } from "@/components/ppc/AdsDiagnostics";
 import { SearchTermsBoard } from "@/components/ppc/SearchTermsBoard";
 import { NoAccess, PageHeader, Panel } from "@/components/ui";
 import { requireSession } from "@/lib/auth/session";
 import { readAdsDiagnostics } from "@/lib/data/ads-health";
+import { a3EmptyReason, stuckGate } from "@/lib/data/ads-health-model";
 import { demoChanges, demoSearchTerms } from "@/lib/data/ppc-demo";
 import {
   a3HasOpenChange,
@@ -49,6 +49,11 @@ export default async function SearchTermsPage({
     return (
       <>
         <div className="mb-3 text-sm font-bold text-amber">DEMO · Dữ liệu minh họa (chưa nối Supabase)</div>
+        <p className="mb-2 text-[12.5px] text-soft">
+          Đang ở màn con <b>A3 — Search term &amp; chặn</b> · KPI/campaign tổng xem ở màn{" "}
+          <a className="font-bold underline" href="/ppc">Quảng cáo (PPC)</a> · hàng đợi ghi Amazon ở màn{" "}
+          <a className="font-bold underline" href="/ppc/approvals">Duyệt thay đổi (A4)</a>.
+        </p>
         <PageHeader
           title="A3 — Search term &amp; Negative keyword"
           sub={`${rows.length} dòng demo · ${demoWaiting} gợi ý chờ duyệt · ${demoFlying} yêu cầu chờ ghi Amazon · ${demoBlocked} đã chặn`}
@@ -167,15 +172,49 @@ export default async function SearchTermsPage({
 
       {rows.length === 0 ? (
         <>
-          {diagnostics ? (
-            <AdsDiagnosticsPanel data={diagnostics} />
-          ) : (
-            <Panel title="Chưa có dữ liệu search term" hint="cũng không đọc được chẩn đoán kết nối">
-              <p className="text-[13px] text-soft">
-                Không đọc được trạng thái kết nối Amazon Ads. Kiểm tra migration 0019/0020/0021 rồi mở lại.
-              </p>
-            </Panel>
-          )}
+          {/* KHÔNG lặp lại panel 5 cổng của /ppc ở đây (trước đây hai màn trông y hệt
+              nhau khi chưa có dữ liệu). Màn con chỉ nói: tắc ở cổng nào + vì sao RIÊNG
+              màn search term trống. Chẩn đoán đầy đủ vẫn ở /ppc, có link sang. */}
+          <Panel
+            title="Vì sao màn này chưa có dòng search term nào"
+            hint="A3 đọc view vexim_ads_search_terms (nguồn: report spSearchTerm)"
+          >
+            <p className="text-[13px] text-muted">
+              {a3EmptyReason(
+                diagnostics?.counts ?? {
+                  profiles: null,
+                  campaigns: null,
+                  targets: null,
+                  searchTerms: null,
+                  metricRows: null,
+                  lastMetricDay: null,
+                },
+                {
+                  credentialsOk: diagnostics?.credentials.complete ?? false,
+                  // `null` = không đọc nổi chẩn đoán; `ok: false` = Supabase không trả lời
+                  // ⇒ cả hai đều là "không biết", phải nói ra chứ không đoán bừa.
+                  hasReadError: diagnostics === null || diagnostics.ok === false,
+                },
+              )}
+            </p>
+            {(() => {
+              const stuck = diagnostics ? stuckGate(diagnostics) : null;
+              return stuck ? (
+                <div className="mt-2 rounded-[10px] border border-amber/50 bg-amber-soft px-3 py-2.5 text-[12.5px]">
+                  <b>⛔ Đang tắc ở {stuck.label}</b> — {stuck.detail}.
+                  <div className="mt-1 font-semibold text-[#8a5602]">Việc cần làm: {stuck.fix}</div>
+                </div>
+              ) : (
+                <div className="mt-2 rounded-[10px] border border-line px-3 py-2.5 text-[12.5px] text-soft">
+                  Không cổng nào đang chặn ⇒ dữ liệu cấu trúc đã về, chỉ còn thiếu dòng search term (report bất đồng bộ).
+                </div>
+              );
+            })()}
+            <p className="mt-2 text-[12.5px] text-soft">
+              Chẩn đoán đầy đủ (5 cổng · trạng thái từng lần xin report · nguyên văn lỗi Amazon) nằm ở màn{" "}
+              <a className="font-bold underline" href="/ppc">Quảng cáo (PPC)</a>.
+            </p>
+          </Panel>
 
           <Panel
             title="Nạp dữ liệu search term bằng cách nào"
@@ -183,9 +222,10 @@ export default async function SearchTermsPage({
           >
             <ol className="flex list-decimal flex-col gap-1.5 pl-5 text-[13px] text-soft">
               <li>
-                <b>Nhanh nhất — không cần shell:</b> bấm <b>“▶ Chạy đồng bộ Amazon Ads ngay”</b> ở khối chẩn đoán trên
-                (hoặc ở màn <a className="font-bold underline" href="/ppc">Quảng cáo (PPC)</a>). Nút này chạy đúng 2 job
-                của cron: đồng bộ cấu trúc rồi kéo 5 report.
+                <b>Nhanh nhất — không cần shell:</b> mở màn{" "}
+                <a className="font-bold underline" href="/ppc">Quảng cáo (PPC)</a> rồi bấm{" "}
+                <b>“▶ Chạy đồng bộ Amazon Ads ngay”</b>. Nút này chạy đúng 2 job của cron: đồng bộ cấu trúc rồi kéo 5
+                report (màn A3 chỉ ĐỌC, không tự chạy job).
               </li>
               <li>
                 <b>Trên máy có shell:</b> trong thư mục <code>worker/</code> chạy{" "}
@@ -211,6 +251,12 @@ export default async function SearchTermsPage({
           </Panel>
         </>
       ) : (
+        <>
+        <p className="mb-2 text-[12.5px] text-soft">
+          Đang ở màn con <b>A3 — Search term &amp; chặn</b> · số liệu campaign/KPI tổng ở màn{" "}
+          <a className="font-bold underline" href="/ppc">Quảng cáo (PPC)</a> · hàng đợi ghi Amazon ở màn{" "}
+          <a className="font-bold underline" href="/ppc/approvals">Duyệt thay đổi (A4)</a>.
+        </p>
         <SearchTermsBoard
           rows={rows}
           canDecide={canDecide}
@@ -219,6 +265,7 @@ export default async function SearchTermsPage({
           truncated={rows.length >= ROW_LIMIT}
           inFlight={inFlight}
         />
+        </>
       )}
     </>
   );

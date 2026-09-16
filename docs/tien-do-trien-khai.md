@@ -1422,7 +1422,13 @@ quả màn trống, 5 cổng, 3 bước bật thật, giới hạn "chưa chứn
 `spPurchasedProduct` [asin] 21/48. Ghi chú: report `spAdvertisedProduct` cần **Advertiser/Marketplace ID** đúng —
 `PENDING` mãi thì **kiểm profile ID trước**, đừng đổi `groupBy` (issues #324/#338 chính thức).
 
-**Kiểm chứng:** `web npm test` **403/403** (`ppc-model` 23 → **30**) · `tsc` sạch · `next build` OK
+**Sau khi giao, chủ dự án báo hai màn `/ppc` và `/ppc/search-terms` "giống hệt nhau"** — đúng, vì khi chưa có dữ liệu
+cả hai đổ cùng một panel chẩn đoán 5 cổng. Đã tách: A1 giữ vai "nhà của chẩn đoán" (đủ 5 cổng + trạng thái report +
+nút chạy ngay), A3 chỉ nói **tắc ở cổng nào** + **vì sao riêng màn search term trống** (5 ca, kể cả ca "đã có keyword
+nhưng report `spSearchTerm` còn PENDING") + 4 cách nạp dữ liệu; hai màn có dòng điều hướng chéo. Helper thuần mới:
+`stuckGate()` · `a3EmptyReason()` trong `ads-health-model.ts`.
+
+**Kiểm chứng:** `web npm test` **405/405** (`ppc-model` 23 → **30**, `ads-health` 9 → **11**) · `tsc` sạch · `next build` OK
 (`/ppc/search-terms` 5.02 kB) · `worker npm test` **490/490** (`ads-engine` 23/23 có mục 7 media type + negative,
 `ads-jobs` 22/22) · `supabase npm test` TẤT CẢ PASS · chạy bản build mới: `/ppc/search-terms` **HTTP 200**,
 hiện *"dữ liệu tới 2026-09-15 · cách đây 1 ngày"*.

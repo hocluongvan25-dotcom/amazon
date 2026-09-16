@@ -271,13 +271,35 @@ trạng thái đang bay nên nếu chỉ dựa vào `is_open` thì ca "đã lỗ
 
 | Hạng mục | Kết quả |
 |---|---|
-| `web npm test` | **403/403 pass** (trước 396; `ppc-model` 23 → **30**) |
+| `web npm test` | **405/405 pass** (trước 396; `ppc-model` 23 → **30**, `ads-health` 9 → **11**) |
 | `web npx tsc --noEmit` | sạch |
 | `web npm run build` | ✓ biên dịch thành công (`/ppc/search-terms` 5.02 kB) |
 | `worker npm test` | **490/490 pass** (`ads-engine` 23/23 gồm mục 7 media type + negative; `ads-jobs` 22/22) |
 | `supabase npm test` | TẤT CẢ PASS |
 | Chạy thật trên bản build mới | `/ppc/search-terms` **HTTP 200**, hiện "dữ liệu tới 2026-09-15 · cách đây 1 ngày";
 kiểm bằng curl: đủ **6 trạng thái** nêu ở 8.4 (chống chặn trùng · thử lại sau lỗi · cảnh báo chặn oan · đã chặn · chờ duyệt · form chặn) |
+
+### 8.7. `/ppc` và `/ppc/search-terms` từng TRÙNG NHAU khi chưa có dữ liệu (đã tách)
+
+Chủ dự án mở `veximops.com/ppc` và `veximops.com/ppc/search-terms` rồi hỏi *"hai trang này giống hệt nhau à?"* —
+**đúng**, và đó là lỗi thiết kế thật: khi chưa có dữ liệu Ads, cả hai màn đều đổ **cùng một panel chẩn đoán 5 cổng**,
+khác nhau mỗi dòng tiêu đề. Người dùng không thể biết màn nào dùng để làm gì.
+
+Đã tách vai rõ ràng:
+
+| Màn | Khi chưa có dữ liệu | Khi có dữ liệu |
+|---|---|---|
+| `/ppc` (A1 — tổng quan) | **Nhà của chẩn đoán**: liệt kê đủ 5 cổng + bảng trạng thái từng lần xin report + nút *"▶ Chạy đồng bộ ngay"* + một dòng chỉ đường sang A3/A4 | KPI · bảng campaign · "Cần xử lý ngay" |
+| `/ppc/search-terms` (A3 — hành động) | **Không lặp lại 5 cổng**: panel *"Vì sao màn này chưa có dòng search term nào"* — nói tắc ở cổng NÀO (1 câu, lấy từ `stuckGate()`) + panel *"Nạp dữ liệu search term bằng cách nào"* (4 cách) + link sang A1 để xem chẩn đoán đầy đủ | Bảng search term + duyệt negative + chống chặn trùng (mục 8.4) |
+
+Cốt lõi là 2 hàm thuần mới trong `web/src/lib/data/ads-health-model.ts` (có test):
+
+- `stuckGate(diagnostics)` → cổng ĐANG chặn (không phải cổng "chờ"), `null` nếu không cổng nào chặn.
+- `a3EmptyReason(counts, {credentialsOk, hasReadError})` → **vì sao RIÊNG màn search term trống**, phân biệt 5 ca:
+  chưa cấu hình Ads · lỗi đọc DB · có profile nhưng 0 campaign · có campaign nhưng 0 keyword/target ·
+  **có keyword nhưng 0 dòng search term** (report `spSearchTerm` còn `PENDING` — ca hay gặp nhất).
+
+Hai màn cũng đã có dòng điều hướng chéo, nên không còn cảm giác "một màn hai tên".
 
 ### 8.6. Hướng dẫn vận hành — đọc kỹ chỗ này
 

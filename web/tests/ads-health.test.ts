@@ -19,8 +19,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  a3EmptyReason,
   buildGates,
   readAdsCredentialsPresence,
+  stuckGate,
   type AdsCounts,
 } from "../src/lib/data/ads-health-model.ts";
 
@@ -229,4 +231,56 @@ test("cổng: report chỉ đang chờ Amazon (pending) KHÔNG bị coi là lỗ
     [{ shop: "VEXIM US", report_type: "spCampaigns", status: "in_progress", rows_imported: null, last_error: null, requested_at: "2026-09-16T03:00:00Z", age_minutes: 2, is_stale: false }],
   );
   assert.equal(find(gates, "last_report").ok, true);
+});
+
+/* ==========================================================================
+ * 16/09/2026 — màn con A3 KHÔNG được lặp lại panel 5 cổng của `/ppc`
+ * --------------------------------------------------------------------------
+ * Chủ dự án mở https://veximops.com/ppc và .../ppc/search-terms rồi hỏi "hai trang
+ * này giống hệt nhau à?" — đúng, vì cả hai đều đổ nguyên panel chẩn đoán 5 cổng khi
+ * chưa có dữ liệu. Từ nay màn con chỉ nói: tắc ở CỔNG NÀO + vì sao RIÊNG nó trống.
+ * ========================================================================== */
+
+test("A3: stuckGate lấy đúng cổng đang chặn; không cổng nào chặn thì trả null", () => {
+  const credsOk = readAdsCredentialsPresence({
+    AMAZON_ADS_CLIENT_ID: "a",
+    AMAZON_ADS_CLIENT_SECRET: "b",
+    AMAZON_ADS_REFRESH_TOKEN: "c",
+  });
+  // Chưa có credential ⇒ cổng 1 là cổng chặn (các cổng sau chỉ "chờ").
+  const credsMissing = readAdsCredentialsPresence({});
+  const g1 = buildGates(credsMissing, NO_COUNTS, []);
+  const stuck1 = stuckGate({ firstBlocked: g1.find((g) => !g.ok && !g.blocked) ?? null, gates: g1 });
+  assert.equal(stuck1?.key, "credentials");
+  assert.match(stuck1?.fix ?? "", /AMAZON_ADS_CLIENT_ID/);
+
+  // Đủ credential + đã có metrics + không lỗi report ⇒ không cổng nào chặn.
+  const g2 = buildGates(
+    credsOk,
+    counts({ profiles: 1, campaigns: 2, targets: 5, searchTerms: 9, metricRows: 30, lastMetricDay: "2026-09-15" }),
+    [],
+  );
+  assert.equal(stuckGate({ firstBlocked: g2.find((g) => !g.ok && !g.blocked) ?? null, gates: g2 }), null);
+  // Không truyền firstBlocked thì tự quét (không phụ thuộc thứ tự gọi).
+  assert.equal(stuckGate({ firstBlocked: null, gates: g2 }), null);
+});
+
+test("A3: a3EmptyReason phân biệt 4 ca trống — mỗi ca một việc cần làm khác nhau", () => {
+  // (a) chưa cấu hình Ads
+  assert.match(a3EmptyReason(NO_COUNTS, { credentialsOk: false }), /chưa được cấu hình/);
+  // (b) đọc DB lỗi
+  assert.match(a3EmptyReason(NO_COUNTS, { credentialsOk: true, hasReadError: true }), /Không đọc được số liệu/);
+  // (c) có profile nhưng 0 campaign ⇒ đồng bộ cấu trúc chưa tới / sai marketplace
+  assert.match(a3EmptyReason(counts({ profiles: 2, campaigns: 0 }), { credentialsOk: true }), /0 campaign/);
+  // (d) có campaign nhưng chưa có keyword/target ⇒ chưa thể có search term
+  assert.match(
+    a3EmptyReason(counts({ profiles: 1, campaigns: 3, targets: 0 }), { credentialsOk: true }),
+    /CHƯA có keyword\/target/,
+  );
+  // (e) ĐÃ có keyword/target nhưng 0 dòng search term ⇒ report spSearchTerm chưa về (bất đồng bộ)
+  const reason = a3EmptyReason(counts({ profiles: 1, campaigns: 3, targets: 12, searchTerms: 0 }), {
+    credentialsOk: true,
+  });
+  assert.match(reason, /spSearchTerm/);
+  assert.match(reason, /PENDING/, "phải nói report v3 bất đồng bộ để người dùng chờ rồi chạy lại thay vì đi sửa code");
 });

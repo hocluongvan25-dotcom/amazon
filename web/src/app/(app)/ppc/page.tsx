@@ -249,16 +249,26 @@ async function LivePpc() {
       ) : null}
 
       {cards.length === 0 ? (
-        diagnostics ? (
-          <AdsDiagnosticsPanel data={diagnostics} />
-        ) : (
-          <Panel title="Chưa có dữ liệu Amazon Ads" hint="không đọc được trạng thái kết nối">
-            <p className="text-[13px] text-muted">
-              Chưa có số liệu và cũng không đọc được trạng thái kết nối. Kiểm tra migration 0019/0020 và
-              credential Amazon Ads trên Vercel.
-            </p>
-          </Panel>
-        )
+        <>
+          {diagnostics ? (
+            <AdsDiagnosticsPanel data={diagnostics} />
+          ) : (
+            <Panel title="Chưa có dữ liệu Amazon Ads" hint="không đọc được trạng thái kết nối">
+              <p className="text-[13px] text-muted">
+                Chưa có số liệu và cũng không đọc được trạng thái kết nối. Kiểm tra migration 0019/0020 và
+                credential Amazon Ads trên Vercel.
+              </p>
+            </Panel>
+          )}
+          {/* Màn này là nhà của chẩn đoán; các màn con (A3/A4) chỉ nói tắc ở đâu nên
+              phải chỉ đường sang, không thì người dùng tưởng chúng trùng nhau. */}
+          <p className="mt-2 text-[12.5px] text-soft">
+            Sau khi có số liệu, màn con{" "}
+            <a className="font-bold underline" href="/ppc/search-terms">A3 — Search term &amp; chặn</a> hiện bảng search
+            term đốt tiền + gợi ý negative kèm bằng chứng;{" "}
+            <a className="font-bold underline" href="/ppc/approvals">A4 — Duyệt thay đổi</a> là hàng đợi ghi lên Amazon.
+          </p>
+        </>
       ) : (
         <>
           <Grid2>
