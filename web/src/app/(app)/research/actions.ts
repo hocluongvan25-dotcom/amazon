@@ -200,37 +200,56 @@ export async function analyzePainNowAction(assessmentId: string): Promise<Enqueu
 }
 
 /**
- * G2 — CHẠY NGAY 1 lượt thu thập đang xếp hàng (không chờ cron 04:17 UTC).
- * Sự cố 16/09/2026: người dùng xếp hàng 3 lượt rồi… không có gì xảy ra — hàng
- * đợi chỉ được xử lý bởi cron ngày (hoặc CLI thủ công), mà luồng thiết kế là
- * "chạy lần lượt, kiểm tra bảng sau mỗi bước trước khi xếp bước kế".
+ * G2 — CHẠY NGAY thu thập THEO TỪNG TÁC VỤ: 1 lần bấm = xếp hàng + chạy thẳng
+ * lượt của kind đó ngay trong request, KHÔNG chờ cron. Cron (Vercel 04:17 UTC
+ * hoặc cron-job.org) chỉ chạy NGẦM vét lượt còn sót/lượt bị cắt giữa chừng.
  *
- * Mỗi lần bấm xử lý TỐI ĐA 1 lượt (max=1): lượt products direct topN=10 đã là
- * ~30 request Rainforest; giữ trong trần thời gian hàm serverless. Bấm nhiều
- * lần nếu xếp hàng nhiều lượt.
+ * Mỗi lần xử lý TỐI ĐA 1 lượt (max=1): lượt products direct topN=10 đã là ~30
+ * request Rainforest; giữ trong trần 60s của hàm serverless. Quá trần thì
+ * migration 0034 thu hồi lượt kẹt và cron chạy tiếp.
  */
-export async function runCollectionNowAction(assessmentId: string): Promise<EnqueueState> {
+export async function enqueueAndRunCollectionAction(
+  assessmentId: string,
+  kind: "serp" | "products" | "reviews",
+  params: Record<string, unknown> = {},
+): Promise<EnqueueState> {
   const session = await getAppSession();
   if (!session) return { ok: false, message: "Chưa đăng nhập." };
   if (session.persona !== "ceo") {
-    return { ok: false, message: "Chạy thu thập dữ liệu chỉ dành cho persona CEO." };
+    return { ok: false, message: "Thu thập dữ liệu chỉ dành cho persona CEO." };
   }
+  const db = await createClient();
+  if (!db) {
+    return { ok: false, message: "DEMO MODE: không chạy thu thập được; cần Supabase + worker." };
+  }
+
+  // 1) Xếp hàng — nếu đã có lượt queued/running cùng kind thì bỏ qua, chạy luôn.
+  const { error } = await db.rpc("vexim_research_enqueue_run", {
+    p_assessment: assessmentId,
+    p_kind: kind,
+    p_params: params,
+    p_provider: null,
+  });
+  if (error && !error.message.includes("đang chờ/chạy")) {
+    return { ok: false, message: error.message };
+  }
+
+  // 2) Chạy ngay lượt vừa xếp, GIỚI HẠN đúng kind của nút vừa bấm.
   let result: Awaited<ReturnType<typeof runResearchCollect>>;
   try {
-    result = await runResearchCollect({ kinds: ["serp", "products", "reviews"], max: 1 });
+    result = await runResearchCollect({ kinds: [kind], max: 1 });
   } catch (e) {
     return { ok: false, message: `Lỗi khi chạy thu thập: ${(e as Error).message.split("\n")[0]}` };
   }
   revalidatePath(`/research/${assessmentId}`);
-  if (result.outcomes.length === 0) {
+  const o = result.outcomes[0];
+  if (!o) {
     return {
       ok: false,
-      message:
-        "Không còn lượt 'queued' (SERP/products/reviews) trong hàng đợi — đã chạy hết hoặc chưa xếp hàng.",
+      message: `Lượt "${kind}" không nhặt được để chạy — có thể đang có lượt cùng loại chạy dở; kiểm tra bảng bên dưới.`,
     };
   }
-  const o = result.outcomes[0];
-  const mode =
+  const mockWarn =
     result.providerName === "mock"
       ? " ⚠️ provider MOCK (thiếu RAINFOREST_API_KEY — dữ liệu không phải số thật)."
       : result.mode === "demo"
@@ -239,9 +258,9 @@ export async function runCollectionNowAction(assessmentId: string): Promise<Enqu
   return {
     ok: o.status !== "failed",
     message:
-      `Chạy ngay lượt "${o.kind}" (${o.runId.slice(0, 8)}): ${o.status}` +
+      `Chạy xong lượt "${o.kind}" (${o.runId.slice(0, 8)}): ${o.status}` +
       (o.creditsUsed > 0 ? ` · ${o.creditsUsed} credits Rainforest` : "") +
-      ` — ${o.message}${mode}`,
+      ` — ${o.message}${mockWarn}`,
   };
 }
 

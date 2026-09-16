@@ -16,7 +16,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Chip, Panel, tableCls } from "@/components/ui";
 import type { CollectionData } from "@/lib/data/research";
-import { enqueueCollectionAction, runCollectionNowAction } from "../actions";
+import { enqueueAndRunCollectionAction } from "../actions";
 
 const KIND_LABEL: Record<string, string> = {
   serp: "SERP (đối thủ trên trang tìm kiếm)",
@@ -66,27 +66,16 @@ export function CollectionPanel({
     Math.min(Math.max(reviewsTopN || 1, 1), 20) *
     Math.min(Math.max(reviewPages || 1, 1), 10);
 
+  // MỖI NÚT = XẾP HÀNG + CHẠY NGAY trong request (không chờ cron). Cron chỉ
+  // chạy ngầm vét lượt sót / lượt bị Vercel cắt giữa chừng (migration 0034).
   const enqueue = (
     kind: "serp" | "products" | "reviews",
     params: Record<string, unknown>,
     credits: number,
   ) => {
     startTransition(async () => {
-      const r = await enqueueCollectionAction(assessmentId, kind, params);
-      setMessage({
-        ok: r.ok,
-        text: r.ok ? `${r.message} · Ước tính ≤${credits} credits Rainforest.` : r.message,
-      });
-      router.refresh();
-    });
-  };
-
-  // Xếp hàng CHỈ ghi DB; cron nhặt lúc 04:17 UTC hằng ngày. Luồng thẩm định
-  // cần thấy kết quả ngay → nút này chạy thẳng 1 lượt queued trong request.
-  const hasQueued = data.runs.some((r) => r.status === "queued");
-  const runNow = () => {
-    startTransition(async () => {
-      const r = await runCollectionNowAction(assessmentId);
+      setMessage({ ok: true, text: `Đang chạy lượt "${kind}" (≈${credits} credits) — chờ chút…` });
+      const r = await enqueueAndRunCollectionAction(assessmentId, kind, params);
       setMessage({ ok: r.ok, text: r.message });
       router.refresh();
     });
@@ -95,7 +84,7 @@ export function CollectionPanel({
   return (
     <Panel
       title="Thu thập dữ liệu (G2 — Rainforest)"
-      hint="worker/cron nhận hàng đợi; mỗi lượt ghi 1 collection_run + sổ cái credits"
+      hint="mỗi nút = xếp hàng + CHẠY NGAY trong request; cron chỉ chạy ngầm vét lượt sót; mỗi lượt ghi 1 collection_run + sổ cái credits"
     >
       {!connected && (
         <div className="mb-3 rounded-[10px] bg-amber-soft px-3 py-2 text-[12.5px] font-semibold text-[#8a5602]">
@@ -122,9 +111,9 @@ export function CollectionPanel({
             onClick={() =>
               enqueue("serp", { pages: serpCredits }, serpCredits)
             }
-            className="rounded-[9px] border border-line bg-white px-3 py-1.5 text-[12px] font-extrabold disabled:opacity-40"
+            className="rounded-[9px] bg-blue px-3 py-1.5 text-[12px] font-extrabold text-white hover:bg-blue-800 disabled:opacity-40"
           >
-            + Xếp hàng: {KIND_LABEL.serp}
+            {pending ? "Đang chạy…" : `▶ Chạy ngay: ${KIND_LABEL.serp}`}
           </button>
           <span className="text-[11px] text-muted">≈ {serpCredits} credit</span>
         </div>
@@ -158,9 +147,9 @@ export function CollectionPanel({
                 productsCredits,
               )
             }
-            className="rounded-[9px] border border-line bg-white px-3 py-1.5 text-[12px] font-extrabold disabled:opacity-40"
+            className="rounded-[9px] bg-blue px-3 py-1.5 text-[12px] font-extrabold text-white hover:bg-blue-800 disabled:opacity-40"
           >
-            + Xếp hàng: {KIND_LABEL.products}
+            {pending ? "Đang chạy…" : `▶ Chạy ngay: ${KIND_LABEL.products}`}
           </button>
           <span className="text-[11px] text-muted">
             ≈ {productsCredits} credits (3 request/ASIN
@@ -198,9 +187,9 @@ export function CollectionPanel({
                 reviewsCredits,
               )
             }
-            className="rounded-[9px] border border-line bg-white px-3 py-1.5 text-[12px] font-extrabold disabled:opacity-40"
+            className="rounded-[9px] bg-blue px-3 py-1.5 text-[12px] font-extrabold text-white hover:bg-blue-800 disabled:opacity-40"
           >
-            + Xếp hàng: {KIND_LABEL.reviews}
+            {pending ? "Đang chạy…" : `▶ Chạy ngay: ${KIND_LABEL.reviews}`}
           </button>
           <span className="text-[11px] text-muted">
             ≤ {reviewsCredits} credits. G4 đủ mẫu: đặt 10 ASIN × 5 trang ≈ 500 review 1–3★.
@@ -216,24 +205,9 @@ export function CollectionPanel({
 
       {message && <Chip tone={message.ok ? "green" : "amber"}>{message.text}</Chip>}
 
-      <div className="mb-1.5 mt-3 flex flex-wrap items-center justify-between gap-2">
-        <h4 className="text-[12px] font-extrabold uppercase tracking-wide text-soft">
-          Hàng đợi & lịch sử lượt quét
-        </h4>
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] text-muted">
-            Không bấm “Chạy ngay”? Cron tự xử lý lúc 04:17 UTC hằng ngày.
-          </span>
-          <button
-            type="button"
-            disabled={pending || !connected || !hasQueued}
-            onClick={runNow}
-            className="rounded-[9px] bg-blue px-3 py-1.5 text-[12px] font-extrabold text-white hover:bg-blue-800 disabled:opacity-40"
-          >
-            {pending ? "Đang chạy…" : "▶ Chạy ngay 1 lượt queued"}
-          </button>
-        </div>
-      </div>
+      <h4 className="mb-1.5 mt-3 text-[12px] font-extrabold uppercase tracking-wide text-soft">
+        Hàng đợi & lịch sử lượt quét
+      </h4>
       {data.runs.length === 0 ? (
         <div className="rounded-[10px] bg-[#f4f6fa] px-3 py-2 text-[12.5px] text-soft">
           Chưa có lượt thu thập nào. Bắt đầu bằng SERP, sau đó mới chạy products/reviews.
