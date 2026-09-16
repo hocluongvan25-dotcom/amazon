@@ -29,6 +29,21 @@ export { ADS_REPORT_SPECS, ADS_ALL_KINDS, isAdsReportKind } from "./ads/registry
 export type { AdsReportKind } from "./ads/registry";
 export { AdsClient, AdsLwaTokenManager, AdsApiRequestError } from "./amazon/ads";
 
+/* ---- Module 4 (Orders API v0): đồng bộ đơn hàng qua GET /orders/v0/orders ---- */
+export { runOrdersSyncAll } from "./run-orders-sync";
+export type { OrdersSyncRunResult, OrdersSyncOutcome } from "./run-orders-sync";
+export { OrdersClient, TokenBucket, ORDERS_RATE_LIMIT, ordersHostForRegion } from "./amazon/orders";
+export type { OrdersListQuery, OrdersClientOptions } from "./amazon/orders";
+export {
+  apiOrderToRowInput,
+  apiItemToRowInput,
+  orderDailyFromApiOrders,
+  assertMarketplaceIds,
+  clampMaxResultsPerPage,
+  PII_LOCKED_PATHS,
+  isPiiLockedPath,
+} from "./domain/orders-api";
+
 /* ---- Module 8 G2 (0026): thu thập đối thủ/review Rainforest ---- */
 export { runResearchCollect, SupabaseResearchPort, NoopResearchPort } from "./run-research-collect";
 export type { ResearchCollectResult } from "./run-research-collect";

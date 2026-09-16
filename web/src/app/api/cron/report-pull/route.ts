@@ -8,11 +8,20 @@
  *   /api/cron/report-pull?adsKinds=campaigns,targeting → chỉ vài loại report Ads
  *   /api/cron/report-pull?days=7                     → ghi đè khoảng ngày mặc định
  *   /api/cron/report-pull?dryRun=1                   → tải + parse, KHÔNG ghi DB
+ *   /api/cron/report-pull?orders=0                   → bỏ phần đồng bộ ĐƠN HÀNG
  *
  * VÌ SAO ADS DÙNG CHUNG MỘT CRON (không thêm cron thứ ba):
  *   Vercel Hobby chỉ cho 2 cron/ngày (02:00 inventory-sync · 03:00 report-pull).
  *   Thêm cron thứ ba là vượt hạn mức ⇒ ghép vào đây theo thứ tự: FBA → cấu trúc
  *   Ads (profile/campaign/ad group/target) → report Ads.
+ *
+ * VÌ SAO ĐƠN HÀNG CŨNG GHÉP VÀO (16/09/2026):
+ *   Đường delta Orders API v0 (`/api/cron/orders-sync`) chỉ cho 0.0167 rps nên chạy
+ *   dày vô ích; mà màn /orders trước đây không có cron nào cả ⇒ bảng luôn rỗng.
+ *   Chạy kèm ở đây (sau Ads) là đủ cho nhịp vận hành 1 lần/ngày; muốn kéo ngay thì
+ *   bấm nút "Đồng bộ đơn hàng ngay" trên /orders hoặc gọi thẳng
+ *   `/api/cron/orders-sync` (cùng CRON_SECRET). Khi dự án lên gói Pro có thể thêm
+ *   mục cron riêng cho /api/cron/orders-sync để chạy mỗi 30 phút.
  *
  * VÌ SAO maxDuration = 60 VÀ CHỈ POLL 2 LẦN:
  *   Cả SP-API Reports và Ads Reporting v3 đều BẤT ĐỒNG BỘ. Cron KHÔNG được ngồi
@@ -35,6 +44,7 @@ import {
   runAdsApplyAll,
   runAdsPullAll,
   runAdsSyncAll,
+  runOrdersSyncAll,
   runReportPullAll,
   type AdsReportKind,
   type ReportKind,
@@ -124,6 +134,9 @@ export async function GET(req: Request) {
   // Phần GHI tách cờ riêng: có shop chỉ muốn kéo số liệu mà chưa muốn cho cron
   // ghi lên Amazon (ví dụ đang kiểm tra quyền của app Ads).
   const withAdsApply = url.searchParams.get("adsApply") !== "0";
+  // Phần ĐƠN HÀNG tách cờ riêng: shop nào chưa xong hồ sơ SP-API Orders vẫn chạy
+  // được report FBA/Ads như cũ.
+  const withOrders = url.searchParams.get("orders") !== "0";
 
   const buf: string[] = [];
   const out = {
@@ -165,8 +178,21 @@ export async function GET(req: Request) {
       if (withAdsApply) adsApply = await runAdsApplyAll({ dryRun, stdout: out });
     }
 
+    // 4. ĐƠN HÀNG (Orders API v0): delta getOrders → orderItems → upsert. Chạy CUỐI
+    //    để phần FBA/Ads không bị phần này ăn hết 60s; ngân sách item giữ nhỏ
+    //    (8s) vì cron là lượt "quét nhanh", còn backfill thì dùng CLI/nút.
+    let orders: Awaited<ReturnType<typeof runOrdersSyncAll>> | null = null;
+    if (withOrders) {
+      orders = await runOrdersSyncAll({
+        days,
+        dryRun,
+        maxItemMs: 8_000,
+        stdout: out,
+      });
+    }
+
     return NextResponse.json({
-      ok: res.failed === 0,
+      ok: res.failed === 0 && (orders?.failed ?? 0) === 0,
       mode: res.mode,
       db: res.db,
       apiConfigured: res.apiConfigured,
@@ -234,6 +260,23 @@ export async function GET(req: Request) {
             }
           : null,
       },
+      orders: orders
+        ? {
+            enabled: withOrders,
+            db: orders.db,
+            apiConfigured: orders.apiConfigured,
+            shopsProcessed: orders.shopsProcessed,
+            ordersUpserted: orders.ordersUpserted,
+            itemsUpserted: orders.itemsUpserted,
+            pages: orders.pages,
+            throttled: orders.throttled,
+            deferred: orders.deferred,
+            skipped: orders.skipped,
+            failed: orders.failed,
+            outcomes: orders.outcomes,
+            errors: orders.errors,
+          }
+        : null,
       cronSecretConfigured: !!process.env.CRON_SECRET,
       log: buf.join(""),
     });

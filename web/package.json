@@ -8,7 +8,8 @@
     "start": "next start -H 0.0.0.0 -p 3000",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
-    "worker:research-collect": "node --experimental-strip-types src/cli/run-research-collect.ts"
+    "worker:research-collect": "node --experimental-strip-types src/cli/run-research-collect.ts",
+    "worker:orders-sync": "node --experimental-strip-types src/cli/run-orders-sync.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.6.1",

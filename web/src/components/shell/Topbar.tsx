@@ -3,13 +3,18 @@
 import Link from "next/link";
 import { PERSONAS, type PersonaKey } from "@/lib/roles";
 import type { Session } from "@/lib/auth/session";
+import type { ShopScope } from "@/lib/data/shop-scope";
+import ShopScopeSelect from "./ShopScopeSelect";
 
 export default function Topbar({
   session,
   bellSlot,
+  shopScope,
 }: {
   session: Session;
   bellSlot: React.ReactNode;
+  /** Shop đang chọn + danh sách shop đọc được — bộ chọn THẬT (xem ShopScopeSelect). */
+  shopScope: ShopScope;
 }) {
   const persona = PERSONAS[session.persona];
 
@@ -46,12 +51,18 @@ export default function Topbar({
           </span>
         )}
 
-        <select className="shrink-0 rounded-[9px] border border-line bg-card px-2.5 py-[7px] text-[12.5px] font-semibold text-muted">
-          <option>{persona.org}</option>
-        </select>
-        <select className="shrink-0 rounded-[9px] border border-line bg-card px-2.5 py-[7px] text-[12.5px] font-semibold text-muted">
-          <option>{persona.shop}</option>
-        </select>
+        {/*
+          Tổ chức chỉ là NHÃN (trước đây là <select> 1 lựa chọn — control giả, gây
+          hiểu nhầm là chọn được). Phạm vi shop là bộ chọn THẬT: đọc vexim_shops
+          theo RLS của người đăng nhập rồi ghi cookie `shop_scope`.
+        */}
+        <span
+          className="hidden shrink-0 rounded-[9px] border border-line bg-card px-2.5 py-[7px] text-[12.5px] font-semibold text-muted lg:inline"
+          title="Tổ chức của tài khoản đang đăng nhập"
+        >
+          {persona.org}
+        </span>
+        <ShopScopeSelect shops={shopScope.shops} current={shopScope.shopId} mode={session.mode} />
         <select className="hidden shrink-0 rounded-[9px] border border-line bg-card px-2.5 py-[7px] text-[12.5px] font-semibold text-muted md:block">
           <option>Hôm qua</option>
           <option>7 ngày</option>
@@ -79,7 +90,16 @@ export default function Topbar({
         ) : (
           <>
             🔒 Đăng nhập: <b className="text-blue">{session.email ?? persona.label}</b> ·{" "}
-            <span className="text-soft">SUPABASE MODE</span>
+            {shopScope.shop ? (
+              <>
+                phạm vi shop: <b className="text-blue">{shopScope.shop.name}</b>{" "}
+              </>
+            ) : (
+              <>
+                phạm vi shop: <b className="text-blue">tất cả ({shopScope.shops.length})</b>{" "}
+              </>
+            )}
+            · <span className="text-soft">SUPABASE MODE</span>
           </>
         )}
       </div>

@@ -1437,3 +1437,42 @@ hiện *"dữ liệu tới 2026-09-15 · cách đây 1 ngày"*.
 Chỉ cần **Redeploy web** để lấy bản sửa media type + gương negative; sau đó chạy đồng bộ một lần
 (trên `/ppc` bấm nút, hoặc `cd worker && npm run worker:ads-sync` rồi `npm run worker:ads-pull`).
 Báo cáo đầy đủ: `docs/bao-cao-module-ppc-ads.md` mục 8.
+
+## 16/09/2026 (lần 6) — Module 4 (Đơn hàng): bộ chọn shop thật + nối đúng Orders API v0 (`/orders`)
+
+**Câu hỏi:** kiểm tra trang `/orders` · kết nối API đã chuẩn chưa · vì sao không chọn được shop đã kéo về (hay là mặc định?).
+
+**Trả lời gọn:** chưa chuẩn — **không phải sai tham số mà là THIẾU tầng gọi**: repo chưa từng gọi `GET /orders/v0/orders`
+(chỉ có tài liệu mô tả trong `jobs/orders-sync.job.ts`, còn `getOrders` chỉ nằm trong comment); và bộ chọn shop trên
+Topbar là **control giả** (một `<option>{persona.shop}</option>`, không `onChange`, không đọc DB) nên *không phải mặc định* —
+nó chưa bao giờ nối vào đâu. Đã sửa cả hai.
+
+**Đã làm (không cần migration mới):**
+
+- **Bộ chọn phạm vi shop dùng chung**: `shop-scope-model.ts` (thuần, có test) + `shop-scope.ts` (server: đọc `vexim_shops`
+  lùi cột V3→V2, RLS lọc sẵn) + `ShopScopeSelect.tsx` (select THẬT, ghi cookie `shop_scope`, `router.refresh()`); nối
+  `(app)/layout.tsx` → `AppShell` → `Topbar`. Luật: `?shop=` thắng cookie, id lạ/đã thu hồi ⇒ bỏ qua, không chọn gì = tất cả.
+  Select **tổ chức** (cũng là control tĩnh) đổi thành chữ.
+- **Lọc theo shop ở tầng DB**: `readOperations(screen, filter?, shopId?)` thêm `eq("seller_account_id", …)` ⇒ mọi màn
+  đơn hàng/tài chính đọc đúng shop đang chọn; tiêu đề ghi rõ `phạm vi: shop X | tất cả shop (N)`.
+- **Nối Orders API v0 (tầng delta)**: `domain/orders-api.ts` (thuần) · `amazon/orders.ts` (`OrdersClient` + `TokenBucket`
+  theo trần Amazon) · `run-orders-sync.ts` (mỗi shop → getOrders → getOrderItems → `upsertOrders`/`order_daily`/alert FBM)
+  · cron `/api/cron/orders-sync` + gộp vào `report-pull` (cờ `?orders=0`, không thêm cron thứ tư) · nút **“▶ Đồng bộ đơn
+  hàng ngay”** trên 3 màn đơn hàng · CLI `cd worker && npm run worker:orders-sync -- --days=7` (kèm `--report=` cho tầng report).
+- **Chuyển code thật vào `web/`** cho 4 file orders (domain · 2 parser · job) theo đúng quy ước repo (Vercel Root Directory =
+  `web`); `worker/src/**` còn **shim** re-export ⇒ `worker npm test` 490/490 vẫn xanh.
+- **Giữ bất biến không PII**: 3 endpoint `/address`, `/buyerInfo`, `/orderItems/buyerInfo` bị **chặn ở tầng request**;
+  hệ quả `ship_state`/`ship_country` để trống ở đường API (chỉ tầng report mới có) — ghi rõ trong code + báo cáo.
+- **Trần 60s của Vercel**: `getOrderItems` 0.5 rps ⇒ runner dùng **ngân sách thời gian** `maxItemMs` (cron 8s · nút 15s),
+  **đơn mới nhất trước**, đơn chưa kịp lấy item vẫn ghi và **báo rõ số bị hoãn** (`deferred`).
+- **Panel rỗng có hướng dẫn**: khi 0 dòng, màn đơn hàng nói rõ cách nạp dữ liệu (cron/nút/CLI/credential/shop production).
+
+**Kiểm chứng:** `web npm test` **431/431** (+6 `shop-scope`, +20 `orders-api`) · `tsc` sạch · `next build` OK
+(`/api/cron/orders-sync` có trong bảng route) · `worker npm test` **490/490** · SSR `/orders`, `/orders/fbm`,
+`/orders/returns` **HTTP 200** với select phạm vi shop (DEMO: disabled + nói rõ lý do).
+
+**VEXIM cần làm:** thêm `AMAZON_LWA_*` + `SUPABASE_SERVICE_ROLE_KEY` (nếu chưa), **Redeploy**, shop phải
+`active` + `data_source='production'`, rồi bấm “Đồng bộ đơn hàng ngay” (hoặc chờ cron 03:00 UTC). **Chưa làm:**
+tầng notification `ORDER_CHANGE` (cần SQS) và ReportKind cho 2 loại report đơn hàng trong registry web.
+
+Báo cáo đầy đủ: `docs/bao-cao-don-hang-orders.md`.
