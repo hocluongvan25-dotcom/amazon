@@ -18,7 +18,7 @@ import { useRouter } from "next/navigation";
 import { Chip, Panel, tableCls } from "@/components/ui";
 import type { PainData } from "@/lib/data/research-pain";
 import type { PainClusterCode, PainItem, PainPriority } from "@/lib/research/domain";
-import { enqueueAnalyzeAction, updatePainItemAction } from "../actions";
+import { analyzePainNowAction, updatePainItemAction } from "../actions";
 
 const PRIORITY_TONE: Record<PainPriority, "red" | "amber" | "gray"> = {
   must: "red",
@@ -156,7 +156,7 @@ export function PainPanel({ assessmentId, data, connected }: { assessmentId: str
 
   const enqueue = () =>
     startTransition(async () => {
-      const r = await enqueueAnalyzeAction(assessmentId);
+      const r = await analyzePainNowAction(assessmentId);
       setMessage({ ok: r.ok, text: r.message });
       router.refresh();
     });
@@ -185,10 +185,11 @@ export function PainPanel({ assessmentId, data, connected }: { assessmentId: str
           onClick={enqueue}
           className="rounded-[9px] border border-line bg-white px-3 py-1.5 text-[12px] font-extrabold disabled:opacity-40"
         >
-          {hasPain ? "↻ Phân tích lại bằng LLM" : "+ Xếp hàng phân tích pain (LLM)"}
+          {hasPain ? "↻ Phân tích lại bằng LLM (chạy ngay)" : "▶ Phân tích pain bằng LLM (chạy ngay)"}
         </button>
         <span className="text-[11.5px] text-muted">
           map theo lô 25 review → reduce top ≤5 pain; gpt-4.1-mini khi có LLM_API_KEY.
+          Bấm 1 lần = xếp hàng + chạy ngay; lô rất lớn quá 60s sẽ được cron chạy tiếp.
         </span>
         <div className="ml-auto flex flex-wrap items-center gap-1.5">
           {mockMode && <Chip tone="amber">dữ liệu MOCK minh họa</Chip>}
@@ -207,7 +208,7 @@ export function PainPanel({ assessmentId, data, connected }: { assessmentId: str
       {!hasPain ? (
         <div className="rounded-[10px] bg-[#f4f6fa] px-3 py-3 text-[12.5px] text-soft">
           Chưa có phân tích pain. Cần thu thập review 1–3★ ở panel G2 (mục tiêu ~500 review/ngách), rồi bấm
-          “Xếp hàng phân tích pain”. Khi chưa đủ 30 review, trụ khác biệt hóa để <b>“chưa đủ cơ sở”</b>, không chấm bừa.
+          “▶ Phân tích pain bằng LLM (chạy ngay)”. Khi chưa đủ 30 review, trụ khác biệt hóa để <b>“chưa đủ cơ sở”</b>, không chấm bừa.
         </div>
       ) : (
         <>

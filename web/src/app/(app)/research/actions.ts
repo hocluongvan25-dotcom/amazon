@@ -141,6 +141,65 @@ export async function enqueueAnalyzeAction(assessmentId: string): Promise<Enqueu
 }
 
 /**
+ * G4 — CHẠY NGAY phân tích pain bằng LLM: 1 lần bấm = xếp hàng (nếu chưa có
+ * lượt) + chạy thẳng lượt analyze trong request, KHÔNG chờ cron. Sự cố
+ * 16/09/2026: nút xếp hàng xong không có gì xảy ra — cron mặc định chỉ nhặt
+ * serp/products/reviews, kind 'analyze' còn không được nhặt.
+ *
+ * Lô review quá lớn (≥500 review) có thể chạy quá trần 60s của Vercel: lượt
+ * đang chạy sẽ được migration 0034 thu hồi sau 10 phút và cron chạy tiếp.
+ */
+export async function analyzePainNowAction(assessmentId: string): Promise<EnqueueState> {
+  const session = await getAppSession();
+  if (!session) return { ok: false, message: "Chưa đăng nhập." };
+  if (session.persona !== "ceo") {
+    return { ok: false, message: "Phân tích pain bằng LLM chỉ dành cho persona CEO." };
+  }
+  const db = await createClient();
+  if (!db) {
+    return { ok: false, message: "DEMO MODE: không chạy phân tích được; cần Supabase + worker." };
+  }
+
+  // 1) Xếp hàng — nếu đã có lượt queued/running thì bỏ qua, sang bước chạy luôn.
+  const { error } = await db.rpc("vexim_research_enqueue_run", {
+    p_assessment: assessmentId,
+    p_kind: "analyze",
+    p_params: { chunkSize: 25, concurrency: 4 },
+    p_provider: "llm",
+  });
+  if (error && !error.message.includes("đang chờ/chạy")) {
+    return { ok: false, message: error.message };
+  }
+
+  // 2) Chạy ngay lượt analyze vừa xếp trong chính request này.
+  let result: Awaited<ReturnType<typeof runResearchCollect>>;
+  try {
+    result = await runResearchCollect({ kinds: ["analyze"], max: 1 });
+  } catch (e) {
+    return { ok: false, message: `Lỗi khi chạy phân tích LLM: ${(e as Error).message.split("\n")[0]}` };
+  }
+  revalidatePath(`/research/${assessmentId}`);
+  const o = result.outcomes[0];
+  if (!o) {
+    return { ok: false, message: "Không nhặt được lượt 'analyze' nào trong hàng đợi để chạy." };
+  }
+  const a = o.analysis;
+  const mockWarn = result.llmConfigured
+    ? ""
+    : " ⚠️ Chưa có LLM_API_KEY — chạy MOCK, kết quả KHÔNG phải phân tích thật.";
+  const detail = a
+    ? `${a.items} pain · ${a.quotes} trích dẫn · ${a.llmRuns} lượt LLM · ${(a.tokensIn + a.tokensOut).toLocaleString("en-US")} token · ~$${a.costUsd.toFixed(4)}`
+    : o.message;
+  return {
+    ok: o.status !== "failed",
+    message:
+      o.status === "failed"
+        ? `Phân tích LLM thất bại: ${o.message}${mockWarn}`
+        : `Phân tích LLM xong (${o.status}): ${detail}${mockWarn}`,
+  };
+}
+
+/**
  * G2 — CHẠY NGAY 1 lượt thu thập đang xếp hàng (không chờ cron 04:17 UTC).
  * Sự cố 16/09/2026: người dùng xếp hàng 3 lượt rồi… không có gì xảy ra — hàng
  * đợi chỉ được xử lý bởi cron ngày (hoặc CLI thủ công), mà luồng thiết kế là

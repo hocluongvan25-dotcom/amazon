@@ -35,7 +35,9 @@ export async function GET(req: Request) {
   }
 
   const url = new URL(req.url);
-  const kinds = (url.searchParams.get("kinds") ?? "serp,products,reviews")
+  // 'analyze' nằm trong danh sách mặc định: lượt phân tích LLM cũng phải được
+  // cron nhặt — không thì chỉ có nút "Chạy ngay" trên web xử lý được nó.
+  const kinds = (url.searchParams.get("kinds") ?? "serp,products,reviews,analyze")
     .split(",")
     .map((k) => k.trim())
     .filter(Boolean);
