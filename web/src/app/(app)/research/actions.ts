@@ -18,6 +18,7 @@ import {
 } from "@/lib/research/domain";
 import { referralRatePctFromFee } from "@/lib/worker/domain/product-fees";
 import { lookupSpApiFeesForAsin } from "@/lib/worker/run-product-fees";
+import { runResearchCollect } from "@/lib/worker";
 import { createClient } from "@/lib/supabase/server";
 import { formToAssumptions, type ResearchFormRaw } from "@/lib/data/research-model";
 
@@ -136,6 +137,52 @@ export async function enqueueAnalyzeAction(assessmentId: string): Promise<Enqueu
   return {
     ok: true,
     message: `Đã xếp hàng phân tích pain bằng LLM (${out.run_id.slice(0, 8)}). Worker sẽ map/reduce trên review 1–3★.`,
+  };
+}
+
+/**
+ * G2 — CHẠY NGAY 1 lượt thu thập đang xếp hàng (không chờ cron 04:17 UTC).
+ * Sự cố 16/09/2026: người dùng xếp hàng 3 lượt rồi… không có gì xảy ra — hàng
+ * đợi chỉ được xử lý bởi cron ngày (hoặc CLI thủ công), mà luồng thiết kế là
+ * "chạy lần lượt, kiểm tra bảng sau mỗi bước trước khi xếp bước kế".
+ *
+ * Mỗi lần bấm xử lý TỐI ĐA 1 lượt (max=1): lượt products direct topN=10 đã là
+ * ~30 request Rainforest; giữ trong trần thời gian hàm serverless. Bấm nhiều
+ * lần nếu xếp hàng nhiều lượt.
+ */
+export async function runCollectionNowAction(assessmentId: string): Promise<EnqueueState> {
+  const session = await getAppSession();
+  if (!session) return { ok: false, message: "Chưa đăng nhập." };
+  if (session.persona !== "ceo") {
+    return { ok: false, message: "Chạy thu thập dữ liệu chỉ dành cho persona CEO." };
+  }
+  let result: Awaited<ReturnType<typeof runResearchCollect>>;
+  try {
+    result = await runResearchCollect({ kinds: ["serp", "products", "reviews"], max: 1 });
+  } catch (e) {
+    return { ok: false, message: `Lỗi khi chạy thu thập: ${(e as Error).message.split("\n")[0]}` };
+  }
+  revalidatePath(`/research/${assessmentId}`);
+  if (result.outcomes.length === 0) {
+    return {
+      ok: false,
+      message:
+        "Không còn lượt 'queued' (SERP/products/reviews) trong hàng đợi — đã chạy hết hoặc chưa xếp hàng.",
+    };
+  }
+  const o = result.outcomes[0];
+  const mode =
+    result.providerName === "mock"
+      ? " ⚠️ provider MOCK (thiếu RAINFOREST_API_KEY — dữ liệu không phải số thật)."
+      : result.mode === "demo"
+        ? " ⚠️ chế độ demo (thiếu Supabase — không ghi DB)."
+        : "";
+  return {
+    ok: o.status !== "failed",
+    message:
+      `Chạy ngay lượt "${o.kind}" (${o.runId.slice(0, 8)}): ${o.status}` +
+      (o.creditsUsed > 0 ? ` · ${o.creditsUsed} credits Rainforest` : "") +
+      ` — ${o.message}${mode}`,
   };
 }
 

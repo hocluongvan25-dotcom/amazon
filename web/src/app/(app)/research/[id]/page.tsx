@@ -23,6 +23,11 @@ import {
   VERDICT_TONE,
   shortDate,
 } from "@/lib/data/research-model";
+
+// Server action "▶ Chạy ngay 1 lượt queued" (CollectionPanel) có thể chạy lâu:
+// lượt products topN=10 direct ≈ 30 request Rainforest. Trần mặc định Vercel
+// chỉ 10s — nâng 60s, cùng mức route /api/cron/research-collect.
+export const maxDuration = 60;
 import { ResearchResultView, pct } from "../ResearchResultView";
 
 const ALLOWED: PersonaKey[] = ["ceo"];

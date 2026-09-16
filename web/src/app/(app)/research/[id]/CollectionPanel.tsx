@@ -16,7 +16,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Chip, Panel, tableCls } from "@/components/ui";
 import type { CollectionData } from "@/lib/data/research";
-import { enqueueCollectionAction } from "../actions";
+import { enqueueCollectionAction, runCollectionNowAction } from "../actions";
 
 const KIND_LABEL: Record<string, string> = {
   serp: "SERP (đối thủ trên trang tìm kiếm)",
@@ -77,6 +77,17 @@ export function CollectionPanel({
         ok: r.ok,
         text: r.ok ? `${r.message} · Ước tính ≤${credits} credits Rainforest.` : r.message,
       });
+      router.refresh();
+    });
+  };
+
+  // Xếp hàng CHỈ ghi DB; cron nhặt lúc 04:17 UTC hằng ngày. Luồng thẩm định
+  // cần thấy kết quả ngay → nút này chạy thẳng 1 lượt queued trong request.
+  const hasQueued = data.runs.some((r) => r.status === "queued");
+  const runNow = () => {
+    startTransition(async () => {
+      const r = await runCollectionNowAction(assessmentId);
+      setMessage({ ok: r.ok, text: r.message });
       router.refresh();
     });
   };
@@ -205,9 +216,24 @@ export function CollectionPanel({
 
       {message && <Chip tone={message.ok ? "green" : "amber"}>{message.text}</Chip>}
 
-      <h4 className="mb-1.5 mt-3 text-[12px] font-extrabold uppercase tracking-wide text-soft">
-        Hàng đợi & lịch sử lượt quét
-      </h4>
+      <div className="mb-1.5 mt-3 flex flex-wrap items-center justify-between gap-2">
+        <h4 className="text-[12px] font-extrabold uppercase tracking-wide text-soft">
+          Hàng đợi & lịch sử lượt quét
+        </h4>
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-muted">
+            Không bấm “Chạy ngay”? Cron tự xử lý lúc 04:17 UTC hằng ngày.
+          </span>
+          <button
+            type="button"
+            disabled={pending || !connected || !hasQueued}
+            onClick={runNow}
+            className="rounded-[9px] bg-blue px-3 py-1.5 text-[12px] font-extrabold text-white hover:bg-blue-800 disabled:opacity-40"
+          >
+            {pending ? "Đang chạy…" : "▶ Chạy ngay 1 lượt queued"}
+          </button>
+        </div>
+      </div>
       {data.runs.length === 0 ? (
         <div className="rounded-[10px] bg-[#f4f6fa] px-3 py-2 text-[12.5px] text-soft">
           Chưa có lượt thu thập nào. Bắt đầu bằng SERP, sau đó mới chạy products/reviews.
