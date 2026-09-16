@@ -21,6 +21,9 @@
 export const SP_API_FEE_TYPES = {
   referral: "ReferralFee",
   fulfillment: "FulfillmentFees",
+  /** Shape response thật (2023+): phí FBA nằm trong FeeType "FBAFees", kèm
+   * IncludedFeeDetailList (FBAPickAndPack…) — KHÔNG đọc phần included để khỏi nhân đôi. */
+  fba: "FBAFees",
   /** Một số response tách riêng phí handling khối lượng khỏi FulfillmentFees. */
   weightHandling: "FBAWeightHandlingFee",
   variableClosing: "VariableClosingFee",
@@ -70,6 +73,11 @@ function moneyAmount(v: unknown): number | null {
  * Response getMyFeesEstimate* → SpApiFeesEstimate. KHÔNG ném lỗi — mọi nhánh
  * lỗi của Amazon (payload.Status ≠ Success, payload.Error, errors[] cấp ngoài)
  * đều quy về ok=false kèm mã + thông điệp để UI nói rõ.
+ *
+ * HAI SHAPE phải xử lý (sự cố "Unknown" 16/09/2026):
+ *  • Model swagger: payload.{Status, FeesEstimate, Error} — phẳng;
+ *  • Response THẬT: payload.FeesEstimateResult.{Status, FeesEstimate, Error}
+ *    (bọc thêm 1 lớp — mẫu response thật trên selling-partner-api-docs #3487).
  */
 export function mapFeesEstimateResponse(json: unknown): SpApiFeesEstimate {
   const empty: SpApiFeesEstimate = {
@@ -103,20 +111,29 @@ export function mapFeesEstimateResponse(json: unknown): SpApiFeesEstimate {
   const payload = asObj(root.payload);
   if (!payload) return { ...empty, errorCode: "InvalidResponse", errorMessage: "SP-API thiếu payload" };
 
-  const status = typeof payload.Status === "string" ? payload.Status : "";
+  // Response THẬT bọc thêm lớp FeesEstimateResult; model swagger thì phẳng.
+  const result = asObj(payload.FeesEstimateResult) ?? payload;
+
+  const status = typeof result.Status === "string" ? result.Status : "";
   if (status !== "Success") {
-    const err = asObj(payload.Error);
+    const err = asObj(result.Error);
+    const rawCode = typeof err?.Code === "string" && err.Code ? err.Code : null;
+    const rawMsg = typeof err?.Message === "string" && err.Message ? err.Message : null;
     return {
       ...empty,
-      errorCode: status || (typeof err?.Code === "string" ? err.Code : "Unknown"),
+      errorCode: status || rawCode || "Unknown",
       errorMessage:
-        (typeof err?.Message === "string" && err.Message) ||
-        "Amazon từ chối ước tính phí cho ASIN/giá này (kiểm tra ASIN còn bán trên marketplace không)",
+        rawMsg ??
+        // ĐỪNG bao giờ giấu lỗi thật: kèm trích đoạn payload để còn chẩn đoán
+        // (bài học vụ "Unknown": mapper cũ nuốt mất nội dung Amazon trả về).
+        `Amazon từ chối ước tính phí cho ASIN/giá này (trạng thái: ${status || "không rõ"}). ` +
+        "Trích đoạn response: " +
+        JSON.stringify(payload).slice(0, 220),
     };
   }
 
-  const estimate = asObj(payload.FeesEstimate) ?? {};
-  const identifier = asObj(payload.FeesEstimateIdentifier);
+  const estimate = asObj(result.FeesEstimate) ?? {};
+  const identifier = asObj(result.FeesEstimateIdentifier);
   const total = asObj(estimate.TotalFeesEstimate);
   const detailList = Array.isArray(estimate.FeeDetailList) ? (estimate.FeeDetailList as unknown[]) : [];
 
@@ -137,6 +154,7 @@ export function mapFeesEstimateResponse(json: unknown): SpApiFeesEstimate {
     else if (d.FeeType === SP_API_FEE_TYPES.variableClosing) variableClosingFee = fee;
     else if (
       d.FeeType === SP_API_FEE_TYPES.fulfillment ||
+      d.FeeType === SP_API_FEE_TYPES.fba ||
       d.FeeType === SP_API_FEE_TYPES.weightHandling
     ) {
       fulfillmentFee = R2((fulfillmentFee ?? 0) + fee);

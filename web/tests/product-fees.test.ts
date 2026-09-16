@@ -102,6 +102,77 @@ test("mapFeesEstimateResponse: errors[] cấp ngoài (token/quyền) → ok=fals
   assert.equal(r.errorCode, "Unauthorized");
 });
 
+test("mapFeesEstimateResponse: SHAPE THẬT payload.FeesEstimateResult + FeeType FBAFees vẫn parse đúng", () => {
+  // Response THẬT bọc thêm lớp FeesEstimateResult và phí FBA tên "FBAFees"
+  // (mẫu từ selling-partner-api-docs issue #3487, đổi EUR→USD).
+  const r = mapFeesEstimateResponse({
+    payload: {
+      FeesEstimateResult: {
+        Status: "Success",
+        FeesEstimateIdentifier: {
+          MarketplaceId: "ATVPDKIKX0DER",
+          IdType: "ASIN",
+          SellerId: "A3SELLER",
+          IsAmazonFulfilled: true,
+          IdValue: "B09DTD7DQG",
+          SellerInputIdentifier: "vexim-1",
+        },
+        FeesEstimate: {
+          TimeOfFeesEstimation: "2026-09-16T11:10:55.000Z",
+          TotalFeesEstimate: { CurrencyCode: "USD", Amount: 5.16 },
+          FeeDetailList: [
+            {
+              FeeType: "ReferralFee",
+              FeeAmount: { CurrencyCode: "USD", Amount: 0.79 },
+              FinalFee: { CurrencyCode: "USD", Amount: 0.79 },
+              FeePromotion: { CurrencyCode: "USD", Amount: 0 },
+            },
+            {
+              FeeType: "VariableClosingFee",
+              FeeAmount: { CurrencyCode: "USD", Amount: 0 },
+              FinalFee: { CurrencyCode: "USD", Amount: 0 },
+            },
+            {
+              FeeType: "FBAFees",
+              FeeAmount: { CurrencyCode: "USD", Amount: 4.37 },
+              FinalFee: { CurrencyCode: "USD", Amount: 4.37 },
+              IncludedFeeDetailList: [
+                { FeeType: "FBAPickAndPack", FinalFee: { CurrencyCode: "USD", Amount: 4.37 } },
+              ],
+            },
+          ],
+        },
+      },
+    },
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.referralFee, 0.79);
+  assert.equal(r.fulfillmentFee, 4.37); // FBAFees — KHÔNG nhân đôi với IncludedFeeDetailList
+  assert.equal(r.variableClosingFee, 0);
+  assert.equal(r.totalFees, 5.16);
+  assert.equal(r.sellerId, "A3SELLER");
+});
+
+test("mapFeesEstimateResponse: lỗi shape thật (bọc FeesEstimateResult) vẫn lộ mã + thông điệp Amazon", () => {
+  const r = mapFeesEstimateResponse({
+    payload: {
+      FeesEstimateResult: {
+        Status: "ClientError",
+        Error: { Type: "Sender", Code: "InvalidParameterValue", Message: "Please verify your inputs." },
+      },
+    },
+  });
+  assert.equal(r.ok, false);
+  assert.equal(r.errorCode, "ClientError");
+  assert.ok(r.errorMessage?.includes("verify"));
+});
+
+test("mapFeesEstimateResponse: shape lạ → KHÔNG 'Unknown' mù mờ, kèm trích đoạn payload để chẩn đoán", () => {
+  const r = mapFeesEstimateResponse({ payload: { giLa: 1 } });
+  assert.equal(r.ok, false);
+  assert.ok(r.errorMessage?.includes("Trích đoạn response"), "phải kèm payload thô để dò lỗi");
+});
+
 test("referralRatePctFromFee: $0.79 @ $9.89 → 8% (danh mục điện tử), làm tròn 1 chữ số", () => {
   assert.equal(referralRatePctFromFee(0.79, 9.89), 8);
   assert.equal(referralRatePctFromFee(1.48, 9.89), 15);
